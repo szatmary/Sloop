@@ -5,6 +5,16 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-05
 
+- **Keyboard M2 complete + starting host-key prompt.** Build iOS green on
+  9bb52c6 confirms the `TerminalController` refactor and live-cursor-mode read
+  (`Terminal.applicationCursor`) compile — so the keyboard M2 feature (encoder →
+  routed through the terminal → sticky modifiers + expanded strip) is done.
+  Next feature per plan: trust-on-first-use host-key prompt. First step (this
+  commit): a testable `HostKeyVerifier` protocol in SloopKit —
+  `AutoAcceptHostKeyVerifier` (current behavior) and `ClosureHostKeyVerifier`
+  (for tests / bridging to a UI prompt), with unit tests. Next: inject it into
+  `LibSSH2Transport` (replace the auto-accept in `verifyHostKey`) and add the
+  SwiftUI confirmation prompt.
 - **Keyboard M2 — step 1: `KeyEncoder` (SloopKit) + tests.** New pure-Foundation
   `KeyEncoder`/`TerminalKey`/`KeyModifiers` mapping special keys and modifiers to
   terminal byte sequences: `Ctrl = key & 0x1F`, Option = ESC-prefix,
