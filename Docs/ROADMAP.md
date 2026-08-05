@@ -1,6 +1,6 @@
 # Roadmap
 
-Target: Blink-parity — SSH + Mosh — across iPhone, iPad, Mac, and tvOS.
+Target: a full-featured mobile shell — SSH + Mosh — across iPhone, iPad, Mac, and tvOS.
 Sequenced so something runs at every step and the hardest piece (Mosh) lands on
 top of a working SSH terminal rather than first.
 

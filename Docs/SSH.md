@@ -30,8 +30,9 @@ xcodebuild -create-xcframework \
 Drop the result at `Vendor/libssh2.xcframework` (git-ignored) and add it to the
 app target in `project.yml` under `dependencies:` as a `framework:`.
 
-> Prebuilt options exist (e.g. the recipes in Blink's `build_frameworks`), but
-> verify licensing and crypto export details before shipping.
+> Prebuilt libssh2 xcframeworks and open-source build recipes exist if you'd
+> rather not build from scratch, but verify licensing and crypto export details
+> before shipping.
 
 ## 2. Make libssh2 importable as `CSSH`
 

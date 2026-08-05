@@ -1,7 +1,7 @@
 # Licensing — decide before shipping
 
 Sloop is meant to be free (no cost). That's a pricing choice; the *license* is a
-separate, real decision because two dependencies we want are copyleft.
+separate, real decision because one dependency we want is copyleft.
 
 ## The dependencies
 
@@ -10,14 +10,16 @@ separate, real decision because two dependencies we want are copyleft.
 | SwiftTerm | MIT | No obligations beyond attribution. Fine. |
 | libssh2 | BSD-style | Permissive. Fine. |
 | **Mosh** | **GPLv3** | Copyleft. This is the one to think about. |
-| Blink Shell | GPLv3 (historically) | We are *not* copying its code — building fresh — so its license doesn't bind us. Don't paste Blink source in. |
 
-## The GPL ⇄ App Store tension — and how Blink handles it
+Sloop's own code is written fresh — no third-party GPL source is pasted in, so
+only the code we actually bundle (mosh) carries a copyleft obligation.
+
+## The GPL ⇄ App Store tension
 
 The App Store's terms (usage rules, DRM) are often called incompatible with the
 GPL because they add restrictions the GPL forbids. But that tension is narrower
-than it looks, and Blink Shell has shipped GPLv3 **with bundled mosh** on the App
-Store for years. Why it works:
+than it looks — GPLv3 apps, including terminals that bundle mosh, have shipped on
+the App Store for years. Why it works:
 
 - **The GPL binds licensees, not the author.** As the copyright holder of
   Sloop's own code, you are not your own licensee — you may distribute your work
@@ -28,14 +30,13 @@ Store for years. Why it works:
   the GPL's core obligation, and it's met by simply being open.
 - **Third-party GPL code is the only real risk.** The VLC-style takedowns
   happened when a *contributor* who held copyright objected to App Store terms.
-  For Sloop that means **mosh** (GPLv3, held by its authors). Blink bundles the
-  same mosh and its authors have not objected — but the theoretical right to
-  object is theirs, not ours.
+  For Sloop that means **mosh** (GPLv3, held by its authors) — the theoretical
+  right to object is theirs, not ours.
 
-So the "sidestep mosh" advice from before is *not* required. The Blink model is
-viable and is the recommended path.
+So the "sidestep mosh" advice from before is *not* required. Shipping our own
+GPLv3 app with mosh bundled is viable and is the recommended path.
 
-## Recommendation — the Blink model
+## Recommendation
 
 1. License **Sloop's own code GPLv3** and keep this repository public, providing
    corresponding source for every release.
@@ -46,9 +47,9 @@ viable and is the recommended path.
    listing SwiftTerm (MIT), libssh2 (BSD), and mosh (GPLv3).
 
 Residual risk: a mosh copyright holder could object to App Store distribution.
-It's low (Blink precedent) but it is theirs to raise. If you'd rather carry zero
-copyleft risk, the fallback is still M2-era SSH-only under a permissive license —
-but that's a choice, not a necessity.
+It's low — GPLv3 terminals bundling mosh already ship there — but it is theirs to
+raise. If you'd rather carry zero copyleft risk, the fallback is still M2-era
+SSH-only under a permissive license — but that's a choice, not a necessity.
 
 Action item: add `LICENSE` (GPL-3.0) and a third-party notices file before the
 first App Store submission.

@@ -1,8 +1,8 @@
 # Sloop ⚓
 
 A free, native terminal for Apple platforms — iPhone, iPad, Mac, and tvOS.
-SSH and Mosh, a real terminal emulator, and proper keyboard support. Think
-Blink Shell, rebuilt native and given away.
+SSH and Mosh, a real terminal emulator, and proper keyboard support — a
+first-class mobile shell, native and given away.
 
 > **Status: early scaffold.** The core library and app skeleton are in place and
 > a local echo terminal runs today. SSH (libssh2) and Mosh are stubbed with a
