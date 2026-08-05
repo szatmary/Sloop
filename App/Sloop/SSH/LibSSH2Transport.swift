@@ -244,8 +244,10 @@ final class LibSSH2Transport: Transport {
             // Drain available output.
             var readData = false
             while true {
-                let n = buffer.withUnsafeMutableBytes {
-                    libssh2_channel_read_ex(channel, 0, $0.bindMemory(to: CChar.self).baseAddress, buffer.count)
+                let n = buffer.withUnsafeMutableBytes { raw in
+                    // Use raw.count, not buffer.count — reading `buffer` here
+                    // would be an overlapping (exclusive) access to the buffer.
+                    libssh2_channel_read_ex(channel, 0, raw.bindMemory(to: CChar.self).baseAddress, raw.count)
                 }
                 if n > 0 {
                     onData?(ArraySlice(buffer[0..<n]))
