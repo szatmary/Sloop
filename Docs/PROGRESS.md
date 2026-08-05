@@ -5,6 +5,11 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-05
 
+- **Release Mac app artifact (user request):** new `mac-release` CI job builds
+  the macOS app in **Release** (arm64, SSH-enabled via the libssh2 xcframework),
+  packages `Sloop.app` with `ditto`, and uploads it as the `Sloop-macOS-app`
+  artifact (`Sloop-macOS.zip`). Unsigned for now — signing keys to be added
+  later (Gatekeeper will require right-click → Open to run it).
 - **macOS app tests (user request):** added an app-hosted unit-test target
   `SloopTests` (`Tests/SloopAppTests`) that `@testable import`s the app and runs
   on the macOS runner via `xcodebuild test -scheme Sloop_macOS`. Tests exercise

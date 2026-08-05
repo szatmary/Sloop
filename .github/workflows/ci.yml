@@ -63,3 +63,45 @@ jobs:
         run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_iOS -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO -quiet
       - name: Build macOS
         run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -sdk macosx CODE_SIGNING_ALLOWED=NO -quiet
+
+  mac-release:
+    name: Release build (macOS app artifact)
+    runs-on: macos-15
+    needs: libssh2-xcframework
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download libssh2 xcframework
+        uses: actions/download-artifact@v4
+        with:
+          name: libssh2-xcframework
+          path: Vendor/libssh2.xcframework
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project (SSH)
+        run: xcodegen generate --spec project.ssh.yml
+      # Release, arm64, SSH-enabled. Unsigned for now — signing keys come later.
+      - name: Build Release (unsigned)
+        run: >
+          xcodebuild build
+          -project Sloop.xcodeproj
+          -scheme Sloop_macOS
+          -configuration Release
+          -sdk macosx
+          -derivedDataPath build/dd
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+          -quiet
+      - name: Package .app
+        run: |
+          set -euo pipefail
+          APP="$(find build/dd/Build/Products/Release -maxdepth 1 -name '*.app' | head -1)"
+          test -n "$APP" || { echo "No .app found"; ls -R build/dd/Build/Products || true; exit 1; }
+          echo "Packaging $APP"
+          rm -rf build/pkg && mkdir -p build/pkg
+          cp -R "$APP" build/pkg/Sloop.app
+          ditto -c -k --keepParent build/pkg/Sloop.app Sloop-macOS.zip
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sloop-macOS-app
+          path: Sloop-macOS.zip
+          if-no-files-found: error
