@@ -5,6 +5,14 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-05
 
+- **Branch renamed to `main`** (from claude/ios-terminal-app-uwmzf3); loop + local
+  now push to main. CI green pipeline unchanged.
+- **Key-based auth in the host editor.** `HostEditView` gained an auth-method
+  picker (Password / Private Key): a monospaced PEM editor + optional passphrase,
+  saved into the keychain `Credential` (the transport already tries
+  `privateKeyPEM` first). Added a SloopKit test that a private-key credential
+  round-trips through Codable. Next core-app feature: `CommandRunner` (SSH exec →
+  {stdout, stderr, exitStatus} + SloopKit `CommandResult` + test).
 - **Host-key prompt step 3: interactive UI.** Added `HostKeyPrompter` (a shared
   `ObservableObject` + `HostKeyVerifier`): on an unknown key the SSH thread
   blocks on a semaphore while `HostKeyPromptView` (a SwiftUI sheet showing the

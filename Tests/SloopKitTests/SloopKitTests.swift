@@ -94,6 +94,21 @@ final class SloopKitTests: XCTestCase {
         XCTAssertNil(store.credential(for: id))
     }
 
+    func testPrivateKeyCredentialRoundTrips() throws {
+        // The keychain store serializes Credential as JSON — private keys must
+        // survive the round trip.
+        let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nabc123\n-----END OPENSSH PRIVATE KEY-----"
+        let store = InMemoryCredentialStore()
+        let id = UUID()
+        try store.setCredential(Credential(privateKeyPEM: pem, passphrase: "pw"), for: id)
+
+        let data = try JSONEncoder().encode(store.credential(for: id))
+        let decoded = try JSONDecoder().decode(Credential.self, from: data)
+        XCTAssertEqual(decoded.privateKeyPEM, pem)
+        XCTAssertEqual(decoded.passphrase, "pw")
+        XCTAssertNil(decoded.password)
+    }
+
     func testHostStoreUpsertReplacesSameID() {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("sloop-test-\(UUID().uuidString).json")
