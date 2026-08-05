@@ -5,6 +5,10 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-05
 
+- **Tip jar (user request):** added a non-consumable "Leave a Tip" IAP
+  (StoreKit 2) that unlocks a Thank-You page with a ❤️ — no features gated.
+  New `App/Sloop/Store/TipJar.swift` + `SupportView.swift`, a heart button in
+  the host-list toolbar, a `Sloop.storekit` test config, and `Docs/TIPJAR.md`.
 - **SSH compile fix #2 (run 31035244684):** past the macro error, the channel
   read hit a Swift exclusive-access violation — `buffer.count` was read inside
   `buffer.withUnsafeMutableBytes { }`. Use the raw buffer's own `raw.count`

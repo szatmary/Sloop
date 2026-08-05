@@ -60,3 +60,5 @@ top of a working SSH terminal rather than first.
   for saved one-shot commands on iOS/Mac. Also the foundation for a watch app.
 - **Apple Watch** — an ops "command runner" (not a terminal), ideally driven
   through the paired iPhone via WatchConnectivity. See `Docs/WATCH.md`.
+- **Tip jar** — a non-consumable "Leave a Tip" IAP that unlocks a Thank-You page
+  (❤️); no features gated. Scaffolded in `App/Sloop/Store`. See `Docs/TIPJAR.md`.

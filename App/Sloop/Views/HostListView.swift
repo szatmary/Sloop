@@ -7,6 +7,7 @@ struct HostListView: View {
     @StateObject private var model = HostListModel()
     @State private var editing: SSHHost?
     @State private var session: TerminalSession?
+    @State private var showingSupport = false
 
     var body: some View {
         NavigationStack {
@@ -35,12 +36,22 @@ struct HostListView: View {
             }
             .navigationTitle("Sloop")
             .toolbar {
-                Button { editing = model.newHost() } label: {
-                    Image(systemName: "plus")
+                ToolbarItem {
+                    Button { showingSupport = true } label: {
+                        Image(systemName: "heart")
+                    }
+                }
+                ToolbarItem {
+                    Button { editing = model.newHost() } label: {
+                        Image(systemName: "plus")
+                    }
                 }
             }
             .sheet(item: $editing) { host in
                 HostEditView(host: host) { model.save($0, credential: $1) }
+            }
+            .sheet(isPresented: $showingSupport) {
+                SupportView()
             }
             .navigationDestination(item: $session) { session in
                 TerminalScreen(session: session)
