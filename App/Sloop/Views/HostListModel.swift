@@ -49,7 +49,8 @@ final class HostListModel: ObservableObject {
         let credential = credentials.credential(for: host.id) ?? Credential()
         let transport = TransportFactory.ssh(host: host,
                                              credential: credential,
-                                             knownHosts: knownHosts)
+                                             knownHosts: knownHosts,
+                                             hostKeyVerifier: HostKeyPrompter.shared)
         return TerminalSession(title: host.alias, transport: transport)
     }
 }

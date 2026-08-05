@@ -8,9 +8,11 @@ import SloopKit
 enum TransportFactory {
     static func ssh(host: SSHHost,
                     credential: Credential,
-                    knownHosts: KnownHostsStore) -> Transport {
+                    knownHosts: KnownHostsStore,
+                    hostKeyVerifier: HostKeyVerifier) -> Transport {
         #if canImport(CSSH)
-        return LibSSH2Transport(host: host, credential: credential, knownHosts: knownHosts)
+        return LibSSH2Transport(host: host, credential: credential,
+                                knownHosts: knownHosts, hostKeyVerifier: hostKeyVerifier)
         #else
         return MessageTransport(message:
             "SSH isn't built into this app yet.\r\n" +

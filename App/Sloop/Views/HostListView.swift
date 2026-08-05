@@ -5,6 +5,7 @@ import SloopKit
 /// host opens a `TerminalScreen`; the `+` toolbar item adds a host.
 struct HostListView: View {
     @StateObject private var model = HostListModel()
+    @ObservedObject private var hostKeyPrompter = HostKeyPrompter.shared
     @State private var editing: SSHHost?
     @State private var session: TerminalSession?
     @State private var showingSupport = false
@@ -52,6 +53,9 @@ struct HostListView: View {
             }
             .sheet(isPresented: $showingSupport) {
                 SupportView()
+            }
+            .sheet(item: $hostKeyPrompter.prompt) { prompt in
+                HostKeyPromptView(prompt: prompt)
             }
             .navigationDestination(item: $session) { session in
                 TerminalScreen(session: session)

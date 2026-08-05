@@ -5,6 +5,14 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-05
 
+- **Host-key prompt step 3: interactive UI.** Added `HostKeyPrompter` (a shared
+  `ObservableObject` + `HostKeyVerifier`): on an unknown key the SSH thread
+  blocks on a semaphore while `HostKeyPromptView` (a SwiftUI sheet showing the
+  endpoint + SHA256 fingerprint + Trust / Don't-Trust) collects the user's
+  choice, which unblocks the thread. Wired through `TransportFactory` (new
+  `hostKeyVerifier` param) and `HostListModel.connect`; `HostListView` observes
+  the shared prompter and presents the sheet. Trust-on-first-use is now a real
+  user decision instead of silent auto-accept. Compiled by the SSH build jobs.
 - **Host-key prompt step 2: inject `HostKeyVerifier` into `LibSSH2Transport`.**
   `verifyHostKey` now consults the injected verifier on an unknown key —
   remembering it only if trusted, refusing otherwise (replacing the silent
