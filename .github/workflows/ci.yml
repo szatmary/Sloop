@@ -11,11 +11,11 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - name: Run tests
-        run: swift test --disable-sandbox
+      - name: swift test
+        run: swift test
 
-  project-generation:
-    name: XcodeGen spec is valid
+  app-build:
+    name: Build app (iOS · tvOS · macOS)
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -23,3 +23,23 @@ jobs:
         run: brew install xcodegen
       - name: Generate project
         run: xcodegen generate
+      - name: Build iOS
+        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_iOS -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO -quiet
+      - name: Build tvOS
+        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_tvOS -sdk appletvsimulator CODE_SIGNING_ALLOWED=NO -quiet
+      - name: Build macOS
+        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -sdk macosx CODE_SIGNING_ALLOWED=NO -quiet
+
+  libssh2-xcframework:
+    name: Build libssh2 xcframework
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build xcframework
+        run: ./Scripts/build-libssh2.sh
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libssh2-xcframework
+          path: Vendor/libssh2.xcframework
+          if-no-files-found: error
