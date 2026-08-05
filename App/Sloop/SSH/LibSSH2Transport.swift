@@ -85,7 +85,7 @@ final class LibSSH2Transport: Transport {
         libssh2_session_set_blocking(session, 0)
 
         // Handshake
-        var rc = retry(session, sock) { libssh2_session_handshake(session, sock) }
+        let rc = retry(session, sock) { libssh2_session_handshake(session, sock) }
         guard rc == 0 else { return finish(SSHError.connectionFailed("handshake rc=\(rc)")) }
 
         // Host-key verification (trust-on-first-use)
@@ -173,9 +173,12 @@ final class LibSSH2Transport: Transport {
         var channel: OpaquePointer?
         while channel == nil {
             channel = "session".withCString {
+                // The LIBSSH2_CHANNEL_WINDOW_DEFAULT/PACKET_DEFAULT macros don't
+                // survive Swift's C importer ("structure not supported"), so use
+                // their literal values from libssh2.h.
                 libssh2_channel_open_ex(session, $0, UInt32(7),
-                                        UInt32(LIBSSH2_CHANNEL_WINDOW_DEFAULT),
-                                        UInt32(LIBSSH2_CHANNEL_PACKET_DEFAULT), nil, 0)
+                                        UInt32(2 * 1024 * 1024),   // window default
+                                        UInt32(32_768), nil, 0)    // packet default
             }
             if channel == nil {
                 if libssh2_session_last_errno(session) == LIBSSH2_ERROR_EAGAIN {
