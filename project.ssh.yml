@@ -1,0 +1,17 @@
+# SSH-enabled variant of the project. Layers the libssh2 xcframework onto the
+# base project so `import CSSH` resolves and LibSSH2Transport compiles.
+#
+# Requires Vendor/libssh2.xcframework to be present (built by
+# Scripts/build-libssh2.sh, or downloaded from the CI artifact). Generate with:
+#     xcodegen generate --spec project.ssh.yml
+#
+# The base project.yml (no SSH) is included and the Sloop target gains the
+# framework dependency; everything else is inherited.
+include:
+  - project.yml
+
+targets:
+  Sloop:
+    dependencies:
+      - framework: Vendor/libssh2.xcframework
+        embed: false

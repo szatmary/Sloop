@@ -41,3 +41,23 @@ jobs:
           name: libssh2-xcframework
           path: Vendor/libssh2.xcframework
           if-no-files-found: error
+
+  app-build-ssh:
+    name: Build app with SSH (iOS · macOS)
+    runs-on: macos-15
+    needs: libssh2-xcframework
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download libssh2 xcframework
+        uses: actions/download-artifact@v4
+        with:
+          name: libssh2-xcframework
+          path: Vendor/libssh2.xcframework
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project (SSH)
+        run: xcodegen generate --spec project.ssh.yml
+      - name: Build iOS
+        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_iOS -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO -quiet
+      - name: Build macOS
+        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -sdk macosx CODE_SIGNING_ALLOWED=NO -quiet

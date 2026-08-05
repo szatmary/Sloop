@@ -66,6 +66,15 @@ build_slice () {
     "$prefix/lib/libmbedcrypto.a"
   cp "$prefix/include/libssh2.h" "$prefix/include/libssh2_publickey.h" \
      "$prefix/include/libssh2_sftp.h" "$OUT/$name/include/"
+
+  # Ship a module map inside the framework headers so Swift can `import CSSH`
+  # once the xcframework is linked — no separate include path needed.
+  cat > "$OUT/$name/include/module.modulemap" <<'MODMAP'
+module CSSH {
+    header "libssh2.h"
+    export *
+}
+MODMAP
 }
 
 build_slice "ios-arm64"       "OS64"                "$IOS_TARGET"

@@ -35,17 +35,22 @@ app target in `project.yml` under `dependencies:` as a `framework:`.
 
 ## 2. Make libssh2 importable as `CSSH`
 
-`Vendor/CSSH/module.modulemap` + `Vendor/CSSH/shim.h` (both committed) expose
-libssh2 to Swift as `import CSSH`. In the app target, once the xcframework is
-present:
+The build script writes a `module.modulemap` into each slice's headers, so the
+xcframework *is* the `CSSH` module — linking it is all that's needed to
+`import CSSH`, no extra include paths.
 
-- Add `Vendor/CSSH` to `SWIFT_INCLUDE_PATHS` (so the module map is found).
-- Add the xcframework's header directory to `HEADER_SEARCH_PATHS` (so `shim.h`
-  can `#include <libssh2.h>`).
+Wiring is captured in `project.ssh.yml`, which layers the framework onto the base
+project. With `Vendor/libssh2.xcframework` present:
 
-`App/Sloop/SSH/TransportFactory.swift` gates on `#if canImport(CSSH)`: before
-this wiring it hands the UI a `MessageTransport` explaining SSH isn't built yet;
-after it, real connections go through `LibSSH2Transport`.
+```sh
+xcodegen generate --spec project.ssh.yml
+```
+
+`App/Sloop/SSH/TransportFactory.swift` gates on `#if canImport(CSSH)`: with the
+plain `project.yml` (no framework) it hands the UI a `MessageTransport`
+explaining SSH isn't built yet; with the SSH spec, `CSSH` resolves and real
+connections go through `LibSSH2Transport`. CI's `app-build-ssh` job downloads the
+xcframework artifact and builds exactly this path.
 
 ## 3. LibSSH2Transport — already implemented
 
