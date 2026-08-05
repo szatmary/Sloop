@@ -14,7 +14,9 @@ import SloopKit
 /// encode as SS3 vs CSI; it defaults to normal mode until wired to SwiftTerm.
 struct KeyboardAccessoryBar: View {
     let send: (ArraySlice<UInt8>) -> Void
-    var applicationCursor: Bool = false
+    /// Read the terminal's live DECCKM state at press time (so arrows follow the
+    /// mode set by full-screen apps).
+    var applicationCursor: () -> Bool = { false }
 
     @State private var control = false
     @State private var option = false
@@ -59,7 +61,7 @@ struct KeyboardAccessoryBar: View {
 
     /// Send a special key with the armed modifiers, then clear them (one-shot).
     private func emit(_ key: TerminalKey) {
-        send(KeyEncoder.bytes(for: key, modifiers: armed, applicationCursor: applicationCursor)[...])
+        send(KeyEncoder.bytes(for: key, modifiers: armed, applicationCursor: applicationCursor())[...])
         control = false
         option = false
     }

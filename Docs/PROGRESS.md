@@ -19,6 +19,13 @@ while the maintainer is away. Newest entries first.
   Arrows still default to normal cursor mode — wiring the live DECCKM state from
   SwiftTerm (so arrows/sticky-mods flow through the terminal's input) is the next
   step. iOS-only; verified by the Build iOS CI jobs.
+- **Keyboard M2 — step 3: TerminalController + live cursor mode.** Lifted the
+  terminal ownership out of `SwiftTermView.Coordinator` into a shared
+  `TerminalController` that both `SwiftTermView` and the smart-keys bar use, so
+  the bar reads the terminal's live DECCKM state (`applicationCursor`) at press
+  time — arrows now auto-switch CSI/SS3 to match full-screen apps. Updated the
+  macOS app tests to exercise `TerminalController`. (Note: the SwiftTerm
+  `Terminal.applicationCursor` accessor is a best guess pending CI confirmation.)
 - All five CI jobs green as of e22d3fd (macOS app tests run + pass; Release
   `Sloop-macOS-app` artifact uploads).
 - **Fix CI (xcodegen spec broke):** the multiplatform test wiring failed —

@@ -20,21 +20,21 @@ final class SloopAppTests: XCTestCase {
         func close() {}
     }
 
-    /// The SwiftTerm bridge must forward terminal keystrokes to the transport.
+    /// The terminal controller must forward terminal keystrokes to the transport.
     @MainActor
-    func testTerminalCoordinatorForwardsKeystrokesToTransport() {
+    func testTerminalControllerForwardsKeystrokesToTransport() {
         let probe = ProbeTransport()
-        let coordinator = SwiftTermView.Coordinator(transport: probe)
+        let controller = TerminalController(transport: probe)
 
-        coordinator.send(source: coordinator.terminalView,
-                         data: ArraySlice(Array("ls -la\n".utf8)))
+        controller.send(source: controller.terminalView,
+                        data: ArraySlice(Array("ls -la\n".utf8)))
 
         XCTAssertEqual(probe.sent, Array("ls -la\n".utf8))
     }
 
     /// A terminal size change must be forwarded to the transport.
     @MainActor
-    func testTerminalCoordinatorForwardsResize() {
+    func testTerminalControllerForwardsResize() {
         final class ResizeProbe: Transport {
             var onData: ((ArraySlice<UInt8>) -> Void)?
             var onClose: ((Error?) -> Void)?
@@ -45,9 +45,9 @@ final class SloopAppTests: XCTestCase {
             func close() {}
         }
         let probe = ResizeProbe()
-        let coordinator = SwiftTermView.Coordinator(transport: probe)
+        let controller = TerminalController(transport: probe)
 
-        coordinator.sizeChanged(source: coordinator.terminalView, newCols: 120, newRows: 40)
+        controller.sizeChanged(source: controller.terminalView, newCols: 120, newRows: 40)
 
         XCTAssertEqual(probe.lastSize?.cols, 120)
         XCTAssertEqual(probe.lastSize?.rows, 40)

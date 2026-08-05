@@ -4,12 +4,19 @@ import SloopKit
 /// Hosts a live terminal for one session, plus the smart-keys bar on iOS/iPadOS.
 struct TerminalScreen: View {
     let session: TerminalSession
+    @StateObject private var controller: TerminalController
+
+    init(session: TerminalSession) {
+        self.session = session
+        _controller = StateObject(wrappedValue: TerminalController(transport: session.transport))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            SwiftTermView(transport: session.transport)
+            SwiftTermView(controller: controller)
             #if os(iOS)
-            KeyboardAccessoryBar(send: { session.transport.send($0) })
+            KeyboardAccessoryBar(send: { controller.send($0) },
+                                 applicationCursor: { controller.applicationCursor })
             #endif
         }
         #if os(iOS)
