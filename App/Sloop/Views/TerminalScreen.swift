@@ -9,7 +9,7 @@ struct TerminalScreen: View {
         VStack(spacing: 0) {
             SwiftTermView(transport: session.transport)
             #if os(iOS)
-            KeyboardAccessoryBar { session.transport.send($0) }
+            KeyboardAccessoryBar(send: { session.transport.send($0) })
             #endif
         }
         #if os(iOS)

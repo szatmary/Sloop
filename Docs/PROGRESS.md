@@ -12,6 +12,13 @@ while the maintainer is away. Newest entries first.
   modified keys, edit keys (`ESC [ n ~`), and F1–F12. 14 unit tests. Next: route
   the iOS accessory bar through this encoder + SwiftTerm's live cursor mode, then
   sticky ⌃/⌥ modifiers.
+- **Keyboard M2 — step 2: reworked the iOS accessory bar.** It now encodes
+  through `KeyEncoder`, adds **sticky ⌃/⌥** modifiers (tap to arm → applies to
+  the next special key → auto-disarms), and expands the strip: esc, tab, arrows,
+  home, end, pgup, pgdn, plus one-tap common Ctrl combos (⌃C ⌃D ⌃Z ⌃L ⌃R ⌃A ⌃E).
+  Arrows still default to normal cursor mode — wiring the live DECCKM state from
+  SwiftTerm (so arrows/sticky-mods flow through the terminal's input) is the next
+  step. iOS-only; verified by the Build iOS CI jobs.
 - All five CI jobs green as of e22d3fd (macOS app tests run + pass; Release
   `Sloop-macOS-app` artifact uploads).
 - **Fix CI (xcodegen spec broke):** the multiplatform test wiring failed —
