@@ -5,6 +5,15 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-05
 
+- **Keyboard M2 — step 1: `KeyEncoder` (SloopKit) + tests.** New pure-Foundation
+  `KeyEncoder`/`TerminalKey`/`KeyModifiers` mapping special keys and modifiers to
+  terminal byte sequences: `Ctrl = key & 0x1F`, Option = ESC-prefix,
+  cursor-key-mode-aware arrows (CSI `ESC [ A` vs SS3 `ESC O A`), xterm `1;<n>`
+  modified keys, edit keys (`ESC [ n ~`), and F1–F12. 14 unit tests. Next: route
+  the iOS accessory bar through this encoder + SwiftTerm's live cursor mode, then
+  sticky ⌃/⌥ modifiers.
+- All five CI jobs green as of e22d3fd (macOS app tests run + pass; Release
+  `Sloop-macOS-app` artifact uploads).
 - **Fix CI (xcodegen spec broke):** the multiplatform test wiring failed —
   XcodeGen doesn't resolve the base name `Sloop`/`SloopTests` in dependencies or
   scheme test targets ("invalid dependency: Sloop"). Reworked `project.yml` into
