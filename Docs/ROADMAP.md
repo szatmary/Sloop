@@ -12,13 +12,15 @@ top of a working SSH terminal rather than first.
 - **Local terminal** (echo) runs on device/simulator.
 - Unit tests for echo, Mosh handshake parsing, host persistence.
 
-## M1 — SSH terminal
+## M1 — SSH terminal (in progress)
 
-- [ ] Vendor libssh2 as an `.xcframework` (see `Docs/SSH.md`).
-- [ ] Implement `LibSSH2Transport`: TCP connect, handshake, host-key check,
-      auth, PTY shell channel, read/write pump, `resize`.
-- [ ] Keychain-backed `Credential` lookup; password + key auth in the editor.
-- [ ] `known_hosts` store with a trust-on-first-use prompt.
+- [ ] Vendor libssh2 as an `.xcframework` (see `Docs/SSH.md`). ← only remaining blocker to a live SSH build
+- [x] Implement `LibSSH2Transport`: TCP connect, handshake, host-key check,
+      auth, PTY shell channel, read/write pump, `resize`. *(written; needs a compile pass)*
+- [x] `KnownHostsStore` with trust-on-first-use + mismatch refusal (unit-tested).
+- [x] Keychain-backed `CredentialStore`; password entry in the host editor.
+- [ ] Trust-on-first-use **prompt** in the UI (today unknown keys auto-accept).
+- [ ] Private-key auth entry in the editor (transport already supports keys).
 
 ## M2 — Keyboard & UX
 

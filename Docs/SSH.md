@@ -33,20 +33,37 @@ app target in `project.yml` under `dependencies:` as a `framework:`.
 > Prebuilt options exist (e.g. the recipes in Blink's `build_frameworks`), but
 > verify licensing and crypto export details before shipping.
 
-## 2. Implement LibSSH2Transport
+## 2. Make libssh2 importable as `CSSH`
 
-Fill in the `TODO(ssh)` markers in
-`Sources/SloopKit/SSH/LibSSH2Transport.swift`:
+`Vendor/CSSH/module.modulemap` + `Vendor/CSSH/shim.h` (both committed) expose
+libssh2 to Swift as `import CSSH`. In the app target, once the xcframework is
+present:
 
-1. `start()` — open a TCP socket, `libssh2_session_init`,
-   `libssh2_session_handshake`.
-2. Verify the host key against a `known_hosts` store; trust-on-first-use prompt.
-3. Authenticate per `host.auth` using the `Credential`
-   (`libssh2_userauth_password` / `..._publickey_frommemory`).
-4. `libssh2_channel_open_session`, `request_pty("xterm-256color")`,
-   `channel_shell`.
-5. Spin a background read loop → `onData`; `send` → `libssh2_channel_write`;
-   `resize` → `libssh2_channel_request_pty_size`.
+- Add `Vendor/CSSH` to `SWIFT_INCLUDE_PATHS` (so the module map is found).
+- Add the xcframework's header directory to `HEADER_SEARCH_PATHS` (so `shim.h`
+  can `#include <libssh2.h>`).
 
-Keep all libssh2 calls on the transport's serial queue; only `onData`/`onClose`
-cross back to callers.
+`App/Sloop/SSH/TransportFactory.swift` gates on `#if canImport(CSSH)`: before
+this wiring it hands the UI a `MessageTransport` explaining SSH isn't built yet;
+after it, real connections go through `LibSSH2Transport`.
+
+## 3. LibSSH2Transport — already implemented
+
+`App/Sloop/SSH/LibSSH2Transport.swift` implements the transport against the
+stable libssh2 C API:
+
+- non-blocking session driven by a `poll()` loop on a background thread;
+- TCP connect via `getaddrinfo`;
+- handshake, SHA-256 host-key check against `KnownHostsStore` (trust-on-first-use,
+  refuse on mismatch);
+- password and in-memory private-key auth;
+- PTY shell channel; `send`/`resize`/read all serviced on the loop thread; only
+  `onData`/`onClose` cross back to callers.
+
+> It was authored without an Xcode/iOS SDK to compile against, so budget a
+> first-build fix-up pass — mostly exact constant/typedef spellings the Swift C
+> importer produces. The design (single-thread event loop, no cross-thread
+> libssh2 calls) is intended to be kept.
+
+Remaining wiring: a trust-on-first-use **prompt** (today unknown keys are
+recorded and accepted) and key-based auth in the host editor UI.

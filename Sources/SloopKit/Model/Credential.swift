@@ -5,7 +5,7 @@ import Foundation
 /// Kept separate from `Host` so hosts can be persisted as plain JSON while
 /// secrets live in the keychain. At connect time the app looks up the
 /// credential for a host and hands it to the SSH transport.
-public struct Credential {
+public struct Credential: Codable, Equatable {
     public var password: String?
     public var privateKeyPEM: String?
     public var passphrase: String?

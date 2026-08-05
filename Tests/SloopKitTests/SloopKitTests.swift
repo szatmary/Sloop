@@ -49,6 +49,51 @@ final class SloopKitTests: XCTestCase {
         XCTAssertEqual(reloaded.hosts.first?.connectionSummary, "matt@example.com")
     }
 
+    func testMessageTransportEmitsThenCloses() {
+        let transport = MessageTransport(message: "hello")
+        var out: [UInt8] = []
+        var closed = false
+        transport.onData = { out.append(contentsOf: $0) }
+        transport.onClose = { _ in closed = true }
+        transport.start()
+        XCTAssertEqual(String(decoding: out, as: UTF8.self), "hello")
+        XCTAssertTrue(closed)
+    }
+
+    func testKnownHostsTrustOnFirstUse() {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sloop-known-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let store = KnownHostsStore(fileURL: tmp)
+        let endpoint = KnownHostsStore.endpoint(host: "example.com", port: 22)
+        XCTAssertEqual(store.status(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "AAAA"), .unknown)
+
+        store.remember(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "AAAA")
+        XCTAssertEqual(store.status(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "AAAA"), .match)
+        XCTAssertEqual(store.status(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "BBBB"), .mismatch)
+    }
+
+    func testKnownHostsPersistsAcrossInstances() {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sloop-known-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let endpoint = KnownHostsStore.endpoint(host: "h", port: 2222)
+        KnownHostsStore(fileURL: tmp).remember(endpoint: endpoint, keyType: "ssh-rsa", fingerprint: "XX")
+        XCTAssertEqual(KnownHostsStore(fileURL: tmp).status(endpoint: endpoint, keyType: "ssh-rsa", fingerprint: "XX"), .match)
+    }
+
+    func testInMemoryCredentialStoreRoundTrips() throws {
+        let store = InMemoryCredentialStore()
+        let id = UUID()
+        XCTAssertNil(store.credential(for: id))
+        try store.setCredential(Credential(password: "secret"), for: id)
+        XCTAssertEqual(store.credential(for: id)?.password, "secret")
+        try store.removeCredential(for: id)
+        XCTAssertNil(store.credential(for: id))
+    }
+
     func testHostStoreUpsertReplacesSameID() {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("sloop-test-\(UUID().uuidString).json")

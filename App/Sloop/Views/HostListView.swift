@@ -40,7 +40,7 @@ struct HostListView: View {
                 }
             }
             .sheet(item: $editing) { host in
-                HostEditView(host: host) { model.save($0) }
+                HostEditView(host: host) { model.save($0, credential: $1) }
             }
             .navigationDestination(item: $session) { session in
                 TerminalScreen(session: session)

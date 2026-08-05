@@ -1,0 +1,10 @@
+// Makes libssh2 importable from Swift as `import CSSH`.
+//
+// Point HEADER_SEARCH_PATHS (or this map's header path) at the libssh2 headers
+// bundled in Vendor/libssh2.xcframework, then add this module map via
+// SWIFT_INCLUDE_PATHS / -fmodule-map-file in the app target. See Docs/SSH.md.
+module CSSH {
+    header "shim.h"
+    link "ssh2"
+    export *
+}

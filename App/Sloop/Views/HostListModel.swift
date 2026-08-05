@@ -1,34 +1,55 @@
 import SwiftUI
 import SloopKit
 
-/// View model backing `HostListView`: owns the `HostStore` and turns a saved
-/// `Host` into a live `TerminalSession` at connect time.
+/// View model backing `HostListView`. Owns the host list, the known-hosts
+/// database, and the credential store, and turns a saved `Host` into a live
+/// `TerminalSession` at connect time.
 @MainActor
 final class HostListModel: ObservableObject {
     @Published private(set) var hosts: [Host] = []
-    private let store = HostStore()
 
-    init() { hosts = store.hosts }
+    private let store = HostStore()
+    private let knownHosts = KnownHostsStore()
+    private let credentials: CredentialStore
+
+    init() {
+        #if canImport(Security)
+        credentials = KeychainCredentialStore()
+        #else
+        credentials = InMemoryCredentialStore()
+        #endif
+        hosts = store.hosts
+    }
 
     func newHost() -> Host {
         Host(alias: "new host", hostname: "", username: "")
     }
 
-    func save(_ host: Host) {
+    /// Save a host and, if a new secret was entered, its credential. A `nil`
+    /// credential means "leave the stored secret untouched".
+    func save(_ host: Host, credential: Credential?) {
         store.upsert(host)
+        if let credential {
+            try? credentials.setCredential(credential, for: host.id)
+        }
         hosts = store.hosts
     }
 
     func delete(at offsets: IndexSet) {
-        for index in offsets { store.remove(hosts[index]) }
+        for index in offsets {
+            let host = hosts[index]
+            try? credentials.removeCredential(for: host.id)
+            store.remove(host)
+        }
         hosts = store.hosts
     }
 
-    /// Build a session for a host. Credentials come from the keychain later; for
-    /// now this hands the SSH transport an empty credential (it will report
-    /// `.notImplemented` and the terminal shows the fallback message).
+    /// Build a session for a host, pulling its credential from the store.
     func connect(_ host: Host) -> TerminalSession {
-        let transport = LibSSH2Transport(host: host, credential: Credential())
+        let credential = credentials.credential(for: host.id) ?? Credential()
+        let transport = TransportFactory.ssh(host: host,
+                                             credential: credential,
+                                             knownHosts: knownHosts)
         return TerminalSession(title: host.alias, transport: transport)
     }
 }

@@ -6,9 +6,10 @@ import SloopKit
 struct HostEditView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var host: Host
-    private let onSave: (Host) -> Void
+    @State private var password: String = ""
+    private let onSave: (Host, Credential?) -> Void
 
-    init(host: Host, onSave: @escaping (Host) -> Void) {
+    init(host: Host, onSave: @escaping (Host, Credential?) -> Void) {
         _host = State(initialValue: host)
         self.onSave = onSave
     }
@@ -31,6 +32,15 @@ struct HostEditView: View {
                         #endif
                     Stepper("Port: \(host.port)", value: $host.port, in: 1...65535)
                 }
+                Section("Authentication") {
+                    SecureField("Password", text: $password)
+                        #if os(iOS)
+                        .textContentType(.password)
+                        #endif
+                    Text("Stored in the keychain, never in the host list. Leave blank to keep the existing secret. Key-based auth comes next — see the roadmap.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 Section("Options") {
                     Toggle("Use Mosh", isOn: $host.useMosh)
                 }
@@ -44,8 +54,11 @@ struct HostEditView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { onSave(host); dismiss() }
-                        .disabled(host.hostname.isEmpty || host.username.isEmpty)
+                    Button("Save") {
+                        onSave(host, password.isEmpty ? nil : Credential(password: password))
+                        dismiss()
+                    }
+                    .disabled(host.hostname.isEmpty || host.username.isEmpty)
                 }
             }
         }
