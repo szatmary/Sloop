@@ -49,3 +49,7 @@ top of a working SSH terminal rather than first.
 - SFTP / file transfer.
 - Port forwarding.
 - `ssh-agent` / Secure Enclave keys.
+- **`CommandRunner`** — non-interactive SSH exec (`{stdout, stderr, exitStatus}`)
+  for saved one-shot commands on iOS/Mac. Also the foundation for a watch app.
+- **Apple Watch** — an ops "command runner" (not a terminal), ideally driven
+  through the paired iPhone via WatchConnectivity. See `Docs/WATCH.md`.
