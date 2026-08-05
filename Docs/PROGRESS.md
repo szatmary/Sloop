@@ -5,6 +5,16 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-05
 
+- **macOS app tests (user request):** added an app-hosted unit-test target
+  `SloopTests` (`Tests/SloopAppTests`) that `@testable import`s the app and runs
+  on the macOS runner via `xcodebuild test -scheme Sloop_macOS`. Tests exercise
+  real app code the SloopKit tests can't reach: the SwiftTerm coordinator
+  forwarding keystrokes and resize to the transport, and `TransportFactory`'s
+  fallback. The `app-build` CI job now runs these on macOS.
+- **All four CI jobs green (run 31036120147):** SloopKit tests, libssh2
+  xcframework, app (iOS · macOS), and the real SSH build all pass — the SSH
+  transport compiles and links against libssh2 on iOS and macOS. Tip-jar
+  StoreKit code compiled too.
 - **Tip jar (user request):** added a non-consumable "Leave a Tip" IAP
   (StoreKit 2) that unlocks a Thank-You page with a ❤️ — no features gated.
   New `App/Sloop/Store/TipJar.swift` + `SupportView.swift`, a heart button in

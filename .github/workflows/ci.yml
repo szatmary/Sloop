@@ -15,7 +15,7 @@ jobs:
         run: swift test
 
   app-build:
-    name: Build app (iOS · macOS)
+    name: Build app (iOS) · Test app (macOS)
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -25,8 +25,10 @@ jobs:
         run: xcodegen generate
       - name: Build iOS
         run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_iOS -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO -quiet
-      - name: Build macOS
-        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -sdk macosx CODE_SIGNING_ALLOWED=NO -quiet
+      # `test` builds the macOS app + its test bundle (SloopAppTests) and runs
+      # the app-level tests on the runner.
+      - name: Test macOS
+        run: xcodebuild test -project Sloop.xcodeproj -scheme Sloop_macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -quiet
 
   libssh2-xcframework:
     name: Build libssh2 xcframework
