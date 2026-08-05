@@ -5,6 +5,13 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-05
 
+- **Fix CI (xcodegen spec broke):** the multiplatform test wiring failed —
+  XcodeGen doesn't resolve the base name `Sloop`/`SloopTests` in dependencies or
+  scheme test targets ("invalid dependency: Sloop"). Reworked `project.yml` into
+  explicit `Sloop_iOS` / `Sloop_macOS` targets sharing a `SloopApp` template, so
+  `SloopTests` (macOS) can depend on the real `Sloop_macOS` target and attach to
+  its scheme. Updated `project.ssh.yml` to add the libssh2 framework to both
+  targets. Scheme names unchanged, so CI is untouched.
 - **Release Mac app artifact (user request):** new `mac-release` CI job builds
   the macOS app in **Release** (arm64, SSH-enabled via the libssh2 xcframework),
   packages `Sloop.app` with `ditto`, and uploads it as the `Sloop-macOS-app`

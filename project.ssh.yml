@@ -5,13 +5,17 @@
 # Scripts/build-libssh2.sh, or downloaded from the CI artifact). Generate with:
 #     xcodegen generate --spec project.ssh.yml
 #
-# The base project.yml (no SSH) is included and the Sloop target gains the
+# The base project.yml (no SSH) is included and each app target gains the
 # framework dependency; everything else is inherited.
 include:
   - project.yml
 
 targets:
-  Sloop:
+  Sloop_iOS:
+    dependencies:
+      - framework: Vendor/libssh2.xcframework
+        embed: false
+  Sloop_macOS:
     dependencies:
       - framework: Vendor/libssh2.xcframework
         embed: false
