@@ -24,16 +24,21 @@ final class LibSSH2Transport: Transport {
     private let host: SSHHost
     private let credential: Credential
     private let knownHosts: KnownHostsStore
+    private let hostKeyVerifier: HostKeyVerifier
 
     private let lock = NSLock()
     private var outbound: [UInt8] = []
     private var pendingResize: (cols: Int, rows: Int)?
     private var shouldClose = false
 
-    init(host: SSHHost, credential: Credential, knownHosts: KnownHostsStore) {
+    init(host: SSHHost,
+         credential: Credential,
+         knownHosts: KnownHostsStore,
+         hostKeyVerifier: HostKeyVerifier = AutoAcceptHostKeyVerifier()) {
         self.host = host
         self.credential = credential
         self.knownHosts = knownHosts
+        self.hostKeyVerifier = hostKeyVerifier
     }
 
     func start() {
@@ -124,8 +129,13 @@ final class LibSSH2Transport: Transport {
         case .match:
             return nil
         case .unknown:
-            // TODO(ssh): surface a trust-on-first-use prompt through the UI.
-            // For now we record and proceed.
+            // Trust-on-first-use: ask the verifier (an interactive one prompts
+            // the user). Remember the key only if trusted; otherwise refuse.
+            guard hostKeyVerifier.shouldTrust(endpoint: endpoint,
+                                              keyType: typeName,
+                                              fingerprint: fingerprint) else {
+                return SSHError.connectionFailed("host key for \(endpoint) was not trusted")
+            }
             knownHosts.remember(endpoint: endpoint, keyType: typeName, fingerprint: fingerprint)
             return nil
         case .mismatch:

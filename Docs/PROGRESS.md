@@ -5,6 +5,14 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-05
 
+- **Host-key prompt step 2: inject `HostKeyVerifier` into `LibSSH2Transport`.**
+  `verifyHostKey` now consults the injected verifier on an unknown key —
+  remembering it only if trusted, refusing otherwise (replacing the silent
+  auto-accept). The init defaults to `AutoAcceptHostKeyVerifier`, so behavior is
+  unchanged until the UI prompt is wired. Compiled by the SSH build jobs
+  (app-build-ssh, mac-release). Next: a `HostKeyVerifier` implementation that
+  blocks the SSH thread and presents a SwiftUI confirm-key sheet, injected via
+  `TransportFactory`.
 - **Keyboard M2 complete + starting host-key prompt.** Build iOS green on
   9bb52c6 confirms the `TerminalController` refactor and live-cursor-mode read
   (`Terminal.applicationCursor`) compile — so the keyboard M2 feature (encoder →
