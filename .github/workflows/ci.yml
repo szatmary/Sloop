@@ -15,7 +15,7 @@ jobs:
         run: swift test
 
   app-build:
-    name: Build app (iOS · tvOS · macOS)
+    name: Build app (iOS · macOS)
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -25,8 +25,6 @@ jobs:
         run: xcodegen generate
       - name: Build iOS
         run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_iOS -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO -quiet
-      - name: Build tvOS
-        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_tvOS -sdk appletvsimulator CODE_SIGNING_ALLOWED=NO -quiet
       - name: Build macOS
         run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -sdk macosx CODE_SIGNING_ALLOWED=NO -quiet
 

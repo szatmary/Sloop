@@ -35,9 +35,10 @@ xcodegen generate
 open Sloop.xcodeproj
 ```
 
-Pick the `Sloop_iOS`, `Sloop_tvOS`, or `Sloop_macOS` scheme and run. The
-**Local terminal** row works immediately; saved hosts will show the SSH
-"not implemented yet" fallback until libssh2 is wired up.
+Pick the `Sloop_iOS` or `Sloop_macOS` scheme and run. The **Local terminal** row
+works immediately; saved hosts show an SSH "not built yet" fallback until the
+libssh2 xcframework is linked (`Docs/SSH.md`). tvOS is deferred — see
+`Docs/ROADMAP.md`.
 
 ## Testing the core
 

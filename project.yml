@@ -29,7 +29,10 @@ packages:
 targets:
   Sloop:
     type: application
-    platform: [iOS, tvOS, macOS]
+    # tvOS is deferred: SwiftTerm's UIKit terminal views don't build cleanly for
+    # tvOS (its iOS/ sources reference a TerminalView type not defined there).
+    # SloopKit still targets tvOS, so the app can add it once SwiftTerm supports it.
+    platform: [iOS, macOS]
     sources:
       - path: App/Sloop
     dependencies:

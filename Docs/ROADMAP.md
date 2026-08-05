@@ -43,6 +43,13 @@ top of a working SSH terminal rather than first.
 - [ ] App icons, launch, tvOS focus model, Mac menu commands.
 - [ ] Background-connection handling and reconnect polish.
 
+## Deferred
+
+- **tvOS app** — blocked on SwiftTerm: its UIKit terminal views don't compile
+  for tvOS (the `iOS/` sources reference a `TerminalView` type not defined
+  there). SloopKit already targets tvOS, so revisit once SwiftTerm supports it
+  or a tvOS renderer is swapped in. iOS + macOS ship first.
+
 ## Nice-to-have
 
 - iCloud host sync (secrets stay in the keychain, not iCloud).
