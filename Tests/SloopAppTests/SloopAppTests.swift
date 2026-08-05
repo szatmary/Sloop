@@ -1,7 +1,8 @@
 import XCTest
 import SloopKit
 import SwiftTerm
-@testable import Sloop
+// The macOS app target is named Sloop_macOS, so its module is Sloop_macOS.
+@testable import Sloop_macOS
 
 /// Unit tests that run against the built macOS app (`@testable import Sloop`),
 /// exercising app-layer code that the pure-Foundation SloopKit tests can't
