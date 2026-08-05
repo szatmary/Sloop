@@ -46,6 +46,10 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_VERSION: "5.9"
+        # arm64 only — Sloop does not support x86. Keeps simulator builds arm64
+        # (no x86_64 slice) and matches the arm64-only libssh2 xcframework.
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: "NO"
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
