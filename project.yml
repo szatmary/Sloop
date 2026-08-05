@@ -1,0 +1,48 @@
+# Sloop — XcodeGen project spec.
+#
+# The .xcodeproj is generated, not checked in. On a Mac:
+#     brew install xcodegen
+#     xcodegen generate
+#     open Sloop.xcodeproj
+#
+# `platform: [iOS, tvOS, macOS]` expands the single `Sloop` target into one
+# target per platform (Sloop_iOS, Sloop_tvOS, Sloop_macOS), all sharing the
+# sources under App/Sloop and the local SloopKit package.
+
+name: Sloop
+
+options:
+  bundleIdPrefix: org.szatmary.sloop
+  deploymentTarget:
+    iOS: "17.0"
+    tvOS: "17.0"
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    from: "1.2.0"
+  SloopKit:
+    path: .
+
+targets:
+  Sloop:
+    type: application
+    platform: [iOS, tvOS, macOS]
+    sources:
+      - path: App/Sloop
+    dependencies:
+      - package: SwiftTerm
+      - package: SloopKit
+        product: SloopKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.szatmary.sloop
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.9"
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES

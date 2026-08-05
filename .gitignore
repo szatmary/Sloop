@@ -1,0 +1,22 @@
+# Xcode / generated project (regenerate with `xcodegen generate`)
+*.xcodeproj
+*.xcworkspace
+!Package.xcworkspace
+DerivedData/
+build/
+.build/
+
+# SwiftPM
+Package.resolved
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# User-specific Xcode state
+xcuserdata/
+*.xcuserstate
+
+# Vendored native binaries (built locally, see Docs/)
+Vendor/**/*.xcframework
+Vendor/**/build/
