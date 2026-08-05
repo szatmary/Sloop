@@ -2,11 +2,11 @@ import SwiftUI
 import SloopKit
 
 /// View model backing `HostListView`. Owns the host list, the known-hosts
-/// database, and the credential store, and turns a saved `Host` into a live
+/// database, and the credential store, and turns a saved `SSHHost` into a live
 /// `TerminalSession` at connect time.
 @MainActor
 final class HostListModel: ObservableObject {
-    @Published private(set) var hosts: [Host] = []
+    @Published private(set) var hosts: [SSHHost] = []
 
     private let store = HostStore()
     private let knownHosts = KnownHostsStore()
@@ -21,13 +21,13 @@ final class HostListModel: ObservableObject {
         hosts = store.hosts
     }
 
-    func newHost() -> Host {
-        Host(alias: "new host", hostname: "", username: "")
+    func newHost() -> SSHHost {
+        SSHHost(alias: "new host", hostname: "", username: "")
     }
 
     /// Save a host and, if a new secret was entered, its credential. A `nil`
     /// credential means "leave the stored secret untouched".
-    func save(_ host: Host, credential: Credential?) {
+    func save(_ host: SSHHost, credential: Credential?) {
         store.upsert(host)
         if let credential {
             try? credentials.setCredential(credential, for: host.id)
@@ -45,7 +45,7 @@ final class HostListModel: ObservableObject {
     }
 
     /// Build a session for a host, pulling its credential from the store.
-    func connect(_ host: Host) -> TerminalSession {
+    func connect(_ host: SSHHost) -> TerminalSession {
         let credential = credentials.credential(for: host.id) ?? Credential()
         let transport = TransportFactory.ssh(host: host,
                                              credential: credential,

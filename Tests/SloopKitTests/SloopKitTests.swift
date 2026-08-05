@@ -41,7 +41,7 @@ final class SloopKitTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let store = HostStore(fileURL: tmp)
-        store.upsert(Host(alias: "box", hostname: "example.com", username: "matt"))
+        store.upsert(SSHHost(alias: "box", hostname: "example.com", username: "matt"))
 
         let reloaded = HostStore(fileURL: tmp)
         XCTAssertEqual(reloaded.hosts.count, 1)
@@ -100,7 +100,7 @@ final class SloopKitTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let store = HostStore(fileURL: tmp)
-        var host = Host(alias: "box", hostname: "example.com", username: "matt")
+        var host = SSHHost(alias: "box", hostname: "example.com", username: "matt")
         store.upsert(host)
         host.alias = "renamed"
         store.upsert(host)

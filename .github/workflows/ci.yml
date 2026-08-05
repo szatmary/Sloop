@@ -57,7 +57,9 @@ jobs:
         run: brew install xcodegen
       - name: Generate project (SSH)
         run: xcodegen generate --spec project.ssh.yml
+      # The libssh2 xcframework ships arm64 slices only, so pin ARCHS=arm64
+      # (the runner is Apple Silicon; the x86_64 simulator slice isn't built).
       - name: Build iOS
-        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_iOS -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO -quiet
+        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_iOS -sdk iphonesimulator ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO -quiet
       - name: Build macOS
-        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -sdk macosx CODE_SIGNING_ALLOWED=NO -quiet
+        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -sdk macosx ARCHS=arm64 CODE_SIGNING_ALLOWED=NO -quiet

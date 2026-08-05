@@ -5,11 +5,11 @@ import SloopKit
 /// that belongs behind a keychain flow (see Docs/ROADMAP.md).
 struct HostEditView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var host: Host
+    @State private var host: SSHHost
     @State private var password: String = ""
-    private let onSave: (Host, Credential?) -> Void
+    private let onSave: (SSHHost, Credential?) -> Void
 
-    init(host: Host, onSave: @escaping (Host, Credential?) -> Void) {
+    init(host: SSHHost, onSave: @escaping (SSHHost, Credential?) -> Void) {
         _host = State(initialValue: host)
         self.onSave = onSave
     }

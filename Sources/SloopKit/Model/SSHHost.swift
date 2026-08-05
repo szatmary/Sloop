@@ -10,7 +10,7 @@ public enum AuthMethod: Codable, Hashable {
 
 /// A saved connection. Persisted as plain JSON via `HostStore`; the matching
 /// secret is looked up separately at connect time so this stays keychain-free.
-public struct Host: Identifiable, Codable, Hashable {
+public struct SSHHost: Identifiable, Codable, Hashable {
     public var id: UUID
     public var alias: String
     public var hostname: String

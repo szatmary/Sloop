@@ -21,7 +21,7 @@ final class LibSSH2Transport: Transport {
     var onData: ((ArraySlice<UInt8>) -> Void)?
     var onClose: ((Error?) -> Void)?
 
-    private let host: Host
+    private let host: SSHHost
     private let credential: Credential
     private let knownHosts: KnownHostsStore
 
@@ -30,7 +30,7 @@ final class LibSSH2Transport: Transport {
     private var pendingResize: (cols: Int, rows: Int)?
     private var shouldClose = false
 
-    init(host: Host, credential: Credential, knownHosts: KnownHostsStore) {
+    init(host: SSHHost, credential: Credential, knownHosts: KnownHostsStore) {
         self.host = host
         self.credential = credential
         self.knownHosts = knownHosts
@@ -187,17 +187,17 @@ final class LibSSH2Transport: Transport {
         guard let channel else { return nil }
 
         let term = "xterm-256color"
-        var rc = term.withCString {
+        var rc = term.withCString { termPtr in
             retry(session, sock) {
-                libssh2_channel_request_pty_ex(channel, $0, UInt32(term.utf8.count),
+                libssh2_channel_request_pty_ex(channel, termPtr, UInt32(term.utf8.count),
                                                nil, 0, 80, 24, 0, 0)
             }
         }
         guard rc == 0 else { return nil }
 
-        rc = "shell".withCString {
+        rc = "shell".withCString { shellPtr in
             retry(session, sock) {
-                libssh2_channel_process_startup(channel, $0, 5, nil, 0)
+                libssh2_channel_process_startup(channel, shellPtr, 5, nil, 0)
             }
         }
         return rc == 0 ? channel : nil

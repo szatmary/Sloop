@@ -5,7 +5,7 @@ import SloopKit
 /// host opens a `TerminalScreen`; the `+` toolbar item adds a host.
 struct HostListView: View {
     @StateObject private var model = HostListModel()
-    @State private var editing: Host?
+    @State private var editing: SSHHost?
     @State private var session: TerminalSession?
 
     var body: some View {
@@ -50,7 +50,7 @@ struct HostListView: View {
 }
 
 private struct HostRow: View {
-    let host: Host
+    let host: SSHHost
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {

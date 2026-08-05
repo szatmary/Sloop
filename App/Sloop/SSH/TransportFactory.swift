@@ -6,7 +6,7 @@ import SloopKit
 /// returns a `MessageTransport` explaining what's missing, so the app stays
 /// usable during the libssh2 bring-up.
 enum TransportFactory {
-    static func ssh(host: Host,
+    static func ssh(host: SSHHost,
                     credential: Credential,
                     knownHosts: KnownHostsStore) -> Transport {
         #if canImport(CSSH)
