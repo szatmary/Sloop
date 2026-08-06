@@ -5,6 +5,17 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-06
 
+- **Mosh step 2: wire prefer-Mosh into the live connect path.** Added
+  `MoshOrSSHTransport` (SloopKit) — a `Transport` that, when Mosh is requested,
+  probes `mosh-server` (via a `CommandRunner`), then activates either a Mosh
+  transport or a plain SSH shell and forwards the whole transport surface to
+  whichever is live, printing a `[sloop] mosh: …` notice so the mode is visible.
+  `HostListModel.connect` now builds one when `host.useMosh` is set (with no Mosh
+  transport factory yet, so it always falls back to SSH today — but the
+  probe/branch/notice path is real). Fully mock-tested in SloopKit: not-requested
+  → SSH; server-missing → SSH+notice; available+transport → Mosh; available+no
+  transport → SSH; and I/O forwarding to the active transport. Next: the
+  `MoshTransport` UDP/SSP session (the C++/crypto piece).
 - **Mosh step 1: prefer-Mosh / fall-back-to-SSH decision core.** First slice of
   Mosh (M3), and fully testable in SloopKit without a Mac. Added `MoshStartup`
   (`connect(MoshBootstrap)` vs `unavailable(reason:)`), `MoshServer.interpret(_:)`

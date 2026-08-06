@@ -46,15 +46,35 @@ final class HostListModel: ObservableObject {
 
     /// Build a session for a host, pulling its credential from the store. The
     /// session holds a factory (not a single transport) so it can reconnect by
-    /// building a fresh SSH connection.
+    /// building a fresh connection.
+    ///
+    /// When the host prefers Mosh, the transport is a `MoshOrSSHTransport`: it
+    /// probes `mosh-server` and either uses Mosh or falls back to a plain SSH
+    /// shell (the Mosh UDP transport isn't wired yet, so today it always falls
+    /// back — the terminal shows which mode it got).
     func connect(_ host: SSHHost) -> TerminalSession {
         let credential = credentials.credential(for: host.id) ?? Credential()
         let knownHosts = self.knownHosts
-        return TerminalSession(title: host.alias) {
+
+        let makeSSH: () -> Transport = {
             TransportFactory.ssh(host: host,
                                  credential: credential,
                                  knownHosts: knownHosts,
                                  hostKeyVerifier: HostKeyPrompter.shared)
+        }
+
+        return TerminalSession(title: host.alias) {
+            guard host.useMosh else { return makeSSH() }
+            return MoshOrSSHTransport(
+                useMosh: true,
+                makeCommandRunner: {
+                    CommandRunnerFactory.ssh(host: host,
+                                             credential: credential,
+                                             knownHosts: knownHosts,
+                                             hostKeyVerifier: HostKeyPrompter.shared)
+                },
+                makeSSHTransport: makeSSH)
+            // makeMoshTransport: supplied once the Mosh UDP/SSP transport lands.
         }
     }
 }

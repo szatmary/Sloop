@@ -36,9 +36,21 @@ network, no Mac):
   exec channel) and reports the `MoshStartup`.
 
 So `host.useMosh` means *prefer* Mosh: hosts that have it get roaming and
-predictive echo; hosts that don't still connect over plain SSH. The connection
-status bar can say which mode is active. **Still to build:** wiring this into the
-live connect path and the `MoshTransport` UDP/SSP session below.
+predictive echo; hosts that don't still connect over plain SSH.
+
+This is wired into the live connect path via `MoshOrSSHTransport` (SloopKit): a
+`Transport` that, when Mosh is requested, probes `mosh-server`, then activates
+either a Mosh transport or a plain SSH shell and forwards the whole transport
+surface to whichever is live. It prints a one-line notice so you can see the
+mode (`[sloop] mosh: … — using SSH`). `HostListModel.connect` builds one when
+`host.useMosh` is set. The branching is unit-tested with mock transports + a mock
+command runner.
+
+**Still to build:** the actual `MoshTransport` UDP/SSP session below. Until it
+exists, `MoshOrSSHTransport` is constructed with no Mosh-transport factory, so it
+always falls back to SSH — but the probe/branch/notice path is real and tested.
+(Cost until then: probing opens a short extra SSH exec connection, and on a
+Mosh-capable host the started `mosh-server` is left to time out while we use SSH.)
 
 ### SSP details
 
