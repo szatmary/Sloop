@@ -5,6 +5,15 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-06
 
+- **CI infra note (not a code change).** The `Mosh step 2` commit's code is green
+  — SloopKit tests, the libssh2 xcframework, and the full iOS+macOS SSH build all
+  passed. But GitHub Actions had a `macos-15` incident that day: an action-
+  download outage (503 Service Unavailable) followed by a long runner-scheduling
+  backlog, which failed/stranded the `app-build` and `mac-release` jobs at the
+  "Set up job" step — before any of our steps ran. Re-runs kept getting
+  deprioritized in the congested queue, so the run was cancelled and re-triggered
+  fresh. No source changes were needed; recording this so a red badge on that run
+  isn't mistaken for a defect.
 - **Mosh step 2: wire prefer-Mosh into the live connect path.** Added
   `MoshOrSSHTransport` (SloopKit) — a `Transport` that, when Mosh is requested,
   probes `mosh-server` (via a `CommandRunner`), then activates either a Mosh
