@@ -5,6 +5,19 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-06
 
+- **Host-key mismatch UI.** A changed host key used to just refuse with an
+  error. Now it's a real user decision, distinct from trust-on-first-use.
+  Extended the SloopKit `HostKeyVerifier` protocol with
+  `shouldTrustChangedKey(...)` (default impl refuses — accepting a changed key
+  must be deliberate), added a changed-key closure to `ClosureHostKeyVerifier`,
+  and added `KnownHostsStore.recorded(endpoint:)` so the UI can show the old vs
+  new fingerprint. Both SSH implementations (`LibSSH2Transport` and
+  `LibSSH2CommandRunner`) now route the `.mismatch` case through the verifier,
+  replacing the stored key only on explicit acceptance. `HostKeyPrompter` gained
+  a prompt `Kind` (unknown / changed), and `HostKeyPromptView` shows a red
+  warning sheet with the previous (struck-through) and new fingerprints plus a
+  destructive "Accept New Key" button. New SloopKit tests cover the default
+  refusal, closure acceptance, and `recorded(endpoint:)`.
 - **CommandRunner step 2: `LibSSH2CommandRunner` (real exec channel).** Added the
   libssh2-backed implementation of the `CommandRunner` protocol in
   `App/Sloop/SSH/`: connect → handshake → host-key (trust-on-first-use) → auth

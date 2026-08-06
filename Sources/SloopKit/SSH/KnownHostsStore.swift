@@ -52,6 +52,13 @@ public final class KnownHostsStore {
             ? .match : .mismatch
     }
 
+    /// The key we currently have on record for an endpoint, if any. Used to show
+    /// the user what changed when a key no longer matches.
+    public func recorded(endpoint: String) -> (keyType: String, fingerprint: String)? {
+        guard let existing = entries.first(where: { $0.endpoint == endpoint }) else { return nil }
+        return (existing.keyType, existing.fingerprint)
+    }
+
     /// Record (or replace) the key for an endpoint. Call this after a successful
     /// trust-on-first-use, or when the user explicitly accepts a changed key.
     public func remember(endpoint: String, keyType: String, fingerprint: String) {

@@ -190,7 +190,15 @@ final class LibSSH2CommandRunner: CommandRunner {
             knownHosts.remember(endpoint: endpoint, keyType: typeName, fingerprint: fingerprint)
             return nil
         case .mismatch:
-            return SSHError.connectionFailed("host key changed for \(endpoint) — refusing to connect")
+            let previous = knownHosts.recorded(endpoint: endpoint)?.fingerprint ?? "unknown"
+            guard hostKeyVerifier.shouldTrustChangedKey(endpoint: endpoint,
+                                                        keyType: typeName,
+                                                        fingerprint: fingerprint,
+                                                        previousFingerprint: previous) else {
+                return SSHError.connectionFailed("host key changed for \(endpoint) — refusing to connect")
+            }
+            knownHosts.remember(endpoint: endpoint, keyType: typeName, fingerprint: fingerprint)
+            return nil
         }
     }
 

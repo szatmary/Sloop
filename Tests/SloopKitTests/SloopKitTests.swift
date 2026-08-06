@@ -74,6 +74,25 @@ final class SloopKitTests: XCTestCase {
         XCTAssertEqual(store.status(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "BBBB"), .mismatch)
     }
 
+    func testKnownHostsRecordedReturnsStoredKey() {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sloop-known-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let store = KnownHostsStore(fileURL: tmp)
+        let endpoint = KnownHostsStore.endpoint(host: "example.com", port: 22)
+        XCTAssertNil(store.recorded(endpoint: endpoint))
+
+        store.remember(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "AAAA")
+        let recorded = store.recorded(endpoint: endpoint)
+        XCTAssertEqual(recorded?.keyType, "ssh-ed25519")
+        XCTAssertEqual(recorded?.fingerprint, "AAAA")
+
+        // After a changed key is accepted, the recorded fingerprint updates.
+        store.remember(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "BBBB")
+        XCTAssertEqual(store.recorded(endpoint: endpoint)?.fingerprint, "BBBB")
+    }
+
     func testKnownHostsPersistsAcrossInstances() {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("sloop-known-\(UUID().uuidString).json")

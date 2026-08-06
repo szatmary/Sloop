@@ -139,7 +139,18 @@ final class LibSSH2Transport: Transport {
             knownHosts.remember(endpoint: endpoint, keyType: typeName, fingerprint: fingerprint)
             return nil
         case .mismatch:
-            return SSHError.connectionFailed("host key changed for \(endpoint) — refusing to connect")
+            // The endpoint is known but its key changed — a possible MITM. Ask
+            // the verifier (an interactive one shows a strong warning). Replace
+            // the stored key only if the user explicitly accepts.
+            let previous = knownHosts.recorded(endpoint: endpoint)?.fingerprint ?? "unknown"
+            guard hostKeyVerifier.shouldTrustChangedKey(endpoint: endpoint,
+                                                        keyType: typeName,
+                                                        fingerprint: fingerprint,
+                                                        previousFingerprint: previous) else {
+                return SSHError.connectionFailed("host key changed for \(endpoint) — refusing to connect")
+            }
+            knownHosts.remember(endpoint: endpoint, keyType: typeName, fingerprint: fingerprint)
+            return nil
         }
     }
 
