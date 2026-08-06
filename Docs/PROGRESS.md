@@ -5,6 +5,16 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-06
 
+- **Mosh step 1: prefer-Mosh / fall-back-to-SSH decision core.** First slice of
+  Mosh (M3), and fully testable in SloopKit without a Mac. Added `MoshStartup`
+  (`connect(MoshBootstrap)` vs `unavailable(reason:)`), `MoshServer.interpret(_:)`
+  (classifies `mosh-server` output — handshake → connect; command-not-found /
+  bad-locale / no-output → SSH fallback), and `MoshBootstrapper(runner:)` which
+  runs the bootstrap over a `CommandRunner` (SSH exec channel) and reports the
+  decision. Unlike upstream Mosh (which errors if `mosh-server` is missing),
+  this makes `host.useMosh` mean *prefer* Mosh and gracefully drop to SSH. Seven
+  unit tests via `MockCommandRunner`. Next: wire this into the live connect path
+  (branch SSH shell vs Mosh) and build the `MoshTransport` UDP/SSP session.
 - **Connection status + reconnect.** The terminal now shows connection state and
   can rebuild a dropped link. Added a testable `ConnectionState`
   (connecting/connected/disconnected+reason) to SloopKit and an `onOpen` signal

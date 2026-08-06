@@ -17,9 +17,33 @@ Sloop and lands after a working SSH terminal (see `Docs/ROADMAP.md`, M3).
    `MoshBootstrap(serverBanner:)` parses the UDP port and the base64 key.
 2. **Speak SSP.** Close the SSH connection. Open a UDP socket to
    `host:60001`, set `MOSH_KEY` in the environment, and run the Mosh State
-   Synchronization Protocol. Datagrams are AES-128-OCB encrypted with the key;
-   the protocol resynchronizes screen state after any gap, so roaming and sleep
-   just work.
+   Synchronization Protocol.
+
+## Prefer Mosh, fall back to SSH
+
+Upstream Mosh errors out if `mosh-server` isn't on the remote. Sloop doesn't:
+because the bootstrap runs over an SSH connection we already hold, a missing (or
+broken) server just falls back to a normal SSH shell.
+
+The decision lives in SloopKit and is unit-tested with a mock command runner (no
+network, no Mac):
+
+- `MoshServer.bootstrapCommand` — the `mosh-server new …` command.
+- `MoshServer.interpret(_:)` — classify the command output into
+  `MoshStartup.connect(MoshBootstrap)` (got a handshake → go to SSP) or
+  `.unavailable(reason:)` (not installed / bad locale / didn't start → SSH).
+- `MoshBootstrapper(runner:)` — runs the command over a `CommandRunner` (an SSH
+  exec channel) and reports the `MoshStartup`.
+
+So `host.useMosh` means *prefer* Mosh: hosts that have it get roaming and
+predictive echo; hosts that don't still connect over plain SSH. The connection
+status bar can say which mode is active. **Still to build:** wiring this into the
+live connect path and the `MoshTransport` UDP/SSP session below.
+
+### SSP details
+
+Datagrams are AES-128-OCB encrypted with the key; the protocol resynchronizes
+screen state after any gap, so roaming and sleep just work.
 
 ## The client is C++
 
