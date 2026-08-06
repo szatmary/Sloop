@@ -55,15 +55,16 @@ public final class ClosureHostKeyVerifier: HostKeyVerifier {
     private let decideChanged: (_ endpoint: String, _ keyType: String, _ fingerprint: String, _ previous: String) -> Bool
 
     public init(onUnknown decide: @escaping (String, String, String) -> Bool,
-                onChanged: @escaping (String, String, String, String) -> Bool = { _, _, _, _ in false }) {
+                onChanged: @escaping (String, String, String, String) -> Bool) {
         self.decide = decide
         self.decideChanged = onChanged
     }
 
     /// Convenience for the common case of deciding only about unknown keys
-    /// (changed keys are refused).
+    /// (changed keys are refused). Keeping this the only single-closure
+    /// initializer avoids a trailing-closure ambiguity with `init(onUnknown:onChanged:)`.
     public convenience init(_ decide: @escaping (String, String, String) -> Bool) {
-        self.init(onUnknown: decide)
+        self.init(onUnknown: decide, onChanged: { _, _, _, _ in false })
     }
 
     public func shouldTrust(endpoint: String, keyType: String, fingerprint: String) -> Bool {
