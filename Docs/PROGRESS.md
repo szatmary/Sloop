@@ -5,6 +5,13 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-06
 
+- **Tabs step 1: `OpenSessions` model (SloopKit).** First slice of multiple
+  concurrent sessions / tabs, fully unit-tested without a Mac. A pure value type
+  holding the open `TerminalSession`s + the active one, with open/select/close
+  logic — including which tab becomes active when the active one is closed (its
+  left neighbor, else the new first, else nothing). Eight unit tests. Next: an
+  app-layer `ObservableObject` store, a tab strip, and persisting each session's
+  live `TerminalController` across tab switches so connections aren't torn down.
 - **CI infra note (not a code change).** The `Mosh step 2` commit's code is green
   — SloopKit tests, the libssh2 xcframework, and the full iOS+macOS SSH build all
   passed. But GitHub Actions had a `macos-15` incident that day: an action-
