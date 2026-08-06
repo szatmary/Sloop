@@ -5,6 +5,15 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-06
 
+- **GitHub Releases (tags + downloads).** The macOS build was only a workflow
+  artifact (buried in the Actions tab, expiring) — the Releases page and tag list
+  were empty. The `mac-release` CI job now also **publishes releases**: every
+  push to `main` refreshes a rolling `nightly` pre-release (tag moves to the
+  latest commit, stable download URL) with `Sloop-macOS.zip` attached, and
+  pushing a `v*` tag publishes an immutable versioned release. Added
+  `permissions: contents: write` to the job, a `tags: ["v*"]` push trigger, and
+  `Docs/RELEASES.md`. Builds stay unsigned (right-click → Open) until signing is
+  configured.
 - **Host-key mismatch UI.** A changed host key used to just refuse with an
   error. Now it's a real user decision, distinct from trust-on-first-use.
   Extended the SloopKit `HostKeyVerifier` protocol with
