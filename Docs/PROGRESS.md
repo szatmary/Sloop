@@ -5,6 +5,13 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-05
 
+- **CommandRunner step 1: SloopKit core.** Added a testable `CommandResult`
+  (stdout/stderr/exitStatus + text/`succeeded` helpers) and a `CommandRunner`
+  protocol (run a command over an SSH exec channel → result), plus a
+  `MockCommandRunner` for tests/previews. Unit tests cover the result helpers and
+  the mock (success + failure). Next: `LibSSH2CommandRunner` (the real exec impl,
+  sharing connect/auth with LibSSH2Transport) — this also unlocks the Apple Watch
+  command runner.
 - **Branch renamed to `main`** (from claude/ios-terminal-app-uwmzf3); loop + local
   now push to main. CI green pipeline unchanged.
 - **Key-based auth in the host editor.** `HostEditView` gained an auth-method
