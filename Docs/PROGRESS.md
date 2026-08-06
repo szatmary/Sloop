@@ -3,6 +3,23 @@
 Running on branch `claude/ios-terminal-app-uwmzf3` via a 10-minute `/loop`
 while the maintainer is away. Newest entries first.
 
+## 2026-08-06
+
+- **CommandRunner step 2: `LibSSH2CommandRunner` (real exec channel).** Added the
+  libssh2-backed implementation of the `CommandRunner` protocol in
+  `App/Sloop/SSH/`: connect → handshake → host-key (trust-on-first-use) → auth
+  (same path as `LibSSH2Transport`, kept as a separate copy so a C typo here
+  can't break the working shell transport), then open a **no-PTY exec channel**,
+  `libssh2_channel_process_startup("exec", command)`, drain stdout (stream 0) and
+  stderr (stream 1) to EOF, and read `libssh2_channel_get_exit_status` into a
+  `CommandResult`. Runs on a background thread; opens and tears down a fresh
+  connection per command — exactly what the planned Apple Watch command runner
+  needs. Also added `CommandRunnerFactory` (the exec counterpart to
+  `TransportFactory`) with an `UnavailableCommandRunner` fallback for the non-SSH
+  build. Gated `#if canImport(CSSH)`, so only the SSH build jobs compile it —
+  blind-C, may need a spelling fix-up pass. This completes the CommandRunner
+  feature and the current roadmap.
+
 ## 2026-08-05
 
 - **CommandRunner step 1: SloopKit core.** Added a testable `CommandResult`
