@@ -8,11 +8,13 @@ import Foundation
 /// code exists, and it doubles as a simulator playground.
 public final class EchoTransport: Transport {
     public var onData: ((ArraySlice<UInt8>) -> Void)?
+    public var onOpen: (() -> Void)?
     public var onClose: ((Error?) -> Void)?
 
     public init() {}
 
     public func start() {
+        onOpen?()
         emit("Sloop \u{2693}  local echo\r\n")
         emit("Type something. Return for a new prompt, Ctrl-C to reset.\r\n\r\n")
         prompt()

@@ -5,6 +5,18 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-06
 
+- **Connection status + reconnect.** The terminal now shows connection state and
+  can rebuild a dropped link. Added a testable `ConnectionState`
+  (connecting/connected/disconnected+reason) to SloopKit and an `onOpen` signal
+  to the `Transport` protocol (fired immediately by the local transports, and
+  after connect/auth/shell-open by `LibSSH2Transport`). `TerminalSession` now
+  holds a transport *factory* instead of a single instance (transports are
+  one-shot, so reconnect needs a fresh one); `TerminalController` publishes
+  `state`, wires open/close, and gained `reconnect()`. `TerminalScreen` shows a
+  thin status bar — a spinner while connecting, hidden once connected, and a red
+  bar with a **Reconnect** button when the connection drops. Tests: SloopKit
+  covers `ConnectionState` + `EchoTransport.onOpen`; the macOS app test drives a
+  probe transport through connecting → connected → disconnected.
 - **GitHub Releases (tags + downloads).** The macOS build was only a workflow
   artifact (buried in the Actions tab, expiring) — the Releases page and tag list
   were empty. The `mac-release` CI job now also **publishes releases**: every

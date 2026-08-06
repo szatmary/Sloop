@@ -24,6 +24,7 @@ Everything the terminal talks to implements one protocol:
 ```swift
 protocol Transport: AnyObject {
     var onData: ((ArraySlice<UInt8>) -> Void)? { get set }   // remote → terminal
+    var onOpen: (() -> Void)? { get set }                    // established → "connected"
     var onClose: ((Error?) -> Void)? { get set }
     func start()
     func send(_ bytes: ArraySlice<UInt8>)                    // terminal → remote

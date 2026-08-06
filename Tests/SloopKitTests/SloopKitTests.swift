@@ -14,6 +14,26 @@ final class SloopKitTests: XCTestCase {
         XCTAssertEqual(String(decoding: out, as: UTF8.self), "hi")
     }
 
+    func testEchoTransportFiresOnOpen() {
+        let transport = EchoTransport()
+        var opened = false
+        transport.onOpen = { opened = true }
+        transport.onData = { _ in }
+        transport.start()
+        XCTAssertTrue(opened)
+    }
+
+    func testConnectionStateLabelsAndFlags() {
+        XCTAssertEqual(ConnectionState.connecting.label, "Connecting…")
+        XCTAssertTrue(ConnectionState.connected.isConnected)
+        XCTAssertFalse(ConnectionState.connecting.isConnected)
+
+        let dropped = ConnectionState.disconnected(reason: "timeout")
+        XCTAssertTrue(dropped.isDisconnected)
+        XCTAssertEqual(dropped.label, "Disconnected — timeout")
+        XCTAssertEqual(ConnectionState.disconnected(reason: nil).label, "Disconnected")
+    }
+
     func testEchoTransportReturnStartsNewPrompt() {
         let transport = EchoTransport()
         var out: [UInt8] = []

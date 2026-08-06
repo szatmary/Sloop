@@ -6,6 +6,7 @@ import Foundation
 /// UI shows an explanation instead of a dead screen.
 public final class MessageTransport: Transport {
     public var onData: ((ArraySlice<UInt8>) -> Void)?
+    public var onOpen: (() -> Void)?
     public var onClose: ((Error?) -> Void)?
 
     private let message: String
@@ -13,6 +14,7 @@ public final class MessageTransport: Transport {
     public init(message: String) { self.message = message }
 
     public func start() {
+        onOpen?()
         onData?(ArraySlice(Array(message.utf8)))
         onClose?(nil)
     }

@@ -6,26 +6,61 @@ import SloopKit
 /// `Transport`. Shared by `SwiftTermView` (which displays the terminal) and the
 /// iOS smart-keys bar (which reads the live cursor-key mode and sends input),
 /// so both talk to the same terminal instance.
+///
+/// Because transports are one-shot, the controller holds a *factory* and can
+/// build a fresh transport on `reconnect()`. It publishes `state` so the UI can
+/// show a status indicator and a reconnect affordance.
 @MainActor
 final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate {
     let terminalView: TerminalView
-    private let transport: Transport
+    @Published private(set) var state: ConnectionState = .connecting
 
-    init(transport: Transport) {
-        self.transport = transport
+    private let makeTransport: () -> Transport
+    private var transport: Transport
+
+    init(makeTransport: @escaping () -> Transport) {
+        self.makeTransport = makeTransport
         self.terminalView = TerminalView(frame: .zero)
+        self.transport = makeTransport()
         super.init()
         terminalView.terminalDelegate = self
+        wire(transport)
+        transport.start()
+    }
 
+    /// Convenience for a single pre-built transport (tests, previews). Reconnect
+    /// reuses the same instance.
+    convenience init(transport: Transport) {
+        self.init(makeTransport: { transport })
+    }
+
+    /// Rebuild the connection after it dropped. No-op unless disconnected.
+    func reconnect() {
+        guard state.isDisconnected else { return }
+        state = .connecting
+        terminalView.feed(text: "\r\n[sloop] reconnecting…\r\n")
+        let fresh = makeTransport()
+        transport = fresh
+        wire(fresh)
+        fresh.start()
+    }
+
+    private func wire(_ transport: Transport) {
+        transport.onOpen = { [weak self] in
+            DispatchQueue.main.async { self?.state = .connected }
+        }
         transport.onData = { [weak terminalView] bytes in
             DispatchQueue.main.async { terminalView?.feed(byteArray: bytes) }
         }
-        transport.onClose = { [weak terminalView] error in
-            let message = error.map { "\r\n[sloop] closed: \($0.localizedDescription)\r\n" }
+        transport.onClose = { [weak self] error in
+            let reason = error?.localizedDescription
+            let message = reason.map { "\r\n[sloop] closed: \($0)\r\n" }
                 ?? "\r\n[sloop] connection closed\r\n"
-            DispatchQueue.main.async { terminalView?.feed(text: message) }
+            DispatchQueue.main.async {
+                self?.terminalView.feed(text: message)
+                self?.state = .disconnected(reason: reason)
+            }
         }
-        transport.start()
     }
 
     /// The terminal's current DECCKM (application-cursor-keys) state, so the

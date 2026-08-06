@@ -44,13 +44,17 @@ final class HostListModel: ObservableObject {
         hosts = store.hosts
     }
 
-    /// Build a session for a host, pulling its credential from the store.
+    /// Build a session for a host, pulling its credential from the store. The
+    /// session holds a factory (not a single transport) so it can reconnect by
+    /// building a fresh SSH connection.
     func connect(_ host: SSHHost) -> TerminalSession {
         let credential = credentials.credential(for: host.id) ?? Credential()
-        let transport = TransportFactory.ssh(host: host,
-                                             credential: credential,
-                                             knownHosts: knownHosts,
-                                             hostKeyVerifier: HostKeyPrompter.shared)
-        return TerminalSession(title: host.alias, transport: transport)
+        let knownHosts = self.knownHosts
+        return TerminalSession(title: host.alias) {
+            TransportFactory.ssh(host: host,
+                                 credential: credential,
+                                 knownHosts: knownHosts,
+                                 hostKeyVerifier: HostKeyPrompter.shared)
+        }
     }
 }

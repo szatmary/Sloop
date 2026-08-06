@@ -19,6 +19,7 @@ import Darwin
 
 final class LibSSH2Transport: Transport {
     var onData: ((ArraySlice<UInt8>) -> Void)?
+    var onOpen: (() -> Void)?
     var onClose: ((Error?) -> Void)?
 
     private let host: SSHHost
@@ -107,6 +108,9 @@ final class LibSSH2Transport: Transport {
             _ = retry(session, sock) { libssh2_channel_close(channel) }
             libssh2_channel_free(channel)
         }
+
+        // Shell is up — the transport is now carrying data.
+        DispatchQueue.main.async { [weak self] in self?.onOpen?() }
 
         eventLoop(session: session, channel: channel, sock: sock)
         finish(nil)

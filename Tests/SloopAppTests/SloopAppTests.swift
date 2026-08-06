@@ -9,9 +9,11 @@ import SwiftTerm
 /// reach. Run in CI via `xcodebuild test -scheme Sloop_macOS`.
 final class SloopAppTests: XCTestCase {
 
-    /// A Transport that just records what the terminal sends to it.
+    /// A Transport that just records what the terminal sends to it, and lets a
+    /// test drive its open/close callbacks.
     private final class ProbeTransport: Transport {
         var onData: ((ArraySlice<UInt8>) -> Void)?
+        var onOpen: (() -> Void)?
         var onClose: ((Error?) -> Void)?
         private(set) var sent: [UInt8] = []
         func start() {}
@@ -37,6 +39,7 @@ final class SloopAppTests: XCTestCase {
     func testTerminalControllerForwardsResize() {
         final class ResizeProbe: Transport {
             var onData: ((ArraySlice<UInt8>) -> Void)?
+            var onOpen: (() -> Void)?
             var onClose: ((Error?) -> Void)?
             var lastSize: (cols: Int, rows: Int)?
             func start() {}
@@ -51,6 +54,32 @@ final class SloopAppTests: XCTestCase {
 
         XCTAssertEqual(probe.lastSize?.cols, 120)
         XCTAssertEqual(probe.lastSize?.rows, 40)
+    }
+
+    /// The controller starts out connecting and reflects the transport's
+    /// open/close callbacks in its published `state`.
+    @MainActor
+    func testControllerReflectsConnectionState() {
+        let probe = ProbeTransport()
+        let controller = TerminalController(transport: probe)
+        XCTAssertEqual(controller.state, .connecting)
+
+        probe.onOpen?()
+        drainMainQueue()
+        XCTAssertTrue(controller.state.isConnected)
+
+        probe.onClose?(SSHError.channelFailure("dropped"))
+        drainMainQueue()
+        XCTAssertTrue(controller.state.isDisconnected)
+    }
+
+    /// Let queued main-queue blocks (the controller hops to main in its
+    /// callbacks) run before asserting.
+    @MainActor
+    private func drainMainQueue() {
+        let done = expectation(description: "main drained")
+        DispatchQueue.main.async { done.fulfill() }
+        wait(for: [done], timeout: 1)
     }
 
     /// The transport factory always yields a usable transport. Without the
