@@ -6,6 +6,13 @@ on:
     tags: ["v*"]
   pull_request:
 
+# Serialize runs per ref so two pushes to main can't race on the `nightly`
+# release tag (each release step deletes and recreates it). Don't cancel an
+# in-progress run — a publish mid-flight should finish, not be interrupted.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   sloopkit-tests:
     name: SloopKit unit tests
