@@ -52,9 +52,18 @@ ls -la "$CRYPTO_DIR"
 echo "==> headers included by crypto sources (reveals any OpenSSL/nettle dep):"
 grep -h '#include' "$CRYPTO_DIR"/*.cc 2>/dev/null | sort -u || true
 
-# bash 3.2 on the macOS runner has no `mapfile`.
+# bash 3.2 on the macOS runner has no `mapfile`. mosh ships several OCB
+# backends as separate files (ocb_openssl, ocb_nettle, ocb_internal); compile
+# only the self-contained one (ocb_internal) so no external crypto lib is
+# needed on Apple — mosh's __APPLE__ paths use CommonCrypto from the SDK.
 CRYPTO_TUS=()
-while IFS= read -r f; do CRYPTO_TUS+=("$f"); done < <(find "$CRYPTO_DIR" -maxdepth 1 -name '*.cc')
+while IFS= read -r f; do
+  case "$(basename "$f")" in
+    ocb_openssl.cc|ocb_nettle.cc)
+      echo "    skipping external backend: $(basename "$f")"; continue ;;
+  esac
+  CRYPTO_TUS+=("$f")
+done < <(find "$CRYPTO_DIR" -maxdepth 1 -name '*.cc')
 echo "    crypto TUs: ${CRYPTO_TUS[*]}"
 INCLUDES=(-I "$SRC" -I "$CRYPTO_DIR" -I "$SRC_ROOT" -I "$SRC_ROOT/util" -I "$SRC_ROOT/include")
 
