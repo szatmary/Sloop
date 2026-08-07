@@ -38,11 +38,23 @@ git clone https://github.com/mobile-shell/mosh.git
 git -C "$SRC" checkout --quiet "$MOSH_TAG"
 
 echo "==> Locating crypto sources"
-CRYPTO_DIR="$(dirname "$(find "$SRC" -name ocb.cc -path '*crypto*' | head -1)")"
-test -n "$CRYPTO_DIR" && test -d "$CRYPTO_DIR" || { echo "could not find mosh crypto sources"; find "$SRC" -name '*.cc' | head -50; exit 1; }
-echo "    crypto dir: $CRYPTO_DIR"
+# Find the crypto directory by name (robust to file naming), not a specific file.
+CRYPTO_DIR="$(find "$SRC" -type d -name crypto | head -1)"
+if [ -z "$CRYPTO_DIR" ] || [ ! -d "$CRYPTO_DIR" ]; then
+  echo "no crypto dir found under $SRC; directory tree:"
+  find "$SRC" -maxdepth 3 -type d | sort
+  exit 1
+fi
 SRC_ROOT="$(dirname "$CRYPTO_DIR")"           # .../src
-mapfile -t CRYPTO_TUS < <(find "$CRYPTO_DIR" -maxdepth 1 -name '*.cc')
+echo "    crypto dir: $CRYPTO_DIR"
+echo "==> crypto dir contents:"
+ls -la "$CRYPTO_DIR"
+echo "==> headers included by crypto sources (reveals any OpenSSL/nettle dep):"
+grep -h '#include' "$CRYPTO_DIR"/*.cc 2>/dev/null | sort -u || true
+
+# bash 3.2 on the macOS runner has no `mapfile`.
+CRYPTO_TUS=()
+while IFS= read -r f; do CRYPTO_TUS+=("$f"); done < <(find "$CRYPTO_DIR" -maxdepth 1 -name '*.cc')
 echo "    crypto TUs: ${CRYPTO_TUS[*]}"
 INCLUDES=(-I "$SRC" -I "$CRYPTO_DIR" -I "$SRC_ROOT" -I "$SRC_ROOT/util" -I "$SRC_ROOT/include")
 
