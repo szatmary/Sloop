@@ -70,6 +70,29 @@ jobs:
           path: Vendor/protobuf.xcframework
           if-no-files-found: error
 
+  mosh-xcframework:
+    name: Build mosh xcframework (experimental · mosh M3)
+    runs-on: macos-14
+    needs: protobuf-xcframework
+    # Brick 2b: blind autotools cross-compile, single-slice bring-up. Keep
+    # continue-on-error and don't fail on a missing xcframework yet.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download protobuf xcframework
+        uses: actions/download-artifact@v4
+        with:
+          name: protobuf-xcframework
+          path: Vendor/protobuf.xcframework
+      - name: Build mosh xcframework
+        run: ./Scripts/build-mosh.sh
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mosh-xcframework
+          path: Vendor/mosh.xcframework
+          if-no-files-found: warn
+
   app-build-ssh:
     name: Build app with SSH (iOS · macOS)
     runs-on: macos-15
