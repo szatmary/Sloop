@@ -4,14 +4,17 @@
 # arm64 slice by building its self-contained crypto (AES + OCB — the AEAD that
 # protects every SSP datagram) into Vendor/mosh-crypto.xcframework.
 #
-# This deliberately avoids protobuf and mosh's autotools link step: it runs
-# mosh's ./configure natively only to GENERATE config.h, then compiles the
-# crypto translation units directly with clang for each target slice. Designed
-# to run on a GitHub macOS runner.
+# This deliberately avoids protobuf and mosh's autotools entirely: the crypto
+# translation units are protobuf-free, so instead of running mosh's ./configure
+# (which requires a matching protobuf and fails against Homebrew's modern
+# abseil-based protobuf), we hand-write a minimal config.h — all HAVE_* left
+# undefined so mosh takes its portable fallbacks — and compile the crypto sources
+# directly with clang for each Apple slice. Designed to run on a GitHub macOS
+# runner.
 #
 # ⚠️ Blind cross-compile — the exact crypto source/include set is best-effort and
-# may need a fix-up pass on first CI run (missing TU, include dir, or an
-# OpenSSL-vs-bundled-OCB config.h toggle).
+# may need a fix-up pass on first CI run (a missing translation unit, an include
+# dir, or a HAVE_* the crypto path actually needs).
 set -euo pipefail
 
 MOSH_TAG="mosh-1.4.0"
@@ -28,22 +31,20 @@ rm -rf "$WORK"
 mkdir -p "$WORK" "$OUT"
 cd "$WORK"
 
-echo "==> Installing build deps (protobuf/automake only needed so configure passes)"
-brew list protobuf   >/dev/null 2>&1 || brew install protobuf
-brew list automake   >/dev/null 2>&1 || brew install automake
-brew list pkg-config >/dev/null 2>&1 || brew install pkg-config
-
 echo "==> Fetching mosh $MOSH_TAG"
 git clone --depth 1 --branch "$MOSH_TAG" https://github.com/mobile-shell/mosh.git
 
-echo "==> Native configure (to generate config.h)"
-cd "$SRC"
-./autogen.sh
-# We only need config.h; a native configure is fine. Don't fail the whole build
-# if configure is unhappy about optional bits — we just need the header.
-./configure || true
-test -f config.h || { echo "config.h was not generated"; exit 1; }
-cd "$WORK"
+echo "==> Writing minimal config.h (crypto is protobuf-free; no autotools needed)"
+# The crypto TUs #include "config.h". A minimal one with everything HAVE_*
+# undefined makes mosh use its portable code paths (little-endian, manual secure
+# zero, bundled OCB). Add HAVE_* here only if a crypto TU actually demands it.
+cat > "$SRC/config.h" <<'CONFIG_H'
+#ifndef SLOOP_MOSH_MINIMAL_CONFIG_H
+#define SLOOP_MOSH_MINIMAL_CONFIG_H
+#define PACKAGE_STRING  "mosh 1.4.0"
+#define PACKAGE_VERSION "1.4.0"
+#endif
+CONFIG_H
 
 # The self-contained crypto translation units. If mosh's config.h selected an
 # OpenSSL OCB path this list/'-I' set will need adjusting (next CI pass).
