@@ -5,6 +5,14 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-06
 
+- **Mosh step 3, brick 2a: cross-compile protobuf for Apple.** Committed to the
+  full-mosh path. Starting with the dependency that blocks everything —
+  `Scripts/build-protobuf.sh` cross-compiles a mosh-compatible Protocol Buffers
+  runtime (v3.21.12, the last pre-abseil release) for all five Apple arm64 slices
+  into `Vendor/protobuf.xcframework`, reusing the libssh2 CMake + ios-toolchain
+  recipe (runtime only; host protoc used later at mosh build time). New CI job
+  builds + uploads it, `continue-on-error` while brought up. Blind cross-compile;
+  expect fix-up passes. Next: brick 2b builds mosh via autotools consuming this.
 - **Mosh step 3, brick 1 retired — findings captured.** The crypto-only probe
   did its job as a de-risk and was removed (script + CI job). What it proved:
   mosh cross-compiles for Apple with **no external crypto lib** (it has a

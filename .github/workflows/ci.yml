@@ -52,6 +52,24 @@ jobs:
           path: Vendor/libssh2.xcframework
           if-no-files-found: error
 
+  protobuf-xcframework:
+    name: Build protobuf xcframework (experimental · mosh M3)
+    runs-on: macos-14
+    # Brick 2a of Mosh (M3): a blind cross-compile being brought up. Keep
+    # continue-on-error so its failures don't redden main or block app/release
+    # jobs; drop it once protobuf builds reliably.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build protobuf xcframework
+        run: ./Scripts/build-protobuf.sh
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: protobuf-xcframework
+          path: Vendor/protobuf.xcframework
+          if-no-files-found: error
+
   app-build-ssh:
     name: Build app with SSH (iOS · macOS)
     runs-on: macos-15
