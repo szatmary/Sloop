@@ -7,12 +7,12 @@
 # experimental, so its CI job is continue-on-error and must not be able to break
 # the stable SSH build. Once mosh is proven this can be folded into project.ssh.yml.
 #
-# Requires all three xcframeworks present (built by Scripts/build-*.sh or
-# downloaded from CI artifacts):
+# Requires (built by Scripts/build-*.sh or downloaded from CI artifacts):
 #     Vendor/libssh2.xcframework
 #     Vendor/mosh.xcframework
-#     Vendor/protobuf.xcframework
-# Generate with:
+# Note: protobuf is NOT linked separately — build-mosh.sh already merges
+# libprotobuf.a into each slice's libmosh.a, so linking protobuf.xcframework too
+# would produce duplicate protobuf symbols. Generate with:
 #     xcodegen generate --spec project.mosh.yml
 include:
   - project.ssh.yml
@@ -22,8 +22,6 @@ targets:
     dependencies:
       - framework: Vendor/mosh.xcframework
         embed: false
-      - framework: Vendor/protobuf.xcframework
-        embed: false
     settings:
       base:
         SWIFT_OBJC_BRIDGING_HEADER: App/Sloop/SSH/Sloop-Bridging-Header.h
@@ -31,8 +29,6 @@ targets:
   Sloop_macOS:
     dependencies:
       - framework: Vendor/mosh.xcframework
-        embed: false
-      - framework: Vendor/protobuf.xcframework
         embed: false
     settings:
       base:

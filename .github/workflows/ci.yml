@@ -116,7 +116,7 @@ jobs:
   app-build-mosh:
     name: Build app with Mosh (experimental · mosh M3)
     runs-on: macos-15
-    needs: [libssh2-xcframework, protobuf-xcframework, mosh-xcframework]
+    needs: [libssh2-xcframework, mosh-xcframework]
     # The mosh cross-compile is still bringing up; keep this job from blocking
     # main while it stabilizes. The stable app-build-ssh job above does not
     # depend on mosh, so a red here never turns the SSH build red.
@@ -128,11 +128,8 @@ jobs:
         with:
           name: libssh2-xcframework
           path: Vendor/libssh2.xcframework
-      - name: Download protobuf xcframework
-        uses: actions/download-artifact@v4
-        with:
-          name: protobuf-xcframework
-          path: Vendor/protobuf.xcframework
+      # protobuf is baked into mosh.xcframework (build-mosh.sh merges it), so it
+      # is not downloaded or linked separately here.
       - name: Download mosh xcframework
         uses: actions/download-artifact@v4
         with:
