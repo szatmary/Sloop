@@ -52,24 +52,6 @@ jobs:
           path: Vendor/libssh2.xcframework
           if-no-files-found: error
 
-  mosh-crypto-xcframework:
-    name: Build mosh-crypto xcframework (experimental)
-    runs-on: macos-14
-    # Brick 1 of Mosh (M3): a blind cross-compile still being brought up, so its
-    # failures must not turn main red or block the app/release jobs. Drop
-    # continue-on-error once it builds reliably.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build mosh-crypto xcframework
-        run: ./Scripts/build-mosh-crypto.sh
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mosh-crypto-xcframework
-          path: Vendor/mosh-crypto.xcframework
-          if-no-files-found: error
-
   app-build-ssh:
     name: Build app with SSH (iOS · macOS)
     runs-on: macos-15

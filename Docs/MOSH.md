@@ -57,6 +57,39 @@ Mosh-capable host the started `mosh-server` is left to time out while we use SSH
 Datagrams are AES-128-OCB encrypted with the key; the protocol resynchronizes
 screen state after any gap, so roaming and sleep just work.
 
+## Cross-compiling mosh for Apple — findings (step 3)
+
+A crypto-only probe (cross-compile just mosh's OCB into an xcframework, to
+de-risk the toolchain before the full build) taught us the shape of the real
+work, then was retired:
+
+- **mosh clones and builds cleanly**; the source tree is straightforward.
+- **No external crypto library is required on Apple.** mosh 1.4 ships several
+  OCB backends as separate files — `ocb_openssl.cc`, `ocb_nettle.cc`, and the
+  self-contained `ocb_internal.cc` — and its sources include an Apple/CommonCrypto
+  path. So iOS/macOS can use CommonCrypto (in the SDK) with nothing to vendor.
+- **Do not hand-compile mosh files with a stubbed `config.h`.** `ocb_internal.cc`
+  is Krovetz's reference OCB; its portable declarations are gated behind config
+  macros (BPI, feature detection) that mosh's `./configure` sets. Compiling it
+  directly without them fails (`undeclared identifier 'oa'`). The correct path is
+  to let mosh's **autotools** configure the build.
+- **Protobuf is the real dependency hurdle**, not crypto: Homebrew's modern
+  abseil-based protobuf (v35, C++17) fails mosh 1.4's configure probe. The full
+  build needs a mosh-compatible protobuf (e.g. `protobuf@21`, pre-abseil) or a
+  vendored one.
+
+### Revised plan
+
+1. **`mosh.xcframework` via autotools.** Cross-compile mosh for the Apple arm64
+   slices using an iOS CMake/autotools toolchain, the **CommonCrypto** OCB
+   backend (no OpenSSL to vendor), and a mosh-compatible protobuf (host `protoc`
+   + target runtime). This is the big, multi-iteration piece.
+2. **C shim** exposing a minimal client API over mosh's C++ (`network::` +
+   `statesync::` + `terminal::`): open UDP with a `MoshBootstrap`, feed/receive
+   datagrams, pull the current framebuffer, send keystrokes.
+3. **Swift `MoshTransport`** driving the shim, rendering mosh's framebuffer, wired
+   into the `makeMoshTransport` slot already open in `MoshOrSSHTransport`.
+
 ## The client is C++
 
 The Mosh client (`mosh-client`, the `network::` + `terminal::` layers) is C++

@@ -5,7 +5,18 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-06
 
-- **Mosh step 3, brick 1: prove the mosh C++ cross-compiles for Apple.** Licensing
+- **Mosh step 3, brick 1 retired — findings captured.** The crypto-only probe
+  did its job as a de-risk and was removed (script + CI job). What it proved:
+  mosh cross-compiles for Apple with **no external crypto lib** (it has a
+  CommonCrypto path), but individual files must NOT be hand-compiled with a
+  stubbed `config.h` — `ocb_internal.cc` (Krovetz reference OCB) needs macros
+  that mosh's `./configure` sets. And the real dependency hurdle is protobuf
+  (Homebrew's abseil-based v35 is incompatible with mosh 1.4's configure), not
+  crypto. Revised plan in `Docs/MOSH.md`: cross-compile full mosh via autotools
+  with the CommonCrypto backend + a mosh-compatible protobuf → `mosh.xcframework`,
+  then a C shim, then a Swift `MoshTransport`. Main stayed green throughout (the
+  probe was `continue-on-error`).
+- ~~**Mosh step 3, brick 1: prove the mosh C++ cross-compiles for Apple.**~~ Licensing
   is settled (GPLv3 + public corresponding source, see `Docs/LICENSING.md`), so
   M3 is a go. Unlike libssh2, mosh is C++, needs protobuf, and syncs terminal
   *state* — so it lands over several bricks. This first one de-risks the toolchain
