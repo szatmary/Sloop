@@ -32,7 +32,19 @@ mkdir -p "$WORK" "$OUT"
 cd "$WORK"
 
 echo "==> Fetching mosh $MOSH_TAG"
-git clone --depth 1 --branch "$MOSH_TAG" https://github.com/mobile-shell/mosh.git
+# Full clone + checkout (a shallow clone of mosh's annotated tag leaves a bad
+# working tree — "is not a commit").
+git clone https://github.com/mobile-shell/mosh.git
+git -C "$SRC" checkout --quiet "$MOSH_TAG"
+
+echo "==> Locating crypto sources"
+CRYPTO_DIR="$(dirname "$(find "$SRC" -name ocb.cc -path '*crypto*' | head -1)")"
+test -n "$CRYPTO_DIR" && test -d "$CRYPTO_DIR" || { echo "could not find mosh crypto sources"; find "$SRC" -name '*.cc' | head -50; exit 1; }
+echo "    crypto dir: $CRYPTO_DIR"
+SRC_ROOT="$(dirname "$CRYPTO_DIR")"           # .../src
+mapfile -t CRYPTO_TUS < <(find "$CRYPTO_DIR" -maxdepth 1 -name '*.cc')
+echo "    crypto TUs: ${CRYPTO_TUS[*]}"
+INCLUDES=(-I "$SRC" -I "$CRYPTO_DIR" -I "$SRC_ROOT" -I "$SRC_ROOT/util" -I "$SRC_ROOT/include")
 
 echo "==> Writing minimal config.h (crypto is protobuf-free; no autotools needed)"
 # The crypto TUs #include "config.h". A minimal one with everything HAVE_*
@@ -45,17 +57,6 @@ cat > "$SRC/config.h" <<'CONFIG_H'
 #define PACKAGE_VERSION "1.4.0"
 #endif
 CONFIG_H
-
-# The self-contained crypto translation units. If mosh's config.h selected an
-# OpenSSL OCB path this list/'-I' set will need adjusting (next CI pass).
-CRYPTO_TUS=(
-  "src/crypto/aes.cc"
-  "src/crypto/ocb.cc"
-  "src/crypto/crypto.cc"
-  "src/crypto/base64.cc"
-)
-INCLUDES=(-I "$SRC" -I "$SRC/src/crypto" -I "$SRC/src/util" -I "$SRC/src/include")
-
 build_slice () {
   local name="$1" sdk="$2" min_flag="$3"
   echo "==> Building slice: $name (sdk $sdk)"
@@ -65,17 +66,17 @@ build_slice () {
   obj_dir="$WORK/obj/$name"
   mkdir -p "$obj_dir" "$OUT/$name/include"
 
-  for tu in "${CRYPTO_TUS[@]}"; do
+  for tu in "${CRYPTO_TUS[@]}"; do   # absolute paths from find
     local base
     base="$(basename "$tu" .cc)"
     "$clangxx" -c -std=c++17 -arch arm64 -isysroot "$sysroot" "$min_flag" \
-      "${INCLUDES[@]}" "$SRC/$tu" -o "$obj_dir/$base.o"
+      "${INCLUDES[@]}" "$tu" -o "$obj_dir/$base.o"
   done
 
   ar rcs "$OUT/$name/libmoshcrypto.a" "$obj_dir"/*.o
 
   # Ship the crypto headers (C++), for the C-shim brick that comes next.
-  cp "$SRC/src/crypto/crypto.h" "$SRC/src/crypto/ae.h" "$OUT/$name/include/" 2>/dev/null || true
+  cp "$CRYPTO_DIR/crypto.h" "$CRYPTO_DIR/ae.h" "$OUT/$name/include/" 2>/dev/null || true
 }
 
 build_slice "ios-arm64"       "iphoneos"           "-mios-version-min=$IOS_TARGET"
