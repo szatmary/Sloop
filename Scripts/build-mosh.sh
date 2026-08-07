@@ -102,6 +102,14 @@ build_slice () {
   done
   rm -f "$cfg.bak"
 
+  # mosh's Display (terminaldisplay*.cc) is the local terminfo renderer and the
+  # only thing that needs curses. Sloop renders mosh's framebuffer via SwiftTerm
+  # and never constructs a Display, so stub these out (empty TUs) instead of
+  # cross-compiling ncurses for iOS. The rest of the terminal lib
+  # (Framebuffer/Emulator/Parser, needed by statesync) is untouched.
+  : > "$bdir/src/terminal/terminaldisplay.cc"
+  : > "$bdir/src/terminal/terminaldisplayinit.cc"
+
   # Build the convenience libraries only (the frontend binaries won't link for
   # iOS; that's fine — we just want the .a's). Keep going past a failed binary.
   make -C "$bdir/src" -j"$(sysctl -n hw.ncpu)" || echo "    (make returned nonzero — expected if the frontend link failed; checking libs)"
