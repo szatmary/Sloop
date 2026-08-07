@@ -135,12 +135,22 @@ build_slice "ios-arm64"      "iphoneos"        "-mios-version-min=$IOS_TARGET"  
 build_slice "ios-sim-arm64"  "iphonesimulator" "-mios-simulator-version-min=$IOS_TARGET"  "arm-apple-darwin" "ios-arm64-simulator"
 build_slice "macos-arm64"    "macosx"          "-mmacosx-version-min=$MACOS_TARGET"       "arm-apple-darwin" "macos-arm64"
 
+echo "==> Staging mosh headers (flat — mosh uses same-dir includes)"
+# The C shim compiles against mosh's C++ API, so ship its headers. Stage them
+# flat (all .h + generated .pb.h in one dir) so mosh's own "same-dir" includes
+# resolve with a single header search path. Source is identical across slices,
+# so collect once from the ios-arm64 build.
+HDRS="$WORK/headers"
+rm -rf "$HDRS"; mkdir -p "$HDRS"
+find "$WORK/build/mosh-ios-arm64/src" \( -name '*.h' -o -name '*.hpp' \) -exec cp {} "$HDRS/" \;
+echo "    staged $(ls "$HDRS" | wc -l | tr -d ' ') headers"
+
 echo "==> Assembling mosh.xcframework"
 rm -rf "$ROOT/Vendor/mosh.xcframework"
 xcodebuild -create-xcframework \
-  -library "$OUT/ios-arm64/libmosh.a" \
-  -library "$OUT/ios-sim-arm64/libmosh.a" \
-  -library "$OUT/macos-arm64/libmosh.a" \
+  -library "$OUT/ios-arm64/libmosh.a"     -headers "$HDRS" \
+  -library "$OUT/ios-sim-arm64/libmosh.a" -headers "$HDRS" \
+  -library "$OUT/macos-arm64/libmosh.a"   -headers "$HDRS" \
   -output "$ROOT/Vendor/mosh.xcframework"
 
-echo "==> Done: Vendor/mosh.xcframework"
+echo "==> Done: Vendor/mosh.xcframework (with headers)"
