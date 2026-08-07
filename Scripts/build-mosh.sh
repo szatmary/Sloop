@@ -92,6 +92,16 @@ build_slice () {
       TINFO_LIBS=" " \
       --disable-silent-rules ) || { echo "configure failed; tail of config.log:"; tail -60 "$bdir/config.log" || true; exit 1; }
 
+  # The iOS SDK has no curses/terminfo (configure mis-detected it on the host).
+  # Disable those defines so mosh's terminal takes its non-curses path — Sloop
+  # renders mosh's framebuffer via SwiftTerm, so mosh's local terminfo Display
+  # isn't needed.
+  local cfg="$bdir/src/include/config.h"
+  for m in HAVE_CURSES_H HAVE_NCURSES_H HAVE_NCURSESW_CURSES_H HAVE_NCURSES_CURSES_H HAVE_TERM_H HAVE_NCURSES_TERM_H HAVE_TERMIO_H; do
+    sed -i.bak "s|#define $m 1|/* $m disabled for iOS */|" "$cfg"
+  done
+  rm -f "$cfg.bak"
+
   # Build the convenience libraries only (the frontend binaries won't link for
   # iOS; that's fine — we just want the .a's). Keep going past a failed binary.
   make -C "$bdir/src" -j"$(sysctl -n hw.ncpu)" || echo "    (make returned nonzero — expected if the frontend link failed; checking libs)"
@@ -100,7 +110,10 @@ build_slice () {
   find "$bdir/src" -name '*.a'
   local libs
   libs=$(find "$bdir/src" -name 'libmosh*.a')
-  test -n "$libs" || { echo "no libmosh*.a produced"; exit 1; }
+  # Require the client-critical libraries — a partial build must report red.
+  for need in libmoshcrypto libmoshnetwork libmoshstatesync libmoshterminal libmoshprotos libmoshutil; do
+    find "$bdir/src" -name "$need.a" | grep -q . || { echo "MISSING $need.a — build incomplete"; exit 1; }
+  done
 
   mkdir -p "$OUT/$name/include"
   # shellcheck disable=SC2086
