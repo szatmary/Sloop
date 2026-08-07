@@ -5,6 +5,18 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-06
 
+- **Mosh step 3, brick 1: prove the mosh C++ cross-compiles for Apple.** Licensing
+  is settled (GPLv3 + public corresponding source, see `Docs/LICENSING.md`), so
+  M3 is a go. Unlike libssh2, mosh is C++, needs protobuf, and syncs terminal
+  *state* — so it lands over several bricks. This first one de-risks the toolchain
+  cheaply: `Scripts/build-mosh-crypto.sh` clones mosh 1.4.0, runs its `configure`
+  natively only to generate `config.h`, then cross-compiles the self-contained
+  crypto (AES + OCB — the AEAD on every SSP datagram) for all five Apple arm64
+  slices into `Vendor/mosh-crypto.xcframework`. New CI job builds + uploads it,
+  marked `continue-on-error` while the blind cross-compile is brought up (so its
+  failures don't redden main). Next bricks: full mosh + protobuf → xcframework, a
+  C shim client API, then a Swift `MoshTransport` feeding the `makeMoshTransport`
+  slot already left open in `MoshOrSSHTransport`.
 - **Tabs step 1: `OpenSessions` model (SloopKit).** First slice of multiple
   concurrent sessions / tabs, fully unit-tested without a Mac. A pure value type
   holding the open `TerminalSession`s + the active one, with open/select/close
