@@ -84,7 +84,7 @@ build_slice () {
       CFLAGS="-arch arm64 -isysroot $sysroot $min_flag" \
       CXXFLAGS="-arch arm64 -isysroot $sysroot $min_flag -std=c++17 -I$pbinc" \
       LDFLAGS="-arch arm64 -isysroot $sysroot $min_flag -L$pbslice" \
-      PROTOBUF_CFLAGS="-I$pbinc" PROTOBUF_LIBS="-L$pbslice -lprotobuf" \
+      protobuf_CFLAGS="-I$pbinc" protobuf_LIBS="-L$pbslice -lprotobuf" \
       TINFO_LIBS=" " \
       --disable-silent-rules ) || { echo "configure failed; tail of config.log:"; tail -60 "$bdir/config.log" || true; exit 1; }
 
