@@ -34,6 +34,13 @@ rm -rf "$WORK"
 mkdir -p "$WORK" "$OUT"
 cd "$WORK"
 
+echo "==> Installing autotools (mosh uses autoconf/automake/libtool)"
+for pkg in autoconf automake libtool pkg-config; do
+  brew list "$pkg" >/dev/null 2>&1 || brew install "$pkg"
+done
+# mosh's autogen calls libtoolize; on macOS Homebrew names it glibtoolize.
+export LIBTOOLIZE=glibtoolize
+
 echo "==> Fetching sources"
 git clone --depth 1 https://github.com/leetal/ios-cmake.git
 git clone --depth 1 --branch "$PROTOBUF_TAG" https://github.com/protocolbuffers/protobuf.git
