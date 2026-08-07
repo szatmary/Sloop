@@ -46,6 +46,10 @@ git clone --depth 1 https://github.com/leetal/ios-cmake.git
 git clone --depth 1 --branch "$PROTOBUF_TAG" https://github.com/protocolbuffers/protobuf.git
 git clone https://github.com/mobile-shell/mosh.git
 git -C mosh checkout --quiet "$MOSH_TAG"
+# mosh's src/include/Makefile builds version.h from a top-level VERSION file
+# (shipped in the dist tarball / created by git-describe). A plain tag checkout
+# lacks it, so provide it.
+echo "mosh ${MOSH_TAG#mosh-}" > mosh/VERSION
 
 echo "==> Building HOST protoc (native, protobuf $PROTOBUF_TAG)"
 PB_CMAKE_SRC="protobuf/cmake"; test -f "$PB_CMAKE_SRC/CMakeLists.txt" || PB_CMAKE_SRC="protobuf"
