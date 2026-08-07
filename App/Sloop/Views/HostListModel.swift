@@ -65,6 +65,16 @@ final class HostListModel: ObservableObject {
 
         return TerminalSession(title: host.alias) {
             guard host.useMosh else { return makeSSH() }
+            // The real Mosh UDP/SSP transport is only built into the Mosh variant
+            // (project.mosh.yml, which defines SLOOP_MOSH); elsewhere
+            // `makeMoshTransport` stays nil and the composite transport falls back
+            // to SSH after probing.
+            var makeMosh: ((MoshBootstrap) -> Transport)? = nil
+            #if SLOOP_MOSH
+            makeMosh = { bootstrap in
+                MoshTransport(host: host.hostname, bootstrap: bootstrap)
+            }
+            #endif
             return MoshOrSSHTransport(
                 useMosh: true,
                 makeCommandRunner: {
@@ -73,8 +83,8 @@ final class HostListModel: ObservableObject {
                                              knownHosts: knownHosts,
                                              hostKeyVerifier: HostKeyPrompter.shared)
                 },
-                makeSSHTransport: makeSSH)
-            // makeMoshTransport: supplied once the Mosh UDP/SSP transport lands.
+                makeSSHTransport: makeSSH,
+                makeMoshTransport: makeMosh)
         }
     }
 }

@@ -3,6 +3,35 @@
 Running on branch `claude/ios-terminal-app-uwmzf3` via a 10-minute `/loop`
 while the maintainer is away. Newest entries first.
 
+## 2026-08-07
+
+- **Mosh step 3, brick 2c+2d: the C++ bridge and Swift transport are written.**
+  Read mosh's real headers (`networktransport.h`, `user.h`, `completeterminal.h`,
+  `terminalframebuffer.h`, `crypto.h`, `parseraction.h`) and built the shim
+  against the actual API instead of guessing:
+  - `App/Sloop/SSH/MoshBridge.{h,mm}` — an Objective-C++ bridge owning a
+    `Network::Transport<UserStream, Complete>` on a dedicated thread. It mirrors
+    upstream `stmclient`'s main loop (drain queued user events → `tick()` →
+    `select()` on `network.fds()` + a self-pipe → `recv()` → render). Rendering
+    reuses mosh's **own** `Display::new_frame` to diff the server framebuffer to
+    ANSI for SwiftTerm. Exposes a plain-C API (create/set_callbacks/start/send/
+    resize/close/destroy). Gated with `#if __has_include("networktransport.h")`
+    so the non-mosh build compiles it to nothing.
+  - **Build-script fix:** the previous brick stubbed out *both* Display TUs.
+    Wrong — `terminaldisplay.cc` (which has `new_frame`) has no curses
+    dependency and `Terminal::Complete` embeds a `Display`. Now `build-mosh.sh`
+    keeps `terminaldisplay.cc` and replaces only `terminaldisplayinit.cc` (the
+    lone curses user) with a curses-free `Display::Display(bool)` stub. No
+    ncurses needed anywhere.
+  - `App/Sloop/SSH/MoshTransport.swift` — a `Transport` driving the shim via a
+    retained-context trampoline pair; wired into the `makeMoshTransport` slot in
+    `HostListModel`. Gated on a new `SLOOP_MOSH` flag.
+  - **New `project.mosh.yml`** (layers mosh + protobuf xcframeworks + the
+    bridging header + `SLOOP_MOSH` onto `project.ssh.yml`) and a new
+    `app-build-mosh` CI job (`continue-on-error`). Kept separate from the stable
+    `app-build-ssh` on purpose: the experimental mosh cross-compile can never
+    turn the SSH build red.
+
 ## 2026-08-06
 
 - **Mosh step 3, brick 2b: mosh.xcframework via autotools cross-compile.** The

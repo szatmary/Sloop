@@ -102,13 +102,36 @@ build_slice () {
   done
   rm -f "$cfg.bak"
 
-  # mosh's Display (terminaldisplay*.cc) is the local terminfo renderer and the
-  # only thing that needs curses. Sloop renders mosh's framebuffer via SwiftTerm
-  # and never constructs a Display, so stub these out (empty TUs) instead of
-  # cross-compiling ncurses for iOS. The rest of the terminal lib
-  # (Framebuffer/Emulator/Parser, needed by statesync) is untouched.
-  : > "$bdir/src/terminal/terminaldisplay.cc"
-  : > "$bdir/src/terminal/terminaldisplayinit.cc"
+  # Curses/terminfo only enters through terminaldisplayinit.cc, which holds the
+  # single function `Display::Display(bool use_environment)` — deliberately kept
+  # in its own TU by upstream "because otherwise the ncurses #defines alias our
+  # own variable names." Everything else in terminaldisplay.cc (notably
+  # `Display::new_frame`, the Framebuffer→ANSI renderer) has NO curses
+  # dependency. Sloop's Mosh bridge reuses `new_frame` to render the remote
+  # framebuffer into SwiftTerm, and `Terminal::Complete` embeds a `Display`, so
+  # both files must stay linkable.
+  #
+  # So: keep terminaldisplay.cc verbatim, and replace ONLY the init TU with a
+  # curses-free constructor. iOS has no terminfo database anyway, and Sloop
+  # always constructs `Display(false)`, so the terminfo probing the real
+  # constructor does under `use_environment` is dead code here — the stub just
+  # sets the same conservative capability defaults the real ctor starts from.
+  cat > "$bdir/src/terminal/terminaldisplayinit.cc" <<'EOF'
+/* Sloop: curses-free replacement for mosh's Display constructor.
+   The upstream constructor probes terminfo when use_environment is true; iOS
+   has no terminfo and Sloop always passes false, so we skip curses entirely and
+   keep the conservative capability defaults (ECH/BCE/title on, no alt-screen).
+   The rest of Display (new_frame etc.) is compiled from terminaldisplay.cc. */
+#include "terminaldisplay.h"
+
+using namespace Terminal;
+
+Display::Display( bool use_environment )
+  : has_ech( true ), has_bce( true ), has_title( true ), smcup( NULL ), rmcup( NULL )
+{
+  (void)use_environment;
+}
+EOF
 
   # Build the convenience libraries only (the frontend binaries won't link for
   # iOS; that's fine — we just want the .a's). Keep going past a failed binary.

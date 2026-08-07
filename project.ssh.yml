@@ -7,6 +7,9 @@
 #
 # The base project.yml (no SSH) is included and each app target gains the
 # framework dependency; everything else is inherited.
+#
+# Mosh is layered on top of THIS spec by project.mosh.yml — kept separate so the
+# stable SSH build never depends on the experimental mosh cross-compile.
 include:
   - project.yml
 

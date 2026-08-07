@@ -1,0 +1,40 @@
+# Mosh-enabled variant of the project. Layers the mosh + protobuf xcframeworks
+# and the Objective-C bridging header onto the SSH project, so MoshBridge.mm
+# links against mosh's C++ client core and MoshTransport.swift (gated on the
+# SLOOP_MOSH flag defined here) drives it.
+#
+# Kept separate from project.ssh.yml on purpose: the mosh cross-compile is still
+# experimental, so its CI job is continue-on-error and must not be able to break
+# the stable SSH build. Once mosh is proven this can be folded into project.ssh.yml.
+#
+# Requires all three xcframeworks present (built by Scripts/build-*.sh or
+# downloaded from CI artifacts):
+#     Vendor/libssh2.xcframework
+#     Vendor/mosh.xcframework
+#     Vendor/protobuf.xcframework
+# Generate with:
+#     xcodegen generate --spec project.mosh.yml
+include:
+  - project.ssh.yml
+
+targets:
+  Sloop_iOS:
+    dependencies:
+      - framework: Vendor/mosh.xcframework
+        embed: false
+      - framework: Vendor/protobuf.xcframework
+        embed: false
+    settings:
+      base:
+        SWIFT_OBJC_BRIDGING_HEADER: App/Sloop/SSH/Sloop-Bridging-Header.h
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_MOSH
+  Sloop_macOS:
+    dependencies:
+      - framework: Vendor/mosh.xcframework
+        embed: false
+      - framework: Vendor/protobuf.xcframework
+        embed: false
+    settings:
+      base:
+        SWIFT_OBJC_BRIDGING_HEADER: App/Sloop/SSH/Sloop-Bridging-Header.h
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_MOSH

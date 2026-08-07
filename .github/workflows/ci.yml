@@ -113,6 +113,40 @@ jobs:
       - name: Build macOS
         run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -sdk macosx CODE_SIGNING_ALLOWED=NO -quiet
 
+  app-build-mosh:
+    name: Build app with Mosh (experimental · mosh M3)
+    runs-on: macos-15
+    needs: [libssh2-xcframework, protobuf-xcframework, mosh-xcframework]
+    # The mosh cross-compile is still bringing up; keep this job from blocking
+    # main while it stabilizes. The stable app-build-ssh job above does not
+    # depend on mosh, so a red here never turns the SSH build red.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download libssh2 xcframework
+        uses: actions/download-artifact@v4
+        with:
+          name: libssh2-xcframework
+          path: Vendor/libssh2.xcframework
+      - name: Download protobuf xcframework
+        uses: actions/download-artifact@v4
+        with:
+          name: protobuf-xcframework
+          path: Vendor/protobuf.xcframework
+      - name: Download mosh xcframework
+        uses: actions/download-artifact@v4
+        with:
+          name: mosh-xcframework
+          path: Vendor/mosh.xcframework
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project (Mosh)
+        run: xcodegen generate --spec project.mosh.yml
+      - name: Build iOS
+        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_iOS -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO -quiet
+      - name: Build macOS
+        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -sdk macosx CODE_SIGNING_ALLOWED=NO -quiet
+
   mac-release:
     name: Release build (macOS app + GitHub Release)
     runs-on: macos-15
