@@ -91,7 +91,7 @@ jobs:
         with:
           name: mosh-xcframework
           path: Vendor/mosh.xcframework
-          if-no-files-found: warn
+          if-no-files-found: error
 
   app-build-ssh:
     name: Build app with SSH (iOS · macOS)

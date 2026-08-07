@@ -16,6 +16,7 @@ set -euo pipefail
 MOSH_TAG="mosh-1.4.0"
 PROTOBUF_TAG="v21.12"
 IOS_TARGET="17.0"
+MACOS_TARGET="14.0"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$ROOT/.native-mosh"
@@ -67,7 +68,6 @@ echo "    host protoc: $($PROTOC --version)"
 echo "==> autogen mosh"
 ( cd mosh && ./autogen.sh )
 
-# Build a single slice for now.
 build_slice () {
   local name="$1" sdk="$2" min_flag="$3" triple="$4" pb_dir="$5"
   echo "==> Slice $name (sdk $sdk, triple $triple)"
@@ -129,6 +129,18 @@ build_slice () {
   echo "==> merged: $OUT/$name/libmosh.a"
 }
 
-build_slice "ios-arm64" "iphoneos" "-mios-version-min=$IOS_TARGET" "arm-apple-darwin" "ios-arm64"
+# The app targets iOS (device + simulator) and macOS; tvOS was dropped, so skip
+# it. pb_dir names match the slice identifiers in protobuf.xcframework.
+build_slice "ios-arm64"      "iphoneos"        "-mios-version-min=$IOS_TARGET"            "arm-apple-darwin" "ios-arm64"
+build_slice "ios-sim-arm64"  "iphonesimulator" "-mios-simulator-version-min=$IOS_TARGET"  "arm-apple-darwin" "ios-arm64-simulator"
+build_slice "macos-arm64"    "macosx"          "-mmacosx-version-min=$MACOS_TARGET"       "arm-apple-darwin" "macos-arm64"
 
-echo "==> (single-slice bring-up) libmosh.a built for ios-arm64; xcframework assembly added once all slices compile."
+echo "==> Assembling mosh.xcframework"
+rm -rf "$ROOT/Vendor/mosh.xcframework"
+xcodebuild -create-xcframework \
+  -library "$OUT/ios-arm64/libmosh.a" \
+  -library "$OUT/ios-sim-arm64/libmosh.a" \
+  -library "$OUT/macos-arm64/libmosh.a" \
+  -output "$ROOT/Vendor/mosh.xcframework"
+
+echo "==> Done: Vendor/mosh.xcframework"

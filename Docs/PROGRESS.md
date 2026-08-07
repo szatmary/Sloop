@@ -5,6 +5,19 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-06
 
+- **Mosh step 3, brick 2b: mosh.xcframework via autotools cross-compile.** The
+  hard part is done — mosh's full C++ client library set cross-compiles for
+  Apple. `Scripts/build-mosh.sh` builds a host protoc, then per slice cross-
+  configures mosh (host triple + clang flags + the slice's target libprotobuf
+  from brick 2a) and makes the noinst libraries. Configure lands on the ideal
+  crypto path (internal OCB + **Apple CommonCrypto** — no OpenSSL). Fixes found
+  along the way: install autotools; write a top-level VERSION file; pass
+  `protobuf_CFLAGS/_LIBS` (lowercase); stub mosh's `Display` (terminaldisplay*.cc,
+  the only curses/terminfo user — Sloop renders the framebuffer via SwiftTerm).
+  All six client-critical libs (crypto/network/statesync/terminal/protos/util)
+  build; fanned out to ios-arm64 / ios-sim-arm64 / macos-arm64 and assembled into
+  `Vendor/mosh.xcframework`. Next: brick 2c, a C shim exposing a client API over
+  mosh's C++, then brick 2d the Swift `MoshTransport`.
 - **Mosh step 3, brick 2a: cross-compile protobuf for Apple.** Committed to the
   full-mosh path. Starting with the dependency that blocks everything —
   `Scripts/build-protobuf.sh` cross-compiles a mosh-compatible Protocol Buffers
