@@ -46,11 +46,14 @@ mode (`[sloop] mosh: … — using SSH`). `HostListModel.connect` builds one whe
 `host.useMosh` is set. The branching is unit-tested with mock transports + a mock
 command runner.
 
-**Still to build:** the actual `MoshTransport` UDP/SSP session below. Until it
-exists, `MoshOrSSHTransport` is constructed with no Mosh-transport factory, so it
-always falls back to SSH — but the probe/branch/notice path is real and tested.
-(Cost until then: probing opens a short extra SSH exec connection, and on a
-Mosh-capable host the started `mosh-server` is left to time out while we use SSH.)
+**Status:** the `MoshTransport` UDP/SSP session (below) is now built in the Mosh
+variant — `HostListModel` supplies a real Mosh-transport factory there, so a
+Mosh-capable host gets a genuine Mosh session instead of the SSH fallback. In the
+plain SSH build (no `SLOOP_MOSH`) the factory stays nil and `MoshOrSSHTransport`
+still falls back to SSH after the probe, as before. The probe/branch/notice path
+is real and unit-tested either way. (Fallback cost: probing opens a short extra
+SSH exec connection; on a Mosh-capable host with no Mosh transport wired, the
+started `mosh-server` is left to time out while we use SSH.)
 
 ### SSP details
 
@@ -80,36 +83,42 @@ work, then was retired:
 
 ### Revised plan
 
-1. **`mosh.xcframework` via autotools.** Cross-compile mosh for the Apple arm64
-   slices using an iOS CMake/autotools toolchain, the **CommonCrypto** OCB
-   backend (no OpenSSL to vendor), and a mosh-compatible protobuf (host `protoc`
-   + target runtime). This is the big, multi-iteration piece.
-2. **C shim** exposing a minimal client API over mosh's C++ (`network::` +
-   `statesync::` + `terminal::`): open UDP with a `MoshBootstrap`, feed/receive
-   datagrams, pull the current framebuffer, send keystrokes.
-3. **Swift `MoshTransport`** driving the shim, rendering mosh's framebuffer, wired
-   into the `makeMoshTransport` slot already open in `MoshOrSSHTransport`.
+1. **`mosh.xcframework` via autotools.** ✅ Done — `Scripts/build-mosh.sh` cross-
+   compiles mosh's full client library set for the Apple arm64 slices using an
+   iOS CMake/autotools toolchain, mosh's **internal OCB + Apple CommonCrypto**
+   AES backend (no OpenSSL to vendor), and a mosh-compatible protobuf (host
+   `protoc` + target runtime, merged into `libmosh.a`). Ships headers flat.
+2. **C shim** ✅ Written — `App/Sloop/SSH/MoshBridge.{h,mm}`, an Objective-C++
+   bridge owning a `Network::Transport<UserStream, Complete>` on a dedicated
+   thread. It mirrors upstream `stmclient`'s main loop (drain queued user events
+   → `tick()` → `select()` on `network.fds()` + a self-pipe → `recv()` →
+   render) and reuses mosh's own `Display::new_frame` to diff the server
+   framebuffer to ANSI. Exposes a plain-C API. The only curses user
+   (`terminaldisplayinit.cc`) is replaced with a curses-free `Display`
+   constructor stub, so no ncurses is vendored.
+3. **Swift `MoshTransport`** ✅ Written — `App/Sloop/SSH/MoshTransport.swift`
+   drives the shim, forwards its framebuffer bytes to SwiftTerm, and is wired
+   into the `makeMoshTransport` slot in `MoshOrSSHTransport`/`HostListModel`.
+
+Bricks 2–3 build only in the **Mosh variant** (`project.mosh.yml`, which layers
+`mosh.xcframework` + the bridging header + the `SLOOP_MOSH` flag onto
+`project.ssh.yml`) and are exercised by the `continue-on-error` `app-build-mosh`
+CI job — kept separate so the experimental cross-compile can never redden the
+stable SSH build.
 
 ## The client is C++
 
-The Mosh client (`mosh-client`, the `network::` + `terminal::` layers) is C++
-and depends on Protocol Buffers. To use it on Apple platforms:
+The Mosh client (the `network::` + `statesync::` + `terminal::` layers) is C++
+and depends on Protocol Buffers, which is why the bridge is Objective-C++ and
+`mosh.xcframework` bundles a merged `libmosh.a` (all client libs + protobuf) for
+`ios-arm64`, the iOS simulator, and `macos-arm64`. Sloop links the whole client
+rather than porting a subset: reusing `Terminal::Complete` + `Display::new_frame`
+means mosh itself parses the SSP stream and renders the framebuffer to ANSI, so
+SwiftTerm just displays bytes and there's no re-implementation to keep in sync.
 
-- Cross-compile it (and protobuf) for `ios-arm64`, the simulator, `macos-arm64`,
-  and `tvos-arm64`; package as `Vendor/mosh.xcframework`.
-- Or port just the SSP transport (`network/network.cc`, `crypto/`, the OCB and
-  transport-fragment code) to a focused static lib — smaller surface, no
-  terminal layer needed since SwiftTerm already renders.
-
-Then implement `MoshTransport: Transport`:
-
-- `start()` — assume the caller already has a `MoshBootstrap` (from the SSH
-  bootstrap step). Open UDP, hand the key to the SSP layer, begin the
-  send/receive loop.
-- `send` / `onData` — feed keystrokes into SSP; deliver diffs as bytes to the
-  terminal.
-- Reconnect transparently when the network path changes (`NWPathMonitor`) or the
-  app returns from suspension.
+**Still open (follow-ups):** transparent reconnect when the network path changes
+(`NWPathMonitor`) or the app resumes from suspension — mosh's roaming is built
+for exactly this, but Sloop doesn't yet re-arm the socket across those events.
 
 ## Licensing note
 
