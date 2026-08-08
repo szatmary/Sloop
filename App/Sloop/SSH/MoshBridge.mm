@@ -304,6 +304,15 @@ void mosh_session_resize(MoshSession *session, int cols, int rows) {
   session->wake();
 }
 
+void mosh_session_network_changed(MoshSession *session) {
+  if (!session) return;
+  // Waking the loop makes it tick() on the next iteration, which sends an
+  // immediate packet from whatever interface the kernel now routes through.
+  // The wait_time() cap already bounds this to ~1s, but on a path change we
+  // want the server to re-home to the new peer address right away.
+  session->wake();
+}
+
 void mosh_session_close(MoshSession *session) {
   if (!session) return;
   {

@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import SloopKit
 
 // Only the Mosh-enabled build (project.mosh.yml) links mosh.xcframework and sets
@@ -33,6 +34,19 @@ final class MoshTransport: Transport {
     private var cols: Int = 80
     private var rows: Int = 24
     private var closed = false
+    /// Guards `session`/`closed`. Held for the duration of each C call so the
+    /// session can't be destroyed out from under an in-flight send/resize/nudge
+    /// (the path monitor and the close callback run on other threads).
+    private let lock = NSLock()
+
+    /// Watches for network path changes (Wi-Fi↔cellular, app resume) so we can
+    /// nudge Mosh to re-send from the new interface. Mosh's SSP handles the
+    /// actual roaming; this just cuts first-packet latency after a change.
+    private let pathMonitor = NWPathMonitor()
+    private let pathQueue = DispatchQueue(label: "org.szatmary.sloop.mosh.path")
+    /// Set once the first path update has been seen, so the initial callback
+    /// (which fires right after start) isn't treated as a "change".
+    private var sawInitialPath = false
 
     /// - Parameters:
     ///   - host: the hostname/IP the SSH connection reached (mosh reuses it for UDP).
@@ -56,15 +70,30 @@ final class MoshTransport: Transport {
         let ctx = Unmanaged.passRetained(self).toOpaque()
         mosh_session_set_callbacks(s, moshOutputTrampoline, moshCloseTrampoline, ctx)
         mosh_session_start(s)
+
+        // Nudge Mosh whenever the network path changes so it re-homes to the new
+        // interface promptly. The first update fires right after starting and is
+        // the baseline, not a change, so skip it.
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            guard let self else { return }
+            // The first update fires right after start — that's the baseline,
+            // not a change. (sawInitialPath is only touched on pathQueue.)
+            guard self.sawInitialPath else { self.sawInitialPath = true; return }
+            guard path.status == .satisfied else { return }
+            self.withLiveSession { mosh_session_network_changed($0) }
+        }
+        pathMonitor.start(queue: pathQueue)
+
         onOpen?()
     }
 
     func send(_ bytes: ArraySlice<UInt8>) {
-        guard let s = session else { return }
         let arr = Array(bytes)
-        arr.withUnsafeBufferPointer { buf in
-            buf.baseAddress?.withMemoryRebound(to: CChar.self, capacity: buf.count) { p in
-                mosh_session_send(s, p, buf.count)
+        withLiveSession { s in
+            arr.withUnsafeBufferPointer { buf in
+                buf.baseAddress?.withMemoryRebound(to: CChar.self, capacity: buf.count) { p in
+                    mosh_session_send(s, p, buf.count)
+                }
             }
         }
     }
@@ -72,14 +101,20 @@ final class MoshTransport: Transport {
     func resize(cols: Int, rows: Int) {
         self.cols = cols
         self.rows = rows
-        if let s = session {
-            mosh_session_resize(s, Int32(cols), Int32(rows))
-        }
+        withLiveSession { mosh_session_resize($0, Int32(cols), Int32(rows)) }
     }
 
     func close() {
-        guard let s = session else { return }
-        mosh_session_close(s)
+        withLiveSession { mosh_session_close($0) }
+    }
+
+    /// Run `body` with the live session pointer while holding `lock`, so it
+    /// can't be destroyed mid-call. No-op once the session has closed.
+    private func withLiveSession(_ body: (OpaquePointer) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !closed, let s = session else { return }
+        body(s)
     }
 
     // MARK: Callbacks from the bridge (network thread)
@@ -92,14 +127,22 @@ final class MoshTransport: Transport {
     }
 
     fileprivate func handleClose(_ reason: String?) {
-        guard !closed else { return }
-        closed = true
-        let error = reason.map { MoshTransportError.session($0) }
-        onClose?(error)
-        // Tear down the bridge (joins the net thread) now that it has ended.
-        if let s = session {
-            session = nil
-            mosh_session_destroy(s)
+        let s: OpaquePointer?
+        lock.lock()
+        if closed { lock.unlock(); return }
+        closed = true          // barrier: after this, no new C call starts
+        s = session
+        session = nil
+        lock.unlock()
+
+        pathMonitor.cancel()
+        onClose?(reason.map { MoshTransportError.session($0) })
+        if let s {
+            // Destroy off the net thread: mosh_session_destroy joins the loop
+            // thread, and handleClose runs *on* that thread (via the close
+            // callback), so joining inline would deadlock. `closed` is already
+            // published, so no send/resize/nudge will touch the session again.
+            DispatchQueue.global().async { mosh_session_destroy(s) }
         }
     }
 }

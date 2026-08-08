@@ -50,6 +50,13 @@ void mosh_session_send(MoshSession *session, const char *bytes, size_t len);
 /// Queue a terminal resize. Thread-safe; wakes the loop.
 void mosh_session_resize(MoshSession *session, int cols, int rows);
 
+/// Nudge the loop to send immediately — call when the network path changes
+/// (Wi-Fi↔cellular, app resume) so Mosh re-sends from the new interface without
+/// waiting out its timer. Mosh's SSP roams intrinsically (the server adopts the
+/// new peer address from incoming datagrams); this just cuts the latency of the
+/// first post-change packet. Thread-safe; wakes the loop.
+void mosh_session_network_changed(MoshSession *session);
+
 /// Request a graceful shutdown. The close callback fires when it completes.
 /// Thread-safe; wakes the loop.
 void mosh_session_close(MoshSession *session);
