@@ -53,12 +53,10 @@ jobs:
           if-no-files-found: error
 
   protobuf-xcframework:
-    name: Build protobuf xcframework (experimental · mosh M3)
+    name: Build protobuf xcframework (mosh)
     runs-on: macos-14
-    # Brick 2a of Mosh (M3): a blind cross-compile being brought up. Keep
-    # continue-on-error so its failures don't redden main or block app/release
-    # jobs; drop it once protobuf builds reliably.
-    continue-on-error: true
+    # Brick 2a of Mosh: cross-compile protobuf 3.21 (runtime) for the Apple
+    # slices; feeds the mosh xcframework. Green and reliable, so it gates.
     steps:
       - uses: actions/checkout@v4
       - name: Build protobuf xcframework
@@ -71,12 +69,11 @@ jobs:
           if-no-files-found: error
 
   mosh-xcframework:
-    name: Build mosh xcframework (experimental · mosh M3)
+    name: Build mosh xcframework
     runs-on: macos-14
     needs: protobuf-xcframework
-    # Brick 2b: blind autotools cross-compile, single-slice bring-up. Keep
-    # continue-on-error and don't fail on a missing xcframework yet.
-    continue-on-error: true
+    # Brick 2b: cross-compile mosh's full client library set (+ merged protobuf)
+    # for the Apple slices. Green and reliable, so it gates.
     steps:
       - uses: actions/checkout@v4
       - name: Download protobuf xcframework
@@ -114,13 +111,12 @@ jobs:
         run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -sdk macosx CODE_SIGNING_ALLOWED=NO -quiet
 
   app-build-mosh:
-    name: Build app with Mosh (experimental · mosh M3)
+    name: Build app with Mosh (iOS · macOS)
     runs-on: macos-15
     needs: [libssh2-xcframework, mosh-xcframework]
-    # The mosh cross-compile is still bringing up; keep this job from blocking
-    # main while it stabilizes. The stable app-build-ssh job above does not
-    # depend on mosh, so a red here never turns the SSH build red.
-    continue-on-error: true
+    # Builds the app with the real Mosh UDP/SSP transport (project.mosh.yml:
+    # mosh.xcframework + the MoshBridge bridging header + SLOOP_MOSH). Green on
+    # both platforms, so it gates like the other app builds.
     steps:
       - uses: actions/checkout@v4
       - name: Download libssh2 xcframework

@@ -3,6 +3,25 @@
 Running on branch `claude/ios-terminal-app-uwmzf3` via a 10-minute `/loop`
 while the maintainer is away. Newest entries first.
 
+## 2026-08-08
+
+- **Mosh is GREEN end-to-end — the app builds with the real UDP/SSP transport
+  on iOS and macOS.** `app-build-mosh` passes both platforms. Getting the bridge
+  to compile+link took five targeted fixes, one CI layer cleared per push:
+  1. Bundle protobuf's `google/` headers into `mosh.xcframework` (the generated
+     `*.pb.h` include `<google/protobuf/…>`).
+  2. Include `networktransport-impl.h` (not just the decl header) so the
+     `Transport<UserStream, Complete>` / `TransportSender<UserStream>` template
+     methods instantiate in the bridge TU — they live only in mosh's frontend.
+  3. Include `fatal_assert.h` before it (the impl header uses the macro without
+     including it, as stmclient.cc does).
+  4. `-lz` — mosh's `Network::Compressor` uses zlib for SSP payloads.
+  5. (build-script) keep `terminaldisplay.cc` and stub only the curses TU, so
+     `Display::new_frame` survives to render the framebuffer.
+  Promoted the whole mosh chain (protobuf → mosh → app-build-mosh) out of
+  `continue-on-error`: it now gates like the other builds. The stable
+  `app-build-ssh` remains independent of it.
+
 ## 2026-08-07
 
 - **Mosh step 3, brick 2c+2d: the C++ bridge and Swift transport are written.**
