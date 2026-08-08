@@ -51,5 +51,9 @@ It's low — GPLv3 terminals bundling mosh already ship there — but it is thei
 raise. If you'd rather carry zero copyleft risk, the fallback is still M2-era
 SSH-only under a permissive license — but that's a choice, not a necessity.
 
-Action item: add `LICENSE` (GPL-3.0) and a third-party notices file before the
-first App Store submission.
+Action item: ~~add `LICENSE` (GPL-3.0) and a third-party notices file before the
+first App Store submission.~~ **Done** — `LICENSE` (full GPL-3.0) and
+`THIRD-PARTY-NOTICES.md` are in the repo root. The remaining licensing task is a
+judgment call, not a file: confirm you accept the low residual risk of shipping
+Mosh (GPL-3.0) via the App Store with corresponding source kept public. See
+`Docs/HANDOFF.md` for the full path to shipping.

@@ -5,6 +5,20 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-08
 
+- **Wrapping up → ship-readiness.** Shifted from features to handoff:
+  - Added `LICENSE` (full GPL-3.0, fetched verbatim) and `THIRD-PARTY-NOTICES.md`
+    (SwiftTerm MIT, libssh2 BSD, Mosh GPL-3.0, protobuf BSD) — the licensing
+    action item from `Docs/LICENSING.md` is now done; only the owner's sign-off
+    on the residual GPL/App-Store risk remains.
+  - New `Docs/HANDOFF.md`: the honest state (feature-complete + CI-green on
+    iOS/macOS, but **never run on real hardware**), build/run instructions, the
+    ordered path to shipping (device test → icons → signing → App Store), and a
+    first-device-test checklist.
+  - Roadmap M4 updated: Mac menus + licensing files done; runtime validation,
+    icons, signing, and submission are the remaining finish line.
+  Also shipped **SSH config import/export** (round-trip parser/formatter in
+  SloopKit with tests; file picker/exporter UI).
+
 - **M2 tabs + iPad/Mac polish.** After Mosh, moved down the roadmap:
   - **Terminal appearance settings** — `TerminalAppearance` (SloopKit, unit-
     tested: font size/theme/cursor with defensive decoding), `AppearanceStore`

@@ -40,11 +40,19 @@ top of a working SSH terminal rather than first.
       SSH fallback when `mosh-server` is missing).
 - [ ] Runtime validation against a live `mosh-server` (CI proves it builds/links).
 
-## M4 — Ship
+## M4 — Ship (the remaining finish line — see `Docs/HANDOFF.md`)
 
-- [ ] Resolve licensing (`Docs/LICENSING.md`) before App Store submission.
-- [ ] App icons, launch, tvOS focus model, Mac menu commands.
-- [ ] Background-connection handling and reconnect polish.
+- [x] Mac menu commands (Terminal menu: new/close/cycle tabs) + macOS Settings.
+- [x] Licensing files: `LICENSE` (GPL-3.0) + `THIRD-PARTY-NOTICES.md`. The
+      GPL-3.0/App-Store posture is decided (`Docs/LICENSING.md`); only your
+      sign-off on the residual risk remains.
+- [ ] **Runtime validation on real hardware** — first device test (biggest
+      open risk; nothing has run live yet). Checklist in `Docs/HANDOFF.md`.
+- [ ] App icons + launch assets.
+- [ ] Code signing + notarization (currently unsigned).
+- [ ] App Store Connect listing + submission.
+- [ ] Background-connection handling and reconnect polish (Mosh roaming exists;
+      exercise it on-device).
 
 ## Deferred
 
