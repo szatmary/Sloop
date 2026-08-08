@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Sloop app icon">
+  <title>Sloop</title>
+  <desc>A single-masted sailboat whose foresail is a terminal-teal, riding a command-line waterline with a cursor.</desc>
+
+  <defs>
+    <!-- deep teal-to-black ground -->
+    <linearGradient id="ground" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#164743"/>
+      <stop offset="0.55" stop-color="#0d1e20"/>
+      <stop offset="1" stop-color="#0a1113"/>
+    </linearGradient>
+    <!-- soft light behind the sails -->
+    <radialGradient id="glow" cx="0.46" cy="0.40" r="0.62">
+      <stop offset="0" stop-color="#3a8f86" stop-opacity="0.55"/>
+      <stop offset="0.55" stop-color="#2a6c65" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#2a6c65" stop-opacity="0"/>
+    </radialGradient>
+    <!-- mainsail: subtle canvas shading -->
+    <linearGradient id="main" x1="0.15" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#f6fcfb"/>
+      <stop offset="1" stop-color="#d5e9e6"/>
+    </linearGradient>
+    <!-- foresail: the terminal-teal accent -->
+    <linearGradient id="jib" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5ad9ca"/>
+      <stop offset="1" stop-color="#33b6a7"/>
+    </linearGradient>
+  </defs>
+
+  <!-- app-icon rounded square (Apple masks the corners itself; this is the master art) -->
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#ground)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#glow)"/>
+
+  <!-- mast -->
+  <line x1="512" y1="214" x2="512" y2="692" stroke="#eaf5f3" stroke-width="13" stroke-linecap="round"/>
+
+  <!-- mainsail (aft, white) -->
+  <path d="M512 232 L512 660 H742 Q660 430 512 232 Z" fill="url(#main)"/>
+  <!-- foresail / jib (fore, teal) -->
+  <path d="M512 262 L512 660 H300 Q372 452 512 262 Z" fill="url(#jib)"/>
+
+  <!-- hull -->
+  <path d="M262 690 H762 L706 744 Q512 778 318 744 Z" fill="#eaf5f3"/>
+
+  <!-- command-line waterline + cursor: the terminal wink under the boat -->
+  <g>
+    <rect x="330" y="800" width="250" height="13" rx="6.5" fill="#4fd1c2" opacity="0.55"/>
+    <rect x="598" y="792" width="26" height="29" rx="5" fill="#4fd1c2" opacity="0.92"/>
+    <rect x="330" y="834" width="168" height="13" rx="6.5" fill="#4fd1c2" opacity="0.28"/>
+  </g>
+</svg>
