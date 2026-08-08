@@ -35,6 +35,21 @@ final class HostListModel: ObservableObject {
         hosts = store.hosts
     }
 
+    /// Import hosts from OpenSSH config text, skipping aliases that already
+    /// exist. Secrets aren't in the config, so imported hosts use password auth
+    /// until the user edits them. Returns the number of new hosts added.
+    @discardableResult
+    func importConfig(_ text: String) -> Int {
+        let existing = Set(hosts.map(\.alias))
+        var added = 0
+        for host in SSHConfigParser.parse(text) where !existing.contains(host.alias) {
+            store.upsert(host)
+            added += 1
+        }
+        hosts = store.hosts
+        return added
+    }
+
     func delete(at offsets: IndexSet) {
         for index in offsets {
             let host = hosts[index]

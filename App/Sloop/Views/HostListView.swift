@@ -1,5 +1,6 @@
 import SwiftUI
 import SloopKit
+import UniformTypeIdentifiers
 
 /// Root screen: saved hosts plus a quick "local terminal" action. Opening a host
 /// or the local terminal adds a tab to the shared `SessionsModel` and pushes the
@@ -13,6 +14,8 @@ struct HostListView: View {
     @State private var showingSupport = false
     @State private var showingSettings = false
     @State private var showingTerminal = false
+    @State private var showingImport = false
+    @State private var importResult: String?
 
     var body: some View {
         NavigationStack {
@@ -62,7 +65,18 @@ struct HostListView: View {
                     }
                 }
                 ToolbarItem {
-                    Button { editing = model.newHost() } label: {
+                    Menu {
+                        Button {
+                            editing = model.newHost()
+                        } label: {
+                            Label("New Host", systemImage: "plus")
+                        }
+                        Button {
+                            showingImport = true
+                        } label: {
+                            Label("Import from SSH Config…", systemImage: "square.and.arrow.down")
+                        }
+                    } label: {
                         Image(systemName: "plus")
                     }
                 }
@@ -78,6 +92,18 @@ struct HostListView: View {
             }
             .sheet(item: $hostKeyPrompter.prompt) { prompt in
                 HostKeyPromptView(prompt: prompt)
+            }
+            .fileImporter(isPresented: $showingImport,
+                          allowedContentTypes: [.text, .plainText, .data]) { result in
+                importResult = importConfig(from: result)
+            }
+            .alert("Import SSH Config", isPresented: Binding(
+                get: { importResult != nil },
+                set: { if !$0 { importResult = nil } })
+            ) {
+                Button("OK", role: .cancel) { importResult = nil }
+            } message: {
+                Text(importResult ?? "")
             }
             .navigationDestination(isPresented: $showingTerminal) {
                 TerminalTabsView(model: sessions)
@@ -95,6 +121,29 @@ struct HostListView: View {
     private func open(_ session: TerminalSession) {
         sessions.openSession(session)
         showingTerminal = true
+    }
+
+    /// Read the picked SSH config file and import its hosts. Returns a short
+    /// user-facing result message.
+    private func importConfig(from result: Result<URL, Error>) -> String {
+        switch result {
+        case .failure(let error):
+            return error.localizedDescription
+        case .success(let url):
+            // The picked URL is security-scoped on iOS/macOS; access it briefly.
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url),
+                  let text = String(data: data, encoding: .utf8) else {
+                return "Couldn't read that file as text."
+            }
+            let count = model.importConfig(text)
+            switch count {
+            case 0: return "No new hosts found in that config."
+            case 1: return "Imported 1 host."
+            default: return "Imported \(count) hosts."
+            }
+        }
     }
 }
 
