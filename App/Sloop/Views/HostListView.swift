@@ -15,6 +15,7 @@ struct HostListView: View {
     @State private var showingSettings = false
     @State private var showingTerminal = false
     @State private var showingImport = false
+    @State private var showingExport = false
     @State private var importResult: String?
 
     var body: some View {
@@ -76,6 +77,13 @@ struct HostListView: View {
                         } label: {
                             Label("Import from SSH Config…", systemImage: "square.and.arrow.down")
                         }
+                        if !model.hosts.isEmpty {
+                            Button {
+                                showingExport = true
+                            } label: {
+                                Label("Export SSH Config…", systemImage: "square.and.arrow.up")
+                            }
+                        }
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -96,6 +104,14 @@ struct HostListView: View {
             .fileImporter(isPresented: $showingImport,
                           allowedContentTypes: [.text, .plainText, .data]) { result in
                 importResult = importConfig(from: result)
+            }
+            .fileExporter(isPresented: $showingExport,
+                          document: ConfigTextDocument(text: SSHConfigParser.format(model.hosts)),
+                          contentType: .plainText,
+                          defaultFilename: "sloop-hosts.config") { result in
+                if case .failure(let error) = result {
+                    importResult = error.localizedDescription
+                }
             }
             .alert("Import SSH Config", isPresented: Binding(
                 get: { importResult != nil },
@@ -144,6 +160,28 @@ struct HostListView: View {
             default: return "Imported \(count) hosts."
             }
         }
+    }
+}
+
+/// A minimal plain-text document so the host list can be exported as an OpenSSH
+/// config via `.fileExporter`.
+private struct ConfigTextDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText] }
+
+    var text: String
+
+    init(text: String) { self.text = text }
+
+    init(configuration: ReadConfiguration) throws {
+        if let data = configuration.file.regularFileContents {
+            text = String(decoding: data, as: UTF8.self)
+        } else {
+            text = ""
+        }
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(text.utf8))
     }
 }
 
