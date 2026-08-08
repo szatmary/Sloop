@@ -10,6 +10,11 @@ import SloopKit
 /// tab closes.
 @MainActor
 final class SessionsModel: ObservableObject {
+    /// Shared instance so app-level menu/keyboard commands (which live outside
+    /// the view tree) drive the same tabs the UI shows. Single-window today; a
+    /// future multi-window app would use one model per scene instead.
+    static let shared = SessionsModel()
+
     @Published private(set) var open = OpenSessions()
 
     private var controllers: [TerminalSession.ID: TerminalController] = [:]
@@ -32,6 +37,20 @@ final class SessionsModel: ObservableObject {
     func select(_ id: TerminalSession.ID) {
         open.select(id)
     }
+
+    /// Open a fresh local (echo) terminal tab — the ⌘T action.
+    func openLocal() {
+        openSession(.localEcho())
+    }
+
+    /// Close the active tab — the ⌘W action. No-op when nothing is open.
+    func closeSelected() {
+        if let id = open.selectedID { close(id) }
+    }
+
+    /// Cycle the active tab (⌘⇧] / ⌘⇧[). No-ops when nothing is open.
+    func selectNext() { open.selectNext() }
+    func selectPrevious() { open.selectPrevious() }
 
     /// Close a tab: tear down its connection and drop its controller.
     func close(_ id: TerminalSession.ID) {

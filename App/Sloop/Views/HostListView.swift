@@ -6,7 +6,7 @@ import SloopKit
 /// tabbed terminal view; the `+` toolbar item adds a host.
 struct HostListView: View {
     @StateObject private var model = HostListModel()
-    @StateObject private var sessions = SessionsModel()
+    @ObservedObject private var sessions = SessionsModel.shared
     @ObservedObject private var hostKeyPrompter = HostKeyPrompter.shared
     @ObservedObject private var appearance = AppearanceStore.shared
     @State private var editing: SSHHost?
@@ -82,9 +82,11 @@ struct HostListView: View {
             .navigationDestination(isPresented: $showingTerminal) {
                 TerminalTabsView(model: sessions)
             }
-            // Popping back to an empty tab set means there's nothing to return to.
-            .onChange(of: sessions.isEmpty) { _, empty in
-                if empty { showingTerminal = false }
+            // Show the terminal when a tab opens (including via the ⌘T menu
+            // command from anywhere), and pop back when the last tab closes.
+            .onChange(of: sessions.count) { old, new in
+                if new > old { showingTerminal = true }
+                else if new == 0 { showingTerminal = false }
             }
         }
     }

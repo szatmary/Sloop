@@ -35,6 +35,30 @@ public struct OpenSessions {
         selectedID = id
     }
 
+    /// Move selection to the next tab, wrapping past the end. No-op if empty;
+    /// selects the first tab if nothing was selected.
+    public mutating func selectNext() {
+        guard !sessions.isEmpty else { return }
+        guard let id = selectedID,
+              let i = sessions.firstIndex(where: { $0.id == id }) else {
+            selectedID = sessions.first?.id
+            return
+        }
+        selectedID = sessions[(i + 1) % sessions.count].id
+    }
+
+    /// Move selection to the previous tab, wrapping past the start. No-op if
+    /// empty; selects the last tab if nothing was selected.
+    public mutating func selectPrevious() {
+        guard !sessions.isEmpty else { return }
+        guard let id = selectedID,
+              let i = sessions.firstIndex(where: { $0.id == id }) else {
+            selectedID = sessions.last?.id
+            return
+        }
+        selectedID = sessions[(i - 1 + sessions.count) % sessions.count].id
+    }
+
     /// Close a session. When the active session closes, selection moves to the
     /// tab on its left (or the first remaining), or becomes `nil` if none are
     /// left. Returns the removed session, or `nil` if the id wasn't open.

@@ -90,4 +90,42 @@ final class OpenSessionsTests: XCTestCase {
         XCTAssertEqual(open.count, 1)
         XCTAssertEqual(open.selectedID, a.id)
     }
+
+    func testSelectNextWraps() {
+        var open = OpenSessions()
+        let a = session("a"); let b = session("b"); let c = session("c")
+        open.open(a); open.open(b); open.open(c)
+        open.select(a.id)
+
+        open.selectNext(); XCTAssertEqual(open.selectedID, b.id)
+        open.selectNext(); XCTAssertEqual(open.selectedID, c.id)
+        open.selectNext(); XCTAssertEqual(open.selectedID, a.id)   // wrap
+    }
+
+    func testSelectPreviousWraps() {
+        var open = OpenSessions()
+        let a = session("a"); let b = session("b"); let c = session("c")
+        open.open(a); open.open(b); open.open(c)
+        open.select(a.id)
+
+        open.selectPrevious(); XCTAssertEqual(open.selectedID, c.id)   // wrap
+        open.selectPrevious(); XCTAssertEqual(open.selectedID, b.id)
+        open.selectPrevious(); XCTAssertEqual(open.selectedID, a.id)
+    }
+
+    func testSelectNextPreviousEmptyIsNoOp() {
+        var open = OpenSessions()
+        open.selectNext()
+        XCTAssertNil(open.selectedID)
+        open.selectPrevious()
+        XCTAssertNil(open.selectedID)
+    }
+
+    func testSelectNextSingleStaysPut() {
+        var open = OpenSessions()
+        let a = session("a")
+        open.open(a)
+        open.selectNext(); XCTAssertEqual(open.selectedID, a.id)
+        open.selectPrevious(); XCTAssertEqual(open.selectedID, a.id)
+    }
 }
