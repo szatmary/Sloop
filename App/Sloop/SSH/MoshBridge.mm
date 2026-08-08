@@ -36,7 +36,14 @@
 #include <unistd.h>
 
 // mosh's C++ client core (from mosh.xcframework's flat Headers dir).
-#include "networktransport.h"
+//
+// Include the *-impl.h template definitions, not just networktransport.h: the
+// Network::Transport<UserStream, Complete> and TransportSender<UserStream>
+// instantiations live only in mosh's frontend TUs (stmclient.cc), which we
+// don't build. Pulling in the impl header here (as stmclient does) makes this
+// TU instantiate those template methods itself. networktransport-impl.h
+// includes networktransport.h and transportsender-impl.h.
+#include "networktransport-impl.h"
 #include "user.h"
 #include "completeterminal.h"
 #include "terminaldisplay.h"
