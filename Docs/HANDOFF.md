@@ -56,8 +56,17 @@ open Sloop.xcodeproj
 # Sloop_macOS scheme's SloopTests bundle.
 ```
 
-Prebuilt unsigned macOS app: the `nightly` GitHub release (refreshed on every
-push to `main`).
+Prebuilt macOS app: the `nightly` GitHub release (refreshed on every push to
+`main`). It's **ad-hoc signed but not notarized**, so Gatekeeper blocks the
+download on first launch. To run it: right-click the app → **Open** → **Open**;
+if macOS calls it *"damaged"*, clear the quarantine flag first:
+
+```sh
+xattr -cr /path/to/Sloop.app && open /path/to/Sloop.app
+```
+
+The "damaged" message is Gatekeeper on an unnotarized download, not a real
+problem — it goes away with Developer ID signing + notarization (a ship step).
 
 ## The path to shipping (the real finish line)
 
