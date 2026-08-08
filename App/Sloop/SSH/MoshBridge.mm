@@ -43,6 +43,10 @@
 // don't build. Pulling in the impl header here (as stmclient does) makes this
 // TU instantiate those template methods itself. networktransport-impl.h
 // includes networktransport.h and transportsender-impl.h.
+//
+// networktransport-impl.h uses the fatal_assert() macro but doesn't include its
+// header — stmclient.cc includes fatal_assert.h first, so we do too.
+#include "fatal_assert.h"
 #include "networktransport-impl.h"
 #include "user.h"
 #include "completeterminal.h"
