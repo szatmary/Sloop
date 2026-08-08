@@ -1,23 +1,35 @@
 import SwiftUI
 import SloopKit
 
-/// Root screen: saved hosts plus a quick "local terminal" action. Selecting a
-/// host opens a `TerminalScreen`; the `+` toolbar item adds a host.
+/// Root screen: saved hosts plus a quick "local terminal" action. Opening a host
+/// or the local terminal adds a tab to the shared `SessionsModel` and pushes the
+/// tabbed terminal view; the `+` toolbar item adds a host.
 struct HostListView: View {
     @StateObject private var model = HostListModel()
+    @StateObject private var sessions = SessionsModel()
     @ObservedObject private var hostKeyPrompter = HostKeyPrompter.shared
     @ObservedObject private var appearance = AppearanceStore.shared
     @State private var editing: SSHHost?
-    @State private var session: TerminalSession?
     @State private var showingSupport = false
     @State private var showingSettings = false
+    @State private var showingTerminal = false
 
     var body: some View {
         NavigationStack {
             List {
+                if !sessions.isEmpty {
+                    Section("Open") {
+                        Button {
+                            showingTerminal = true
+                        } label: {
+                            Label("Terminals (\(sessions.count))", systemImage: "rectangle.on.rectangle")
+                        }
+                    }
+                }
+
                 Section("Quick") {
                     Button {
-                        session = .localEcho()
+                        open(.localEcho())
                     } label: {
                         Label("Local terminal", systemImage: "terminal")
                     }
@@ -29,7 +41,7 @@ struct HostListView: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(model.hosts) { host in
-                        Button { session = model.connect(host) } label: {
+                        Button { open(model.connect(host)) } label: {
                             HostRow(host: host)
                         }
                         .buttonStyle(.plain)
@@ -67,10 +79,20 @@ struct HostListView: View {
             .sheet(item: $hostKeyPrompter.prompt) { prompt in
                 HostKeyPromptView(prompt: prompt)
             }
-            .navigationDestination(item: $session) { session in
-                TerminalScreen(session: session)
+            .navigationDestination(isPresented: $showingTerminal) {
+                TerminalTabsView(model: sessions)
+            }
+            // Popping back to an empty tab set means there's nothing to return to.
+            .onChange(of: sessions.isEmpty) { _, empty in
+                if empty { showingTerminal = false }
             }
         }
+    }
+
+    /// Open a session as a new tab and navigate to the terminal.
+    private func open(_ session: TerminalSession) {
+        sessions.openSession(session)
+        showingTerminal = true
     }
 }
 

@@ -1,19 +1,12 @@
 import SwiftUI
 import SloopKit
 
-/// Hosts a live terminal for one session, plus a connection-status bar and the
-/// smart-keys bar on iOS/iPadOS.
-struct TerminalScreen: View {
-    let session: TerminalSession
-    @StateObject private var controller: TerminalController
-    @ObservedObject private var appearance = AppearanceStore.shared
-
-    init(session: TerminalSession) {
-        self.session = session
-        _controller = StateObject(wrappedValue: TerminalController(
-            makeTransport: session.newTransport,
-            appearance: AppearanceStore.shared.appearance))
-    }
+/// One terminal, driven by an already-built `TerminalController` (owned by
+/// `SessionsModel`). Unlike the old `TerminalScreen`, it does NOT create the
+/// controller, so a pane can be hidden (a background tab) without tearing down
+/// its connection.
+struct TerminalPane: View {
+    @ObservedObject var controller: TerminalController
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,20 +17,13 @@ struct TerminalScreen: View {
                                  applicationCursor: { controller.applicationCursor })
             #endif
         }
-        // Restyle the live terminal when the user changes appearance settings.
-        .onChange(of: appearance.appearance) { _, new in controller.apply(new) }
-        #if os(iOS)
-        .navigationTitle(session.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .ignoresSafeArea(.container, edges: .bottom)
-        #endif
     }
 }
 
 /// A thin status bar above the terminal. Hidden while connected (to maximize the
 /// terminal), a spinner while connecting, and a red bar with a Reconnect button
 /// once the connection drops.
-private struct ConnectionStatusBar: View {
+struct ConnectionStatusBar: View {
     let state: ConnectionState
     let reconnect: () -> Void
 

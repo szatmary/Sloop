@@ -130,6 +130,11 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         transport.send(bytes)
     }
 
+    /// Tear down the connection — called when the session's tab is closed.
+    func close() {
+        transport.close()
+    }
+
     // MARK: TerminalViewDelegate
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
