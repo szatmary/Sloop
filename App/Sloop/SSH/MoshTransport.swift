@@ -1,6 +1,11 @@
 import Foundation
 import Network
 import SloopKit
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 // Only the Mosh-enabled build (project.mosh.yml) links mosh.xcframework and sets
 // the bridging header that exposes the `mosh_session_*` C API, and it defines
@@ -47,6 +52,9 @@ final class MoshTransport: Transport {
     /// Set once the first path update has been seen, so the initial callback
     /// (which fires right after start) isn't treated as a "change".
     private var sawInitialPath = false
+    /// Observer for app-foreground, so we also nudge Mosh on resume-from-suspend
+    /// even when the network path is unchanged (path monitor stays quiet then).
+    private var foregroundObserver: NSObjectProtocol?
 
     /// - Parameters:
     ///   - host: the hostname/IP the SSH connection reached (mosh reuses it for UDP).
@@ -83,6 +91,22 @@ final class MoshTransport: Transport {
             self.withLiveSession { mosh_session_network_changed($0) }
         }
         pathMonitor.start(queue: pathQueue)
+
+        // Also nudge on app foreground: a resume-from-suspend with an unchanged
+        // path produces no NWPathMonitor event, but Mosh should still send right
+        // away rather than wait out its timer.
+        #if canImport(UIKit)
+        let foregroundName = UIApplication.didBecomeActiveNotification
+        #elseif canImport(AppKit)
+        let foregroundName = NSApplication.didBecomeActiveNotification
+        #endif
+        #if canImport(UIKit) || canImport(AppKit)
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: foregroundName, object: nil, queue: nil
+        ) { [weak self] _ in
+            self?.withLiveSession { mosh_session_network_changed($0) }
+        }
+        #endif
 
         onOpen?()
     }
@@ -136,6 +160,10 @@ final class MoshTransport: Transport {
         lock.unlock()
 
         pathMonitor.cancel()
+        if let observer = foregroundObserver {
+            NotificationCenter.default.removeObserver(observer)
+            foregroundObserver = nil
+        }
         onClose?(reason.map { MoshTransportError.session($0) })
         if let s {
             // Destroy off the net thread: mosh_session_destroy joins the loop

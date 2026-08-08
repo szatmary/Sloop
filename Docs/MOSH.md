@@ -116,13 +116,14 @@ rather than porting a subset: reusing `Terminal::Complete` + `Display::new_frame
 means mosh itself parses the SSP stream and renders the framebuffer to ANSI, so
 SwiftTerm just displays bytes and there's no re-implementation to keep in sync.
 
-**Roaming:** `MoshTransport` runs an `NWPathMonitor` and, on a path change
-(Wi-Fi↔cellular), nudges the bridge (`mosh_session_network_changed`) so Mosh
-sends immediately from the new interface instead of waiting out its timer. The
-actual re-homing is mosh's own: SSP carries no fixed peer address, so the server
-adopts whatever source address the next datagram arrives from. **Still open:**
-waking on app foreground/resume (not just path changes) for the
-backgrounded-then-resumed case where the path is unchanged.
+**Roaming:** `MoshTransport` nudges the bridge (`mosh_session_network_changed`)
+whenever connectivity should be re-checked — on a path change (Wi-Fi↔cellular,
+via `NWPathMonitor`) and on app foreground/resume (via the platform
+`didBecomeActive` notification, which covers the backgrounded-then-resumed case
+where the path is unchanged and the monitor stays quiet). Each nudge makes the
+loop send immediately from the current interface instead of waiting out its
+timer. The actual re-homing is mosh's own: SSP carries no fixed peer address, so
+the server adopts whatever source address the next datagram arrives from.
 
 ## Licensing note
 
