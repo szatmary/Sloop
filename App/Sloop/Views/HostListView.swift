@@ -6,9 +6,11 @@ import SloopKit
 struct HostListView: View {
     @StateObject private var model = HostListModel()
     @ObservedObject private var hostKeyPrompter = HostKeyPrompter.shared
+    @ObservedObject private var appearance = AppearanceStore.shared
     @State private var editing: SSHHost?
     @State private var session: TerminalSession?
     @State private var showingSupport = false
+    @State private var showingSettings = false
 
     var body: some View {
         NavigationStack {
@@ -38,6 +40,11 @@ struct HostListView: View {
             .navigationTitle("Sloop")
             .toolbar {
                 ToolbarItem {
+                    Button { showingSettings = true } label: {
+                        Image(systemName: "textformat.size")
+                    }
+                }
+                ToolbarItem {
                     Button { showingSupport = true } label: {
                         Image(systemName: "heart")
                     }
@@ -53,6 +60,9 @@ struct HostListView: View {
             }
             .sheet(isPresented: $showingSupport) {
                 SupportView()
+            }
+            .sheet(isPresented: $showingSettings) {
+                TerminalSettingsView(store: appearance)
             }
             .sheet(item: $hostKeyPrompter.prompt) { prompt in
                 HostKeyPromptView(prompt: prompt)

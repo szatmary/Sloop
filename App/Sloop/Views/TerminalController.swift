@@ -1,6 +1,15 @@
 import SwiftUI
 import SwiftTerm
 import SloopKit
+#if os(macOS)
+import AppKit
+private typealias PlatformFont = NSFont
+private typealias PlatformColor = NSColor
+#else
+import UIKit
+private typealias PlatformFont = UIFont
+private typealias PlatformColor = UIColor
+#endif
 
 /// Owns the SwiftTerm `TerminalView` for one session and bridges it to a
 /// `Transport`. Shared by `SwiftTermView` (which displays the terminal) and the
@@ -18,12 +27,14 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     private let makeTransport: () -> Transport
     private var transport: Transport
 
-    init(makeTransport: @escaping () -> Transport) {
+    init(makeTransport: @escaping () -> Transport,
+         appearance: TerminalAppearance = .default) {
         self.makeTransport = makeTransport
         self.terminalView = TerminalView(frame: .zero)
         self.transport = makeTransport()
         super.init()
         terminalView.terminalDelegate = self
+        apply(appearance)
         wire(transport)
         transport.start()
     }
@@ -32,6 +43,51 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     /// reuses the same instance.
     convenience init(transport: Transport) {
         self.init(makeTransport: { transport })
+    }
+
+    /// Apply the user's terminal appearance (font, colors, cursor) to the live
+    /// `TerminalView`. Safe to call repeatedly as settings change.
+    func apply(_ appearance: TerminalAppearance) {
+        terminalView.font = PlatformFont.monospacedSystemFont(
+            ofSize: CGFloat(appearance.fontSize), weight: .regular)
+
+        let palette = Self.colors(for: appearance.theme)
+        terminalView.nativeForegroundColor = palette.fg
+        terminalView.nativeBackgroundColor = palette.bg
+        terminalView.caretColor = palette.caret
+
+        // Cursor shape has no public setter, so drive it with DECSCUSR
+        // (CSI Ps SP q) — the standard sequence SwiftTerm already understands.
+        let code: Int
+        switch appearance.cursor {
+        case .block: code = 2      // steady block
+        case .underline: code = 4  // steady underline
+        case .bar: code = 6        // steady bar
+        }
+        terminalView.feed(text: "\u{1b}[\(code) q")
+    }
+
+    private static func colors(
+        for theme: TerminalAppearance.Theme
+    ) -> (fg: PlatformColor, bg: PlatformColor, caret: PlatformColor) {
+        func rgb(_ r: Double, _ g: Double, _ b: Double) -> PlatformColor {
+            PlatformColor(red: CGFloat(r) / 255, green: CGFloat(g) / 255,
+                          blue: CGFloat(b) / 255, alpha: 1)
+        }
+        switch theme {
+        case .system:
+            #if os(macOS)
+            return (.textColor, .textBackgroundColor, .textColor)
+            #else
+            return (.label, .systemBackground, .label)
+            #endif
+        case .dark:
+            return (rgb(208, 208, 208), rgb(30, 30, 30), rgb(208, 208, 208))
+        case .light:
+            return (rgb(26, 26, 26), rgb(255, 255, 255), rgb(26, 26, 26))
+        case .dimmed:
+            return (rgb(154, 154, 154), rgb(38, 38, 38), rgb(154, 154, 154))
+        }
     }
 
     /// Rebuild the connection after it dropped. No-op unless disconnected.

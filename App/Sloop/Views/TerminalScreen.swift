@@ -6,10 +6,13 @@ import SloopKit
 struct TerminalScreen: View {
     let session: TerminalSession
     @StateObject private var controller: TerminalController
+    @ObservedObject private var appearance = AppearanceStore.shared
 
     init(session: TerminalSession) {
         self.session = session
-        _controller = StateObject(wrappedValue: TerminalController(makeTransport: session.newTransport))
+        _controller = StateObject(wrappedValue: TerminalController(
+            makeTransport: session.newTransport,
+            appearance: AppearanceStore.shared.appearance))
     }
 
     var body: some View {
@@ -21,6 +24,8 @@ struct TerminalScreen: View {
                                  applicationCursor: { controller.applicationCursor })
             #endif
         }
+        // Restyle the live terminal when the user changes appearance settings.
+        .onChange(of: appearance.appearance) { _, new in controller.apply(new) }
         #if os(iOS)
         .navigationTitle(session.title)
         .navigationBarTitleDisplayMode(.inline)
