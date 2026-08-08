@@ -8,8 +8,36 @@ import Foundation
 /// real material lives elsewhere), so every imported host comes in with
 /// password auth; the user sets credentials afterward in the editor.
 ///
-/// Pure value-in/value-out, so it's unit-tested in SloopKit.
+/// Pure value-in/value-out, so it's unit-tested in SloopKit. It also formats
+/// hosts back out (`format`), the inverse of `parse`, so a Sloop host list can
+/// be exported as an OpenSSH config.
 public enum SSHConfigParser {
+
+    /// Render hosts as OpenSSH config text — the inverse of `parse`. Emits
+    /// `HostName` only when it differs from the alias (so `parse` reconstructs
+    /// it via its alias default), `User` when set, and `Port` when non-default.
+    /// Secrets are never written (the model doesn't hold them here).
+    ///
+    /// Note: OpenSSH `Host` names are whitespace-separated tokens, so an alias
+    /// containing spaces won't round-trip; such aliases are emitted verbatim but
+    /// re-import to just their first token.
+    public static func format(_ hosts: [SSHHost]) -> String {
+        var lines: [String] = []
+        for host in hosts {
+            lines.append("Host \(host.alias)")
+            if !host.hostname.isEmpty, host.hostname != host.alias {
+                lines.append("    HostName \(host.hostname)")
+            }
+            if !host.username.isEmpty {
+                lines.append("    User \(host.username)")
+            }
+            if host.port != 22 {
+                lines.append("    Port \(host.port)")
+            }
+            lines.append("")   // blank line between blocks
+        }
+        return lines.joined(separator: "\n")
+    }
 
     /// Parse config text into hosts, in file order. Wildcard `Host` patterns
     /// (`*`, `?`) are defaults, not real hosts, so they're skipped.
