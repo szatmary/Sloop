@@ -5,6 +5,23 @@ while the maintainer is away. Newest entries first.
 
 ## 2026-08-08
 
+- **M2 tabs + iPad/Mac polish.** After Mosh, moved down the roadmap:
+  - **Terminal appearance settings** — `TerminalAppearance` (SloopKit, unit-
+    tested: font size/theme/cursor with defensive decoding), `AppearanceStore`
+    (UserDefaults), applied to SwiftTerm via its verified public API (font,
+    fg/bg + caret colors, cursor via DECSCUSR), plus a Settings sheet.
+  - **Multi-session tabs** — wired the unit-tested `OpenSessions` into the app:
+    `SessionsModel` *owns* a `TerminalController` per session so background tabs
+    stay connected; `TerminalTabsView` shows a tab strip over a ZStack of panes
+    (active visible, rest hidden-but-live); `TerminalPane` renders from an
+    existing controller. Replaced the single-session `TerminalScreen`.
+  - **iPad/Mac tab commands** — `OpenSessions.selectNext/Previous` (wrapping,
+    unit-tested); a shared `SessionsModel`; a "Terminal" command menu (⌘T new,
+    ⌘W close, ⌘⇧]/⌘⇧[ cycle) for the Mac menu bar + iPad hardware keyboard.
+  - **Native macOS Settings** — the appearance editor is also the standard ⌘,
+    Preferences window on Mac (a sheet on iOS).
+  All green on iOS + macOS across base/SSH/Mosh builds.
+
 - **Mosh is GREEN end-to-end — the app builds with the real UDP/SSP transport
   on iOS and macOS.** `app-build-mosh` passes both platforms. Getting the bridge
   to compile+link took five targeted fixes, one CI layer cleared per push:

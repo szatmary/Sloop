@@ -22,5 +22,14 @@ struct SloopApp: App {
                     .keyboardShortcut("[", modifiers: [.command, .shift])
             }
         }
+
+        // Native macOS Preferences window (⌘,). On iOS the same editor is a
+        // sheet from the host list's toolbar.
+        #if os(macOS)
+        Settings {
+            TerminalSettingsView(store: .shared)
+                .frame(width: 360)
+        }
+        #endif
     }
 }
