@@ -166,7 +166,13 @@ echo "==> Staging mosh headers (flat — mosh uses same-dir includes)"
 HDRS="$WORK/headers"
 rm -rf "$HDRS"; mkdir -p "$HDRS"
 find "$WORK/build/mosh-ios-arm64/src" \( -name '*.h' -o -name '*.hpp' \) -exec cp {} "$HDRS/" \;
-echo "    staged $(ls "$HDRS" | wc -l | tr -d ' ') headers"
+# mosh's generated *.pb.h include <google/protobuf/...> (headers AND .inc files),
+# so bundle protobuf's public headers under the same Headers dir. Without this
+# the consumer app can't compile transportinstruction.pb.h. Protobuf is already
+# merged into libmosh.a, so we ship only its headers here (not a second lib).
+# Headers are identical across slices; copy the google/ tree from the ios slice.
+cp -R "$PB_XCF/ios-arm64/Headers/google" "$HDRS/google"
+echo "    staged $(find "$HDRS" -type f | wc -l | tr -d ' ') header files (mosh + protobuf)"
 
 echo "==> Assembling mosh.xcframework"
 rm -rf "$ROOT/Vendor/mosh.xcframework"
