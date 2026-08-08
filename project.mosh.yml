@@ -26,6 +26,9 @@ targets:
       base:
         SWIFT_OBJC_BRIDGING_HEADER: App/Sloop/SSH/Sloop-Bridging-Header.h
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_MOSH
+        # mosh's Network::Compressor uses zlib (compress/uncompress) for SSP
+        # payloads; libz ships in the Apple SDK.
+        OTHER_LDFLAGS: -lz
   Sloop_macOS:
     dependencies:
       - framework: Vendor/mosh.xcframework
@@ -34,3 +37,6 @@ targets:
       base:
         SWIFT_OBJC_BRIDGING_HEADER: App/Sloop/SSH/Sloop-Bridging-Header.h
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_MOSH
+        # mosh's Network::Compressor uses zlib (compress/uncompress) for SSP
+        # payloads; libz ships in the Apple SDK.
+        OTHER_LDFLAGS: -lz
