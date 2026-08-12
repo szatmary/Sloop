@@ -4,6 +4,13 @@
 <dict>
 	<key>keychain-access-groups</key>
 	<array>
+		<!-- On the Data Protection keychain, the FIRST entry here is the
+		     default access group for any keychain call that doesn't set
+		     kSecAttrAccessGroup explicitly (e.g. KeychainCredentialStore's
+		     per-host credentials). Keep the app's own group first so those
+		     unscoped calls keep resolving to the app's own scope instead of
+		     silently landing in the shared key-library group below. -->
+		<string>$(AppIdentifierPrefix)org.szatmary.sloop</string>
 		<string>$(AppIdentifierPrefix)org.szatmary.sloop.shared</string>
 	</array>
 </dict>
