@@ -20,3 +20,6 @@ xcuserdata/
 # Vendored native binaries (built locally, see Docs/)
 Vendor/**/*.xcframework
 Vendor/**/build/
+
+# Claude Code session state + worktrees
+.claude/
