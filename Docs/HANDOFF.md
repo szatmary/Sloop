@@ -37,7 +37,9 @@ biggest open risk and needs a human at a Mac with Xcode.
 - **Runtime validation** — no live SSH/Mosh session has been exercised. First
   device test is step 1 below.
 - **Code signing / distribution** — the app is unsigned.
-- **App icons & marketing assets.**
+- **Marketing assets** (App Store screenshots). The app icon itself is DONE:
+  `App/Sloop/Assets.xcassets` generated from the SVG master by
+  `Scripts/generate-appicon.sh`.
 - **iPad multi-window scenes** (in-app tabs cover most of the need).
 - Nice-to-haves: SFTP, port forwarding, iCloud host sync, ssh-agent/Secure
   Enclave keys, Apple Watch command-runner.
@@ -74,7 +76,9 @@ problem — it goes away with Developer ID signing + notarization (a ship step).
    iPhone/iPad and the Mac. Connect to a real SSH host, and to a host running
    `mosh-server`. Use the checklist below. Fix whatever the compile gate
    couldn't catch (layout, live I/O, rendering, roaming).
-2. **App icons & launch assets.** Add an `AppIcon` asset set; verify launch.
+2. **App icons & launch assets** — DONE: `AppIcon.appiconset` (iOS single-size
+   + full macOS set) via `Scripts/generate-appicon.sh`; verified in a local
+   macOS build.
 3. **Signing.** Apple Developer account → signing certs + provisioning; flip the
    Release build off `CODE_SIGNING_ALLOWED=NO`. Notarize the Mac build.
 4. **Licensing files** — DONE: `LICENSE` (GPL-3.0) and `THIRD-PARTY-NOTICES.md`
