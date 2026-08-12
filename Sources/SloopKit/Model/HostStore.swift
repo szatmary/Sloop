@@ -23,7 +23,20 @@ public final class HostStore {
 
     public func load() {
         guard let data = try? Data(contentsOf: url) else { hosts = []; return }
-        hosts = (try? JSONDecoder().decode([SSHHost].self, from: data)) ?? []
+        hosts = Self.decodeLossy(data)
+    }
+
+    /// Decode a host array, skipping elements that fail (e.g. written by a
+    /// newer app with a connection method this build doesn't know) instead of
+    /// wiping the whole list. Note the trade-off: the next `save()` persists
+    /// only what decoded, dropping the skipped entries.
+    static func decodeLossy(_ data: Data) -> [SSHHost] {
+        struct Lossy: Decodable {
+            let host: SSHHost?
+            init(from decoder: Decoder) throws { host = try? SSHHost(from: decoder) }
+        }
+        let wrapped = (try? JSONDecoder().decode([Lossy].self, from: data)) ?? []
+        return wrapped.compactMap(\.host)
     }
 
     public func save() throws {
