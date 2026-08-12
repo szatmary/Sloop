@@ -1,0 +1,78 @@
+import XCTest
+@testable import SloopKit
+
+final class KeyLibraryTests: XCTestCase {
+    private func host(auth: AuthMethod) -> SSHHost {
+        SSHHost(alias: "web", hostname: "example.com", username: "matt", auth: auth)
+    }
+
+    func testResolvesLibraryKeyByName() throws {
+        let keys = InMemoryKeyStore()
+        try keys.setKey(NamedKey(name: "id_ed25519", privateKeyPEM: "pem", passphrase: "pp"))
+        let credential = KeyLibrary.credential(for: host(auth: .publicKey(name: "id_ed25519")),
+                                               keys: keys,
+                                               credentials: InMemoryCredentialStore())
+        XCTAssertEqual(credential, Credential(privateKeyPEM: "pem", passphrase: "pp"))
+    }
+
+    func testFallsBackToLegacyPerHostCredential() throws {
+        let credentials = InMemoryCredentialStore()
+        let h = host(auth: .publicKey(name: "web"))
+        try credentials.setCredential(Credential(privateKeyPEM: "legacy-pem"), for: h.id)
+        let credential = KeyLibrary.credential(for: h,
+                                               keys: InMemoryKeyStore(),
+                                               credentials: credentials)
+        XCTAssertEqual(credential, Credential(privateKeyPEM: "legacy-pem"))
+    }
+
+    func testLibraryWinsOverLegacyCredential() throws {
+        let keys = InMemoryKeyStore()
+        try keys.setKey(NamedKey(name: "web", privateKeyPEM: "library-pem"))
+        let credentials = InMemoryCredentialStore()
+        let h = host(auth: .publicKey(name: "web"))
+        try credentials.setCredential(Credential(privateKeyPEM: "legacy-pem"), for: h.id)
+        XCTAssertEqual(KeyLibrary.credential(for: h, keys: keys, credentials: credentials)?.privateKeyPEM,
+                       "library-pem")
+    }
+
+    func testPasswordHostsUsePerHostCredential() throws {
+        let credentials = InMemoryCredentialStore()
+        let h = host(auth: .password)
+        try credentials.setCredential(Credential(password: "hunter2"), for: h.id)
+        XCTAssertEqual(KeyLibrary.credential(for: h, keys: InMemoryKeyStore(), credentials: credentials),
+                       Credential(password: "hunter2"))
+    }
+
+    func testMigrationLiftsPerHostPEMsIntoLibrary() throws {
+        let credentials = InMemoryCredentialStore()
+        let keys = InMemoryKeyStore()
+        let h = host(auth: .publicKey(name: "web"))
+        try credentials.setCredential(Credential(privateKeyPEM: "pem", passphrase: "pp"), for: h.id)
+
+        KeyLibrary.migrate(hosts: [h], credentials: credentials, keys: keys)
+        XCTAssertEqual(keys.key(named: "web"),
+                       NamedKey(name: "web", privateKeyPEM: "pem", passphrase: "pp"))
+    }
+
+    func testMigrationNeverOverwritesExistingLibraryEntry() throws {
+        let credentials = InMemoryCredentialStore()
+        let keys = InMemoryKeyStore()
+        try keys.setKey(NamedKey(name: "web", privateKeyPEM: "newer-pem"))
+        let h = host(auth: .publicKey(name: "web"))
+        try credentials.setCredential(Credential(privateKeyPEM: "old-pem"), for: h.id)
+
+        KeyLibrary.migrate(hosts: [h], credentials: credentials, keys: keys)
+        XCTAssertEqual(keys.key(named: "web")?.privateKeyPEM, "newer-pem")
+    }
+
+    func testMigrationSkipsPasswordHostsAndHostsWithoutPEM() throws {
+        let credentials = InMemoryCredentialStore()
+        let keys = InMemoryKeyStore()
+        let pw = host(auth: .password)
+        try credentials.setCredential(Credential(password: "hunter2"), for: pw.id)
+        let keyless = host(auth: .publicKey(name: "bare"))
+
+        KeyLibrary.migrate(hosts: [pw, keyless], credentials: credentials, keys: keys)
+        XCTAssertTrue(keys.keys().isEmpty)
+    }
+}
