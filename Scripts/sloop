@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Scripts/sloop — key-library CLI for Sloop.
+#
+#   sloop import-key ~/.ssh/id_ed25519 [--name work]
+#   sloop list-keys
+#   sloop remove-key <name>
+#
+# Thin exec wrapper: the real logic is inside the app binary (KeyCLI.swift),
+# because writing the shared, iCloud-synced keychain requires the app's code
+# signature and entitlements — a bare script cannot do it.
+set -euo pipefail
+
+for app in "/Applications/Sloop.app" "$HOME/Applications/Sloop.app"; do
+  bin="$app/Contents/MacOS/Sloop_macOS"
+  if [ -x "$bin" ]; then
+    exec "$bin" "$@"
+  fi
+done
+echo "error: Sloop.app not found in /Applications or ~/Applications" >&2
+exit 1
