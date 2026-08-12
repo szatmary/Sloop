@@ -35,6 +35,8 @@ targetTemplates:
         excludes:
           # Master art for Scripts/generate-appicon.sh — not a bundle resource.
           - AppIcon.svg
+          # Build input for CODE_SIGN_ENTITLEMENTS — not a bundle resource.
+          - Sloop.entitlements
     dependencies:
       - package: SwiftTerm
       - package: SloopKit
@@ -49,6 +51,9 @@ targetTemplates:
         # App/Sloop/Assets.xcassets — regenerate from the SVG master with
         # Scripts/generate-appicon.sh.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Shared keychain group for the key library (iCloud-synced). Only
+        # effective in signed builds; see SIGNING.md.
+        CODE_SIGN_ENTITLEMENTS: App/Sloop/Sloop.entitlements
         # arm64 only — Sloop does not support x86. Keeps simulator builds arm64
         # (no x86_64 slice) and matches the arm64-only libssh2 xcframework.
         ARCHS: arm64
