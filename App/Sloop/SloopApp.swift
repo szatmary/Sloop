@@ -1,6 +1,17 @@
 import SwiftUI
 
+/// CLI subcommands run before SwiftUI ever starts; a normal launch falls
+/// through to the GUI. See KeyCLI.
 @main
+enum SloopMain {
+    static func main() {
+        #if os(macOS)
+        if KeyCLI.run(arguments: CommandLine.arguments) { return }
+        #endif
+        SloopApp.main()
+    }
+}
+
 struct SloopApp: App {
     var body: some Scene {
         WindowGroup {
