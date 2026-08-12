@@ -4,7 +4,8 @@ import UniformTypeIdentifiers
 
 /// Root screen: saved hosts plus a quick "local terminal" action. Opening a host
 /// or the local terminal adds a tab to the shared `SessionsModel` and pushes the
-/// tabbed terminal view; the `+` toolbar item adds a host.
+/// tabbed terminal view; the `+` toolbar item adds a host, and each row's ⓘ
+/// button (or its context menu) edits an existing one.
 struct HostListView: View {
     @StateObject private var model = HostListModel()
     @ObservedObject private var sessions = SessionsModel.shared
@@ -45,10 +46,28 @@ struct HostListView: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(model.hosts) { host in
-                        Button { open(model.connect(host)) } label: {
-                            HostRow(host: host)
+                        HStack {
+                            Button { open(model.connect(host)) } label: {
+                                HostRow(host: host)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+
+                            Button { editing = host } label: {
+                                Image(systemName: "info.circle")
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Edit \(host.alias)")
                         }
-                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button { editing = host } label: {
+                                Label("Edit…", systemImage: "pencil")
+                            }
+                            Button(role: .destructive) { model.delete(host) } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                     }
                     .onDelete(perform: model.delete)
                 }

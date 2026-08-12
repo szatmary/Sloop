@@ -51,11 +51,16 @@ final class HostListModel: ObservableObject {
     }
 
     func delete(at offsets: IndexSet) {
-        for index in offsets {
-            let host = hosts[index]
-            try? credentials.removeCredential(for: host.id)
-            store.remove(host)
+        // Resolve hosts up front: `delete(_:)` refreshes `hosts`, which would
+        // shift the remaining offsets.
+        for host in offsets.map({ hosts[$0] }) {
+            delete(host)
         }
+    }
+
+    func delete(_ host: SSHHost) {
+        try? credentials.removeCredential(for: host.id)
+        store.remove(host)
         hosts = store.hosts
     }
 
