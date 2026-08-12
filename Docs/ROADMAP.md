@@ -48,7 +48,8 @@ top of a working SSH terminal rather than first.
       sign-off on the residual risk remains.
 - [ ] **Runtime validation on real hardware** — first device test (biggest
       open risk; nothing has run live yet). Checklist in `Docs/HANDOFF.md`.
-- [ ] App icons + launch assets.
+- [x] App icon: `AppIcon.appiconset` generated from the SVG master
+      (`Scripts/generate-appicon.sh`); launch screen is system-generated.
 - [ ] Code signing + notarization (currently unsigned).
 - [ ] App Store Connect listing + submission.
 - [ ] Background-connection handling and reconnect polish (Mosh roaming exists;
