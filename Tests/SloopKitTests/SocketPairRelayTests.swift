@@ -98,4 +98,52 @@ final class SocketPairRelayTests: XCTestCase {
         close(relay.localFD)
         relay.shutdown()
     }
+
+    /// Exercises the teardown race `shutdown()` has to be safe against:
+    /// another thread hammering `receive()` (blocking writes against the
+    /// small kernel buffer) while `shutdown()` runs concurrently on a third
+    /// thread. `shutdown()` must poison the fd before freeing its number,
+    /// so a racing `receive()` can never be redirected onto an unrelated fd
+    /// the OS reused in between — and deliberate teardown must never look
+    /// like the local side going away, so `onLocalClosed` must not fire.
+    func testShutdownDuringConcurrentReceiveIsSafeAndSuppressesLocalClosed() throws {
+        let relay = try SocketPairRelay()
+
+        let notClosed = expectation(description: "onLocalClosed must not fire on deliberate shutdown")
+        notClosed.isInverted = true
+        relay.onLocalClosed = { notClosed.fulfill() }
+        relay.start()
+
+        // Drains localFD concurrently so receive()'s blocking writes can
+        // make progress instead of stalling the race under test.
+        let readerDone = expectation(description: "reader drained until closed")
+        Thread.detachNewThread {
+            var buf = [UInt8](repeating: 0, count: 4096)
+            while read(relay.localFD, &buf, buf.count) > 0 {}
+            readerDone.fulfill()
+        }
+
+        // Hammers receive() from another thread while shutdown() runs
+        // concurrently on a third — the exact race finding 1 closes.
+        let receiverDone = expectation(description: "receiver finished without crashing")
+        let payload = Data(repeating: 0x42, count: 4096)
+        Thread.detachNewThread {
+            for _ in 0..<500 {
+                relay.receive(payload)
+            }
+            receiverDone.fulfill()
+        }
+
+        let shutdownDone = expectation(description: "shutdown returned")
+        Thread.detachNewThread {
+            relay.shutdown()
+            shutdownDone.fulfill()
+        }
+
+        wait(for: [shutdownDone, receiverDone], timeout: 10)
+        close(relay.localFD)
+        wait(for: [readerDone], timeout: 5)
+        // Final bounded grace period: confirm no late/delayed onLocalClosed.
+        wait(for: [notClosed], timeout: 1)
+    }
 }

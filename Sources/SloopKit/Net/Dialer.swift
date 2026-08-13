@@ -29,14 +29,9 @@ public final class TCPDialer: Dialer {
     }
 
     public func dial() throws -> Int32 {
-        #if canImport(Glibc)
-        let sockStream = Int32(SOCK_STREAM.rawValue)
-        #else
-        let sockStream = SOCK_STREAM
-        #endif
         var hints = addrinfo()
         hints.ai_family = AF_UNSPEC
-        hints.ai_socktype = sockStream
+        hints.ai_socktype = sockStreamType
         hints.ai_protocol = Int32(IPPROTO_TCP)
         var result: UnsafeMutablePointer<addrinfo>?
         let status = getaddrinfo(host, String(port), &hints, &result)
