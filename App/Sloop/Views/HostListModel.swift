@@ -11,19 +11,31 @@ final class HostListModel: ObservableObject {
     private let store = HostStore()
     private let knownHosts = KnownHostsStore()
     private let credentials: CredentialStore
+    private let keys: KeyStore
 
     init() {
         #if canImport(Security)
         credentials = KeychainCredentialStore()
+        keys = KeychainKeyStore()
         #else
         credentials = InMemoryCredentialStore()
+        keys = InMemoryKeyStore()
         #endif
         hosts = store.hosts
+        // Lift legacy per-host PEMs into the library (idempotent; never
+        // overwrites entries that already exist or synced in).
+        KeyLibrary.migrate(hosts: hosts, credentials: credentials, keys: keys)
     }
 
     func newHost() -> SSHHost {
         SSHHost(alias: "new host", hostname: "", username: "")
     }
+
+    /// Library keys for the host editor's picker.
+    func libraryKeys() -> [NamedKey] { keys.keys() }
+
+    /// Store a pasted key into the shared library.
+    func saveLibraryKey(_ key: NamedKey) throws { try keys.setKey(key) }
 
     /// Save a host and, if a new secret was entered, its credential. A `nil`
     /// credential means "leave the stored secret untouched".
@@ -73,7 +85,8 @@ final class HostListModel: ObservableObject {
     /// shell (the Mosh UDP transport isn't wired yet, so today it always falls
     /// back — the terminal shows which mode it got).
     func connect(_ host: SSHHost) -> TerminalSession {
-        let credential = credentials.credential(for: host.id) ?? Credential()
+        let credential = KeyLibrary.credential(for: host, keys: keys, credentials: credentials)
+            ?? Credential()
         let knownHosts = self.knownHosts
 
         let makeSSH: () -> Transport = {

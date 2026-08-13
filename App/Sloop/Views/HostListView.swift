@@ -109,7 +109,11 @@ struct HostListView: View {
                 }
             }
             .sheet(item: $editing) { host in
-                HostEditView(host: host) { model.save($0, credential: $1) }
+                HostEditView(host: host,
+                             libraryKeys: model.libraryKeys(),
+                             onSaveKey: { try model.saveLibraryKey($0) }) {
+                    model.save($0, credential: $1)
+                }
             }
             .sheet(isPresented: $showingSupport) {
                 SupportView()

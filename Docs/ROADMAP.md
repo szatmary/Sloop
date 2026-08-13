@@ -67,6 +67,9 @@ top of a working SSH terminal rather than first.
 - iCloud host sync (secrets stay in the keychain, not iCloud).
 - SFTP / file transfer.
 - Port forwarding.
+- ~~Key management~~ → DONE: shared key library synced via iCloud Keychain;
+  `sloop import-key` CLI on the Mac (embedded in the app binary). Spec:
+  `Docs/superpowers/specs/2026-08-11-key-library-design.md`.
 - `ssh-agent` / Secure Enclave keys.
 - **`CommandRunner`** — non-interactive SSH exec (`{stdout, stderr, exitStatus}`)
   for saved one-shot commands on iOS/Mac. Also the foundation for a watch app.
