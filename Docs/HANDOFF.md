@@ -27,7 +27,8 @@ biggest open risk and needs a human at a Mac with Xcode.
   **appearance settings** (font/theme/cursor), iPad/Mac **keyboard + menu
   commands** (⌘T/⌘W/⌘⇧[ ]), native macOS **Settings** window.
 - **Host management**: keychain-backed credentials, host editor, **SSH config
-  import/export** (`~/.ssh/config`).
+  import/export** (`~/.ssh/config`), **shared key library** synced via iCloud
+  Keychain with a Mac-side `sloop import-key` CLI (`Scripts/sloop`).
 - **CI**: SloopKit unit tests, libssh2/protobuf/mosh xcframeworks, base app
   (iOS+macOS), SSH app (iOS+macOS), Mosh app (iOS+macOS), unsigned macOS
   Release + rolling `nightly` GitHub release. All required and green.
