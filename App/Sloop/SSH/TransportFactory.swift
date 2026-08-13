@@ -12,6 +12,7 @@ enum TransportFactory {
                     hostKeyVerifier: HostKeyVerifier) -> Transport {
         #if canImport(CSSH)
         return LibSSH2Transport(host: host, credential: credential,
+                                dialer: TCPDialer(host: host.hostname, port: host.port),
                                 knownHosts: knownHosts, hostKeyVerifier: hostKeyVerifier)
         #else
         return MessageTransport(message:

@@ -13,6 +13,7 @@ enum CommandRunnerFactory {
                     hostKeyVerifier: HostKeyVerifier) -> CommandRunner {
         #if canImport(CSSH)
         return LibSSH2CommandRunner(host: host, credential: credential,
+                                    dialer: TCPDialer(host: host.hostname, port: host.port),
                                     knownHosts: knownHosts, hostKeyVerifier: hostKeyVerifier)
         #else
         return UnavailableCommandRunner()
