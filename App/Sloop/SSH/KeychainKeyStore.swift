@@ -12,6 +12,14 @@ import Security
 /// Requires the keychain-access-groups entitlement (Sloop.entitlements);
 /// unsigned builds get descriptive errors from set/remove, never silence.
 final class KeychainKeyStore: KeyStore {
+    // Team prefix is hardcoded rather than `$(AppIdentifierPrefix)` because
+    // this string is also the CLI's (KeyCLI.swift) and any future non-app
+    // caller's contract for which access group to open — a build variable
+    // only resolves inside Xcode's entitlements processing. It MUST match
+    // the literal prefix baked into App/Sloop/Sloop.entitlements
+    // (`$(AppIdentifierPrefix)org.szatmary.sloop.shared`, which Xcode
+    // resolves to this same value for the `KR5WZAG3UE` team) — if you ever
+    // sign with a different team, update both places together.
     static let sharedAccessGroup = "KR5WZAG3UE.org.szatmary.sloop.shared"
 
     private let service: String
@@ -94,10 +102,19 @@ final class KeychainKeyStore: KeyStore {
 
     private func keychainError(_ status: OSStatus, _ doing: String) -> NSError {
         let message = SecCopyErrorMessageString(status, nil) as String? ?? "OSStatus \(status)"
+        // errSecMissingEntitlement here almost always means one of two
+        // things, neither of which is "needs any signed build" — a build
+        // signed by the wrong team (one other than KR5WZAG3UE, the team
+        // prefix baked into sharedAccessGroup) hits this same error just as
+        // an entirely unsigned one does.
         return NSError(domain: NSOSStatusErrorDomain, code: Int(status),
                        userInfo: [NSLocalizedDescriptionKey:
-                                    "Keychain error \(doing): \(message). " +
-                                    "Shared-keychain access requires a signed build (see SIGNING.md)."])
+                                    "Keychain error \(doing): \(message). Likely cause: this " +
+                                    "build either isn't signed with an entitlement granting the " +
+                                    "'\(accessGroup ?? "(none)")' keychain-access-group, or it's " +
+                                    "signed with a different Apple Developer team than the one " +
+                                    "baked into that access-group's prefix (KR5WZAG3UE). See " +
+                                    "Docs/SIGNING.md."])
     }
 }
 #endif

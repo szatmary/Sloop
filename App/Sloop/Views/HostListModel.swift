@@ -8,12 +8,23 @@ import SloopKit
 final class HostListModel: ObservableObject {
     @Published private(set) var hosts: [SSHHost] = []
 
+    /// `UserDefaults` key marking that `KeyLibrary.migrate` has already run on
+    /// this device. `KeyLibrary.migrate` is pure and never overwrites an
+    /// existing library entry, which means it can't distinguish "never
+    /// migrated" from "migrated, then the user removed the key via `sloop
+    /// remove-key`" — running it again after a removal would silently
+    /// re-create the removed key. Gating it behind this once-per-device
+    /// marker is what makes `remove-key` an actual, lasting removal.
+    private static let migratedLegacyPEMsDefaultsKey = "sloop.keyLibrary.migratedLegacyPEMs"
+
     private let store = HostStore()
     private let knownHosts = KnownHostsStore()
     private let credentials: CredentialStore
     private let keys: KeyStore
+    private let defaults: UserDefaults
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         #if canImport(Security)
         credentials = KeychainCredentialStore()
         keys = KeychainKeyStore()
@@ -22,9 +33,16 @@ final class HostListModel: ObservableObject {
         keys = InMemoryKeyStore()
         #endif
         hosts = store.hosts
-        // Lift legacy per-host PEMs into the library (idempotent; never
-        // overwrites entries that already exist or synced in).
-        KeyLibrary.migrate(hosts: hosts, credentials: credentials, keys: keys)
+        // Lift legacy per-host PEMs into the library, but only once per
+        // device: KeyLibrary.migrate is idempotent in the sense that it never
+        // overwrites an existing entry, but it has no way to know a name is
+        // missing *because the user removed it*. Running it unconditionally
+        // at every launch would resurrect keys removed via `sloop
+        // remove-key`. See migratedLegacyPEMsDefaultsKey.
+        if !defaults.bool(forKey: Self.migratedLegacyPEMsDefaultsKey) {
+            KeyLibrary.migrate(hosts: hosts, credentials: credentials, keys: keys)
+            defaults.set(true, forKey: Self.migratedLegacyPEMsDefaultsKey)
+        }
     }
 
     func newHost() -> SSHHost {

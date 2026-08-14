@@ -8,13 +8,22 @@ public enum KeyLibrary {
     ///
     /// `.publicKey(name:)` prefers the library key of that name; if the
     /// library has none (pre-migration data, or a removed key) it falls back
-    /// to the legacy per-host credential. Password hosts always use the
-    /// per-host credential.
+    /// to the legacy per-host credential — but only if that credential
+    /// actually carries a private key. A `.publicKey` host must never resolve
+    /// to a password-only legacy credential: `LibSSH2Transport` picks key vs.
+    /// password auth from the credential's contents, so returning a stale
+    /// password would silently re-send it to a host the user migrated to key
+    /// auth. Password hosts always use the per-host credential.
     public static func credential(for host: SSHHost,
                                   keys: KeyStore,
                                   credentials: CredentialStore) -> Credential? {
-        if case .publicKey(let name) = host.auth, let key = keys.key(named: name) {
-            return Credential(privateKeyPEM: key.privateKeyPEM, passphrase: key.passphrase)
+        if case .publicKey(let name) = host.auth {
+            if let key = keys.key(named: name) {
+                return Credential(privateKeyPEM: key.privateKeyPEM, passphrase: key.passphrase)
+            }
+            guard let legacy = credentials.credential(for: host.id),
+                  legacy.privateKeyPEM != nil else { return nil }
+            return legacy
         }
         return credentials.credential(for: host.id)
     }
@@ -23,6 +32,18 @@ public enum KeyLibrary {
     /// existing `.publicKey(name:)`. Idempotent: existing library entries are
     /// never overwritten (they may be newer, or synced from another device).
     /// The per-host copy is left in place as the fallback tier.
+    ///
+    /// This function is pure and safe to call repeatedly, but it is intended
+    /// to run **once per device**: because it never overwrites an existing
+    /// library entry, it also can't tell a key the user deliberately removed
+    /// from the library (via `sloop remove-key`) apart from one that was
+    /// simply never migrated. Calling it again after a removal re-lifts the
+    /// legacy per-host PEM and effectively undoes the removal. Callers that
+    /// run this at every launch (as the app does) must gate it behind a
+    /// persisted "already migrated" marker of their own — see
+    /// `HostListModel` for the app-layer marker. SloopKit itself stays
+    /// Foundation-only and has no place to durably store that marker, so it
+    /// isn't kept here.
     public static func migrate(hosts: [SSHHost],
                                credentials: CredentialStore,
                                keys: KeyStore) {

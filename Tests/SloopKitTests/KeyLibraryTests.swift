@@ -25,6 +25,23 @@ final class KeyLibraryTests: XCTestCase {
         XCTAssertEqual(credential, Credential(privateKeyPEM: "legacy-pem"))
     }
 
+    func testLegacyPasswordOnlyCredentialNeverAnswersAPublicKeyHost() throws {
+        // A host that was migrated to key auth (`.publicKey`), has no
+        // matching library key (removed, or never migrated), but still has
+        // a *password-only* legacy Credential on file — e.g. it was a
+        // password host before the switch. Falling back to that credential
+        // would hand LibSSH2Transport a password, and it silently re-sends
+        // it as if the user never switched to key auth. Must resolve to nil,
+        // not the stale password.
+        let credentials = InMemoryCredentialStore()
+        let h = host(auth: .publicKey(name: "web"))
+        try credentials.setCredential(Credential(password: "stale-password"), for: h.id)
+        let credential = KeyLibrary.credential(for: h,
+                                               keys: InMemoryKeyStore(),
+                                               credentials: credentials)
+        XCTAssertNil(credential)
+    }
+
     func testLibraryWinsOverLegacyCredential() throws {
         let keys = InMemoryKeyStore()
         try keys.setKey(NamedKey(name: "web", privateKeyPEM: "library-pem"))

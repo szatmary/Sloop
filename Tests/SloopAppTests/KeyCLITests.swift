@@ -4,12 +4,27 @@ import XCTest
 final class KeyCLITests: XCTestCase {
     func testParsesImportKeyWithDefaultName() {
         XCTAssertEqual(KeyCLI.parse(["Sloop", "import-key", "/Users/m/.ssh/id_ed25519"]),
-                       .importKey(path: "/Users/m/.ssh/id_ed25519", name: nil))
+                       .importKey(path: "/Users/m/.ssh/id_ed25519", name: nil, force: false))
     }
 
     func testParsesImportKeyWithExplicitName() {
         XCTAssertEqual(KeyCLI.parse(["Sloop", "import-key", "k.pem", "--name", "work"]),
-                       .importKey(path: "k.pem", name: "work"))
+                       .importKey(path: "k.pem", name: "work", force: false))
+    }
+
+    func testParsesForceAfterName() {
+        XCTAssertEqual(KeyCLI.parse(["Sloop", "import-key", "k.pem", "--name", "work", "--force"]),
+                       .importKey(path: "k.pem", name: "work", force: true))
+    }
+
+    func testParsesForceBeforeName() {
+        XCTAssertEqual(KeyCLI.parse(["Sloop", "import-key", "k.pem", "--force", "--name", "work"]),
+                       .importKey(path: "k.pem", name: "work", force: true))
+    }
+
+    func testParsesForceWithoutName() {
+        XCTAssertEqual(KeyCLI.parse(["Sloop", "import-key", "k.pem", "--force"]),
+                       .importKey(path: "k.pem", name: nil, force: true))
     }
 
     func testParsesListAndRemove() {
@@ -28,6 +43,12 @@ final class KeyCLITests: XCTestCase {
         XCTAssertEqual(KeyCLI.parse(["Sloop", "import-key"]), .usage)
         XCTAssertEqual(KeyCLI.parse(["Sloop", "remove-key"]), .usage)
         XCTAssertEqual(KeyCLI.parse(["Sloop", "import-key", "k.pem", "--name"]), .usage)
+        // --name with a value that happens to look like another flag is
+        // still consumed as the name, not re-parsed as a flag; only a
+        // trailing --name with nothing after it is malformed (covered
+        // above). An unrecognized flag is malformed, not silently ignored.
+        XCTAssertEqual(KeyCLI.parse(["Sloop", "import-key", "k.pem", "--bogus"]), .usage)
+        XCTAssertEqual(KeyCLI.parse(["Sloop", "import-key", "k.pem", "--force", "--name"]), .usage)
     }
 
     func testEncryptedPEMDetection() {
