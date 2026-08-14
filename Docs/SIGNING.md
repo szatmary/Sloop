@@ -42,8 +42,14 @@ security import cert.p12 -k build.keychain -P "$DEVELOPER_ID_P12_PASSWORD" \
 security list-keychains -s build.keychain
 security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
 
-# sign with hardened runtime + secure timestamp (required for notarization)
+# sign with hardened runtime + secure timestamp (required for notarization),
+# and — IMPORTANT — the app's own entitlements. Omitting --entitlements here
+# silently drops the keychain-access-groups entitlement the key library
+# needs (App/Sloop/Sloop.entitlements); the app still signs and notarizes
+# cleanly, it just can't read or write the shared keychain at runtime, and
+# nothing in the signing/notarization pipeline catches that for you.
 codesign --force --deep --options runtime --timestamp \
+  --entitlements App/Sloop/Sloop.entitlements \
   --sign "Developer ID Application" build/pkg/Sloop.app
 
 # zip, submit to Apple, wait, then staple the ticket onto the app

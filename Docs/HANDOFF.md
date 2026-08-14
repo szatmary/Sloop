@@ -59,6 +59,37 @@ open Sloop.xcodeproj
 # Sloop_macOS scheme's SloopTests bundle.
 ```
 
+**Signing note (since the key library landed):** the app targets now carry
+`CODE_SIGN_ENTITLEMENTS` (`App/Sloop/Sloop.entitlements`, for the shared
+keychain-access-group — see [Key library](#key-library) below), so a bare
+
+```sh
+xcodebuild -project Sloop.xcodeproj -scheme Sloop_macOS build
+```
+
+**fails** with *"requires a provisioning profile"* — there's no team selected
+to sign the entitlement with. Three ways around it, depending on what you're
+doing:
+
+- **Interactive development** — open the project in Xcode (`open
+  Sloop.xcodeproj`) and pick your team in the target's Signing & Capabilities
+  tab once; subsequent Xcode builds and `xcodebuild` invocations reuse it.
+- **Scripted/CI builds that need to run and use the app** — pass a team and
+  let Xcode provision automatically:
+  ```sh
+  xcodebuild -project Sloop.xcodeproj -scheme Sloop_macOS \
+    -allowProvisioningUpdates DEVELOPMENT_TEAM=<your team> CODE_SIGN_STYLE=Automatic build
+  ```
+- **Test-only builds that never touch the shared keychain** — skip signing
+  entirely:
+  ```sh
+  xcodebuild test -project Sloop.xcodeproj -scheme Sloop_macOS \
+    -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
+  ```
+  (Key-library keychain calls will fail at runtime with a descriptive error
+  in an unsigned build — expected; see [Known limitations](#known-limitations)
+  below.)
+
 Prebuilt macOS app: the `nightly` GitHub release (refreshed on every push to
 `main`). It's **ad-hoc signed but not notarized**, so Gatekeeper blocks the
 download on first launch. To run it: right-click the app → **Open** → **Open**;
@@ -104,6 +135,94 @@ problem — it goes away with Developer ID signing + notarization (a ship step).
 - [ ] **Appearance**: font size / theme / cursor apply live; persist across
       relaunch; macOS ⌘, Settings.
 - [ ] **SSH config**: import `~/.ssh/config`; export and re-import round-trips.
+
+## Key library
+
+A shared SSH key library, synced across devices via iCloud Keychain: import a
+private key once and pick it from any host's editor on any of your signed-in
+devices, instead of pasting or re-storing a PEM per host. Implementation:
+`Sources/SloopKit/Model/NamedKey.swift` (the `KeyStore` protocol and the
+`NamedKey` model — its JSON encoding is the synced wire format, see
+`Tests/SloopKitTests/KeyStoreTests.swift`), `Sources/SloopKit/Model/
+KeyLibrary.swift` (connect-time resolution + one-time legacy migration),
+`App/Sloop/SSH/KeychainKeyStore.swift` (the keychain-backed `KeyStore`, in
+the shared access group), and the picker in `App/Sloop/Views/
+HostEditView.swift`.
+
+### The `sloop` CLI
+
+The Mac app binary doubles as a CLI for managing the library from the
+terminal — quicker than pasting a PEM into the host editor for every import.
+It lives *inside* the app binary (`App/Sloop/KeyCLI.swift`), not as a
+separate executable, because writing the shared, iCloud-synced keychain item
+requires the app's own code signature and entitlements; a standalone script
+can't do that.
+
+```
+sloop import-key <path> [--name <name>] [--force]
+sloop list-keys
+sloop remove-key <name>
+```
+
+- `import-key` reads a PEM from `<path>`, prompting for a passphrase if the
+  key is encrypted. The library name defaults to the file's basename; pass
+  `--name` to choose one explicitly. If that name already exists in the
+  library, the import is **refused** (never silently overwritten — the
+  library syncs to every device) unless you pass `--force`.
+- `list-keys` prints every key name in the library (and whether it has a
+  stored passphrase).
+- `remove-key <name>` deletes a key from the library. Note this only removes
+  the library entry: a host that predates the key library may still have its
+  own legacy per-host copy of the same key material, which `remove-key`
+  leaves untouched (see Known limitations below).
+
+Run it via `Scripts/sloop`, a thin wrapper that execs into the app binary. It
+looks for `Sloop.app` or `Sloop_macOS.app` (a local build keeps the scheme
+name; a packaged release is renamed) in `/Applications` and
+`~/Applications`. Point `SLOOP_APP` at a different `.app` bundle or straight
+at the binary to override the search — handy when your build is still
+sitting in DerivedData:
+
+```sh
+SLOOP_APP=~/Library/Developer/Xcode/DerivedData/Sloop-*/Build/Products/Debug/Sloop_macOS.app \
+  Scripts/sloop list-keys
+```
+
+The CLI (and the app's own key picker) needs a **properly signed build** —
+one whose code signature carries the keychain-access-group entitlement for
+the shared group, from a team matching the hardcoded prefix in
+`KeychainKeyStore.sharedAccessGroup`. See `Docs/SIGNING.md` and the signing
+note under "How to build & run" above. An unsigned or wrongly-signed build
+fails every key-library operation with a descriptive keychain error, not
+silence.
+
+### Known limitations
+
+Two behaviors below are deliberate trade-offs, not bugs — flagging them here
+because fixing either needs a design decision this document doesn't make on
+your behalf:
+
+- **The ad-hoc-signed nightly build can't do key auth at all.** Ad-hoc
+  signing (`codesign --sign -`, what the `nightly` GitHub release uses) can't
+  carry a real keychain-access-group entitlement, so every shared-keychain
+  call in that build fails. There is no per-host fallback key writer
+  anymore — the old per-host `Credential`-based key storage still exists as
+  the legacy *read* fallback (`KeyLibrary.credential`), but nothing writes to
+  it going forward, so the paste-a-key flow in the host editor throws on an
+  ad-hoc build. **Password auth is unaffected** and works on any build.
+  Configuring key auth requires a properly signed build (see above).
+- **Migration can make one device's key shadow another's.** Legacy
+  migration (`KeyLibrary.migrate`) names each newly-lifted library key after
+  the *host's alias*, not anything intrinsically unique. Hosts are
+  local-only (never synced); library keys sync via iCloud Keychain. So if two
+  devices each have a pre-migration host with the same alias but different
+  key material (e.g. both call a host "prod" but used different keys before
+  the library existed), migration on each device creates a library entry
+  named "prod" — and because `migrate` never overwrites an existing entry,
+  whichever device's sync lands first wins, and the other device's "prod"
+  host silently starts using the wrong key. If this applies to you: rename
+  the affected hosts to be unique before they migrate, or re-pick each
+  host's key explicitly in the editor afterward.
 
 ## Where things live
 

@@ -64,7 +64,9 @@ top of a working SSH terminal rather than first.
 
 ## Nice-to-have
 
-- iCloud host sync (secrets stay in the keychain, not iCloud).
+- iCloud host sync (the host list itself is still local-only; key material
+  already syncs today via iCloud Keychain, E2E-encrypted, as part of the
+  shared key library below — the host list is what's not yet synced).
 - SFTP / file transfer.
 - Port forwarding.
 - ~~Key management~~ → DONE: shared key library synced via iCloud Keychain;
