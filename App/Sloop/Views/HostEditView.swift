@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import SloopKit
 
@@ -22,6 +23,18 @@ struct HostEditView: View {
         case password = "Password"
         case privateKey = "Private Key"
         var id: String { rawValue }
+    }
+
+    /// Pasted name/PEM with leading/trailing whitespace removed. Used for
+    /// both the disabled-check (so a whitespace-only paste doesn't count as
+    /// "filled in") and for what actually gets stored, so a stray leading
+    /// space or trailing newline from a copy-paste never ends up baked into
+    /// the library entry.
+    private var trimmedPastedName: String {
+        pastedName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var trimmedPastedPEM: String {
+        pastedPEM.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     init(host: SSHHost,
@@ -135,10 +148,13 @@ struct HostEditView: View {
                             do {
                                 var name = selectedKeyName
                                 if name.isEmpty {
-                                    name = pastedName
+                                    name = trimmedPastedName
+                                    guard !libraryKeys.contains(where: { $0.name == name }) else {
+                                        throw KeyNameCollisionError(name: name)
+                                    }
                                     try onSaveKey(NamedKey(
                                         name: name,
-                                        privateKeyPEM: pastedPEM,
+                                        privateKeyPEM: trimmedPastedPEM,
                                         passphrase: pastedPassphrase.isEmpty ? nil : pastedPassphrase))
                                 }
                                 host.auth = .publicKey(name: name)
@@ -151,9 +167,22 @@ struct HostEditView: View {
                     }
                     .disabled(host.hostname.isEmpty || host.username.isEmpty
                               || (authKind == .privateKey && selectedKeyName.isEmpty
-                                  && (pastedName.isEmpty || pastedPEM.isEmpty)))
+                                  && (trimmedPastedName.isEmpty || trimmedPastedPEM.isEmpty)))
                 }
             }
         }
+    }
+}
+
+/// Thrown when a pasted key's name matches an existing library entry. The
+/// library is synced via iCloud Keychain, so silently overwriting here would
+/// silently replace the key on every device — surfaced instead as the same
+/// "Couldn't Save Key" alert used for keychain-write failures.
+private struct KeyNameCollisionError: LocalizedError {
+    let name: String
+    var errorDescription: String? {
+        "A key named '\(name)' already exists in your library. Pick it from " +
+        "the list above instead, or choose a different name — importing " +
+        "here never overwrites an existing key."
     }
 }

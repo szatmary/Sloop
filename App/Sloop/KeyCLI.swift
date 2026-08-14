@@ -6,12 +6,12 @@ import SloopKit
 /// the app's signature and entitlements (a plain script cannot write the
 /// shared, synchronizable keychain). Invoked via Scripts/sloop:
 ///
-///     sloop import-key ~/.ssh/id_ed25519 [--name work]
+///     sloop import-key ~/.ssh/id_ed25519 [--name work] [--force]
 ///     sloop list-keys
 ///     sloop remove-key work
 enum KeyCLI {
     enum Command: Equatable {
-        case importKey(path: String, name: String?)
+        case importKey(path: String, name: String?, force: Bool)
         case listKeys
         case removeKey(name: String)
         case usage
@@ -24,9 +24,25 @@ enum KeyCLI {
         case "import-key":
             guard arguments.count >= 3 else { return .usage }
             let path = arguments[2]
-            if arguments.count == 3 { return .importKey(path: path, name: nil) }
-            guard arguments.count == 5, arguments[3] == "--name" else { return .usage }
-            return .importKey(path: path, name: arguments[4])
+            var name: String?
+            var force = false
+            var i = 3
+            // --name and --force may each appear at most once, in either
+            // order (`--force --name x` and `--name x --force` both parse).
+            while i < arguments.count {
+                switch arguments[i] {
+                case "--force":
+                    force = true
+                    i += 1
+                case "--name":
+                    guard i + 1 < arguments.count else { return .usage }
+                    name = arguments[i + 1]
+                    i += 2
+                default:
+                    return .usage
+                }
+            }
+            return .importKey(path: path, name: name, force: force)
         case "list-keys":
             return .listKeys
         case "remove-key":
@@ -47,14 +63,23 @@ enum KeyCLI {
             case .usage:
                 FileHandle.standardError.write(Data(usageText.utf8))
                 exit(64)  // EX_USAGE
-            case .importKey(let path, let name):
+            case .importKey(let path, let name, let force):
                 let pem = try String(contentsOfFile: (path as NSString).expandingTildeInPath,
                                      encoding: .utf8)
                 var passphrase: String?
                 if isEncryptedPEM(pem), let raw = getpass("Key passphrase: ") {
                     passphrase = String(cString: raw)
                 }
+                // Defaulting the name to the file's basename means two
+                // different keys on disk (e.g. ~/.ssh/id_rsa and
+                // ~/work/.ssh/id_rsa) can collide on the same library name.
+                // The library is synced via iCloud Keychain, so a silent
+                // overwrite here would silently replace the key on every
+                // device. Require an explicit --force to overwrite.
                 let keyName = name ?? ((path as NSString).lastPathComponent)
+                if !force, store.key(named: keyName) != nil {
+                    throw KeyExistsError(name: keyName)
+                }
                 try store.setKey(NamedKey(name: keyName, privateKeyPEM: pem, passphrase: passphrase))
                 print("Imported '\(keyName)'. It will appear in Sloop on all your devices (iCloud Keychain).")
             case .listKeys:
@@ -65,7 +90,9 @@ enum KeyCLI {
                 }
             case .removeKey(let name):
                 try store.removeKey(named: name)
-                print("Removed '\(name)'.")
+                print("Removed '\(name)' from the library. If any host predates the key " +
+                      "library, it may still have its own legacy copy of this key stored " +
+                      "per-host; edit that host and re-pick its key to clear it.")
             }
         } catch {
             FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))
@@ -89,10 +116,23 @@ enum KeyCLI {
     }
 
     private static let usageText = """
-    usage: sloop import-key <path> [--name <name>]
+    usage: sloop import-key <path> [--name <name>] [--force]
            sloop list-keys
            sloop remove-key <name>
 
     """
+}
+
+/// Thrown by `import-key` when the target name already exists in the library
+/// and `--force` wasn't given. A distinct type (rather than a bare `exit(1)`
+/// at the call site) so the collision goes through the same error-formatting
+/// path as every other CLI failure.
+private struct KeyExistsError: LocalizedError {
+    let name: String
+    var errorDescription: String? {
+        "a key named '\(name)' already exists in the library. Re-run with " +
+        "--force to overwrite it on every synced device, or --name <other> " +
+        "to import under a different name."
+    }
 }
 #endif

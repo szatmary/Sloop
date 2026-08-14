@@ -35,4 +35,26 @@ final class KeyStoreTests: XCTestCase {
     func testRemoveMissingKeyDoesNotThrow() {
         XCTAssertNoThrow(try InMemoryKeyStore().removeKey(named: "absent"))
     }
+
+    // NamedKey's JSON is the wire format synced across devices via iCloud
+    // Keychain (KeychainKeyStore stores the JSON-encoded value directly). A
+    // property rename or CodingKeys change here would silently orphan every
+    // already-synced item on other devices — decode would just fail and
+    // `keys()`/`key(named:)` would quietly drop them (both use `try?`). This
+    // test exists to make that kind of change loud, not to test
+    // Foundation's JSONEncoder/Decoder themselves.
+    func testNamedKeyRoundTripsThroughJSON() throws {
+        let key = NamedKey(name: "work", privateKeyPEM: ed25519.privateKeyPEM, passphrase: "secret")
+        let data = try JSONEncoder().encode(key)
+        let decoded = try JSONDecoder().decode(NamedKey.self, from: data)
+        XCTAssertEqual(decoded, key)
+    }
+
+    func testNamedKeyRoundTripsThroughJSONWithNilPassphrase() throws {
+        let key = NamedKey(name: "work", privateKeyPEM: "pem-body", passphrase: nil)
+        let data = try JSONEncoder().encode(key)
+        let decoded = try JSONDecoder().decode(NamedKey.self, from: data)
+        XCTAssertEqual(decoded, key)
+        XCTAssertNil(decoded.passphrase)
+    }
 }
