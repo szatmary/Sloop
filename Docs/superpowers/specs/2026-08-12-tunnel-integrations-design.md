@@ -3,6 +3,42 @@
 _Approved 2026-08-12. Feature: reach SSH hosts behind Cloudflare Tunnel or on a
 Tailscale tailnet from inside the app, on iOS and macOS alike._
 
+## Revision 2026-08-17 — the SSH library moves to swift-nio-ssh
+
+The Cloudflare **carrier** is re-planned; everything else in this spec stands.
+
+`SocketPairRelay` and the WebSocket half of `CloudflareAccessDialer` exist for
+one reason: libssh2 demands a blocking file descriptor, while a WebSocket is
+callback-shaped. NIO removes that mismatch — the carrier becomes a WebSocket
+`ChannelHandler` sitting in the same pipeline as `NIOSSHHandler`, with NIO
+supplying backpressure. No socketpair, no pump thread, no semaphores, no fd
+lifetime to manage.
+
+That matters because every defect found while building the bridge — a
+self-joining teardown deadlock, a three-way deadlock between URLSession's
+serial delegate queue and the blocking inbound write, a use-after-close on a
+recycled descriptor, and hand-rolled send backpressure — is an artifact of the
+bridge itself, not of the Access protocol. They do not exist in a NIO pipeline.
+
+**Unchanged by the pivot:**
+
+- The `Dialer` seam. NIO adopts an already-connected socket via
+  `ClientBootstrap.withConnectedSocket(descriptor:)`, which is exactly what
+  `dial()` returns, so `TCPDialer` and a future `TailscaleDialer` plug in as
+  designed.
+- `SSHHost.connectionMethod`, `AccessToken` / `AccessTokenStore`, the Keychain
+  store, the browser-SSO sheet, and the host UI — all transport-agnostic.
+- The **entire Tailscale plan**: libtailscale's dial returns a real socket fd.
+- The verified Access wire protocol: `Cf-Access-Token` header, raw bytes in
+  binary WebSocket frames, no extra framing (checked against cloudflared
+  source, and re-confirmed independently in review).
+
+**Superseded:** the `SocketPairRelay` bridge and the URLSession-based carrier
+in `CloudflareAccessDialer`. Both remain on the tunnels branch as a protocol
+reference for the NIO rewrite, unwired and **not finished** — one Important
+review finding is still open against the relay's teardown path. Do not treat
+that code as shippable.
+
 ## Problem
 
 Sloop can only SSH to hosts that are directly reachable: `LibSSH2Transport`
