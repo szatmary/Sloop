@@ -141,13 +141,26 @@ problem — it goes away with Developer ID signing + notarization (a ship step).
 A shared SSH key library, synced across devices via iCloud Keychain: import a
 private key once and pick it from any host's editor on any of your signed-in
 devices, instead of pasting or re-storing a PEM per host. Implementation:
-`Sources/SloopKit/Model/NamedKey.swift` (the `KeyStore` protocol and the
+`Sources/SloopKit/Model/KeyStore.swift` (the `KeyStore` protocol and the
 `NamedKey` model — its JSON encoding is the synced wire format, see
-`Tests/SloopKitTests/KeyStoreTests.swift`), `Sources/SloopKit/Model/
-KeyLibrary.swift` (connect-time resolution + one-time legacy migration),
-`App/Sloop/SSH/KeychainKeyStore.swift` (the keychain-backed `KeyStore`, in
-the shared access group), and the picker in `App/Sloop/Views/
-HostEditView.swift`.
+`Tests/SloopKitTests/KeyStoreTests.swift`),
+`Sources/SloopKit/Model/KeyLibrary.swift` (connect-time resolution + one-time
+legacy migration), `App/Sloop/SSH/KeychainKeyStore.swift` (the keychain-backed
+`KeyStore`, in the shared access group), and the picker in
+`App/Sloop/Views/HostEditView.swift`.
+
+**Verified on real hardware (2026-08-17):** a key imported on a Mac with
+`sloop import-key` (Debug build signed with team `KR5WZAG3UE`) propagated
+through iCloud Keychain and appeared in the key picker on an iPad (9th gen,
+iPadOS 26.6) running a signed Debug build. This confirms the end-to-end path:
+the synchronizable keychain item, the shared access group, and — the part
+automatic signing had to arrange on its own — the iOS provisioning profile
+carrying the keychain-sharing capability. Propagation is not instant: the
+iPad showed nothing until it had been awake and network-connected for a
+while after the import. An empty picker shortly after an import is most
+likely sync latency, not a failure. **Still unverified:** an actual SSH
+login authenticated by a library key (blocked on the same live-SSH gap the
+rest of the app has).
 
 ### The `sloop` CLI
 
