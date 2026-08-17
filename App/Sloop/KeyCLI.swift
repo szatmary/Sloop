@@ -83,7 +83,11 @@ enum KeyCLI {
                 if !force, store.key(named: keyName) != nil {
                     throw KeyExistsError(name: keyName)
                 }
-                let publicKey = try publicKey(forPrivateKeyAt: path)
+                // Best-effort: the OpenSSL backend derives the public key
+                // itself, so a key without one still authenticates. Storing it
+                // when available keeps the library usable by backends that
+                // can't derive (mbedTLS couldn't) and costs nothing.
+                let publicKey = try? publicKey(forPrivateKeyAt: path)
                 try store.setKey(NamedKey(name: keyName,
                                           privateKeyPEM: pem,
                                           publicKey: publicKey,

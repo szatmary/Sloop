@@ -15,6 +15,16 @@ import CSSH
 ///
 /// Deliberately makes no further libssh2 calls: an error path is the worst
 /// place to risk another blocking round-trip on a non-blocking session.
+/// Calls `body` with a C string pointer and byte count for `value`, or
+/// `(nil, 0)` when it is absent — the shape `libssh2_userauth_publickey_*`
+/// wants for an optional public key, without duplicating the call at two
+/// arities in both auth paths.
+func withOptionalCString<R>(_ value: String?,
+                            _ body: (UnsafePointer<CChar>?, Int) -> R) -> R {
+    guard let value, !value.isEmpty else { return body(nil, 0) }
+    return value.withCString { body($0, value.utf8.count) }
+}
+
 func libssh2LastError(_ session: OpaquePointer) -> String {
     var message: UnsafeMutablePointer<CChar>?
     var length: Int32 = 0

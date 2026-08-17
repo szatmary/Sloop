@@ -8,10 +8,17 @@ linked below; each remains under its own terms.
 | --- | --- | --- | --- |
 | [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | MIT | Yes (SwiftPM) | Terminal view + emulator |
 | [libssh2](https://www.libssh2.org) | BSD-3-Clause | Yes (`Vendor/libssh2.xcframework`) | SSH transport |
+| [OpenSSL](https://www.openssl.org) | Apache-2.0 | Yes (`libcrypto` merged into `libssh2.xcframework`) | libssh2's crypto backend |
 | [Mosh](https://mosh.org) | **GPL-3.0** | Yes (`Vendor/mosh.xcframework`) | UDP/SSP mobile-shell transport |
 | [Protocol Buffers](https://github.com/protocolbuffers/protobuf) | BSD-3-Clause | Yes (merged into `mosh.xcframework`) | Mosh's wire format |
 | zlib (`libz`) | zlib | No — Apple SDK system library | Mosh payload compression |
 | [ios-cmake](https://github.com/leetal/ios-cmake) | BSD-3-Clause | No — build tooling only | Cross-compile toolchain |
+
+OpenSSL 3.x is Apache-2.0, which is compatible with GPL-3.0 — the well-known
+OpenSSL/GPL licensing conflict applied to OpenSSL 1.x under the old dual
+OpenSSL/SSLeay license and does not apply here. (Sloop used mbedTLS as the
+crypto backend until 2026-08; it was swapped out because it cannot handle
+Ed25519 keys. See `Docs/SSH.md`.)
 
 ## Why Sloop is GPL-3.0
 

@@ -165,25 +165,18 @@ final class LibSSH2Transport: Transport {
         let user = host.username
 
         if let key = credential.privateKeyPEM {
-            // The public key is not optional in practice: libssh2's mbedTLS
-            // backend can't derive it from the private key in memory, so
-            // passing NULL here fails every key auth. Refuse up front with an
-            // actionable message rather than letting the server report a
-            // misleading "Username/PublicKey combination invalid".
-            guard let publicKey = credential.publicKey, !publicKey.isEmpty else {
-                return SSHError.authenticationFailed(
-                    "this key has no public key stored alongside it, which this build " +
-                    "requires — re-import it with `sloop import-key` (it picks up the " +
-                    "matching .pub file automatically)")
-            }
-            let rc = user.withCString { userPtr -> Int32 in
-                key.withCString { keyPtr in
-                    publicKey.withCString { pubPtr in
+            // Supply the public key when we have it, and let the crypto
+            // backend derive it otherwise. OpenSSL derives it happily; the
+            // mbedTLS backend this project used previously could not, which
+            // is why keys carry one — see Credential.publicKey.
+            let rc = withOptionalCString(credential.publicKey) { pubPtr, pubLen in
+                user.withCString { userPtr -> Int32 in
+                    key.withCString { keyPtr in
                         (credential.passphrase ?? "").withCString { passPtr in
                             retry(session, sock) {
                                 libssh2_userauth_publickey_frommemory(
                                     session, userPtr, user.utf8.count,
-                                    pubPtr, publicKey.utf8.count,
+                                    pubPtr, pubLen,
                                     keyPtr, key.utf8.count,
                                     passPtr)
                             }

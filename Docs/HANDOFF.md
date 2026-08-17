@@ -124,7 +124,8 @@ problem — it goes away with Developer ID signing + notarization (a ship step).
 - [ ] App launches on iPhone, iPad, and Mac; host list renders.
 - [ ] **Local terminal** echoes input.
 - [ ] **SSH password** login to a real host; shell is interactive; resize works.
-- [ ] **SSH key** login (paste PEM or import a key file).
+- [x] **SSH key** login — RSA verified on an iPad against a live host
+      (2026-08-17).
 - [ ] **Host-key prompt** appears for an unknown host; mismatch is refused.
 - [ ] **Mosh**: on a host with `mosh-server`, "Use Mosh" connects over UDP and
       renders; kill Wi-Fi→cellular and confirm it resumes (roaming).
@@ -135,6 +136,37 @@ problem — it goes away with Developer ID signing + notarization (a ship step).
 - [ ] **Appearance**: font size / theme / cursor apply live; persist across
       relaunch; macOS ⌘, Settings.
 - [ ] **SSH config**: import `~/.ssh/config`; export and re-import round-trips.
+
+### Key types — required before release
+
+Each supported key type must authenticate end to end, on device, against a
+real server. Do not treat "the app connected" as covering all of them: the
+crypto backend implements each key type separately, and Sloop has already
+shipped a backend (mbedTLS) that could not parse Ed25519 keys at all while
+RSA worked fine.
+
+- [x] **RSA** (`ssh-rsa` key file, `rsa-sha2-*` signature) — verified on iPad,
+      2026-08-17.
+- [ ] **Ed25519** (`ssh-ed25519`) — NOT yet verified. Needs a host that
+      authorizes an Ed25519 key; under OpenSSL the key parses, but no live
+      session has used one.
+- [ ] **ECDSA** (`ecdsa-sha2-nistp256`) — never exercised.
+- [ ] **Passphrase-protected key** of any type — the passphrase path has never
+      run on device.
+
+**How to test this without fooling yourself.** `ssh -i <key> host` proves
+nothing on its own: OpenSSH also offers your agent's keys and any
+`IdentityFile` from `~/.ssh/config`, so a *different* key may be what
+authenticates. This exact trap produced a false "Ed25519 works" reading during
+the 2026-08-17 session. Always isolate:
+
+```sh
+ssh -o IdentitiesOnly=yes -i ~/.ssh/<key> user@host true   # only this key
+ssh -v  -i ~/.ssh/<key> user@host true | grep 'Server accepts key'
+```
+
+The `Server accepts key:` line names the key that actually worked. Confirm it
+is the one under test before recording a pass.
 
 ## Key library
 
