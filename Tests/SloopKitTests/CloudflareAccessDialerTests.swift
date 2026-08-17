@@ -94,14 +94,25 @@ final class CloudflareAccessDialerTests: XCTestCase {
             url: URL(string: "ws://127.0.0.1:\(server.port)")!,
             hostname: "ssh.example.com", token: "test-token")
         let fd = try dialer.dial()
-        defer { close(fd) }
 
         let payload = Data((0..<1_000_000).map { UInt8(truncatingIfNeeded: $0) })
         var echoed = Data()
         echoed.reserveCapacity(payload.count)
         let done = expectation(description: "round-tripped 1 MB without stalling")
+        // Fulfilled on every exit path of the transfer thread's closure
+        // (success, a short read/write, or being kicked out of a blocking
+        // call by the `close(fd)` below) so the main thread can join it
+        // before touching `echoed` or `fd` again. On a regression (a stall)
+        // `done` times out while the thread is still running; without this,
+        // reading `echoed` here while that thread might still be appending
+        // to it, and closing an `fd` it's still blocked inside a read/write
+        // on, are both data races — races that can crash the process
+        // instead of leaving the clean "stalled at N bytes" failure this
+        // test is meant to produce.
+        let transferThreadFinished = expectation(description: "transfer thread finished")
 
         Thread.detachNewThread {
+            defer { transferThreadFinished.fulfill() }
             var writeOffset = 0
             var buf = [UInt8](repeating: 0, count: 32 * 1024)
             payload.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
@@ -119,7 +130,22 @@ final class CloudflareAccessDialerTests: XCTestCase {
             done.fulfill()
         }
 
-        wait(for: [done], timeout: 15)
+        let transferResult = XCTWaiter().wait(for: [done], timeout: 15)
+
+        // Whether or not the transfer completed, force the transfer thread
+        // out of any blocking read/write it might still be in before
+        // touching anything it also touches: closing `fd` makes a blocked
+        // read return 0/-1 and a blocked write return -1, so the thread's
+        // `guard n > 0 else { return }` (or its outer while-condition, if it
+        // was between calls) ends the thread promptly either way.
+        close(fd)
+        let joinResult = XCTWaiter().wait(for: [transferThreadFinished], timeout: 5)
+        guard joinResult == .completed else {
+            XCTFail("transfer thread did not finish after fd was closed — cannot safely read shared state")
+            return
+        }
+
+        XCTAssertEqual(transferResult, .completed, "transfer stalled before completing")
         XCTAssertEqual(echoed, payload)
     }
 

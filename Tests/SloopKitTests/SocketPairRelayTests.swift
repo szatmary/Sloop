@@ -97,6 +97,42 @@ final class SocketPairRelayTests: XCTestCase {
         XCTAssertTrue(relay.remoteFDClosed)
     }
 
+    /// Round-3 finding: `onOutbound` is a reentrant `shutdown()` call site
+    /// too (`CloudflareAccessDialer` tears down from inside it when a send
+    /// times out), but unlike `onLocalClosed` — which always returns right
+    /// after firing — `onOutbound` fires *mid-loop*, with another
+    /// `read(remoteFD, …)` waiting immediately afterward. Before the fix,
+    /// that reentrant `shutdown()` would close `remoteFD` (the pump-thread
+    /// branch skips joining, since "the pump is on its way out" was the
+    /// premise for that skip) and then the loop would immediately read the
+    /// freed fd number again — one the OS is now free to have handed to an
+    /// unrelated resource. Whether that manifests as forwarding a stranger's
+    /// bytes into the SSH stream or hanging forever depends on what else in
+    /// the process reuses that exact fd number at that exact instant, which
+    /// is not something a reliable test can depend on — so this checks the
+    /// two things that *are* deterministic: the pump thread actually exits
+    /// promptly, and it never attempts that second `read()` at all.
+    /// `outboundReadCount` counts syscall attempts, not results, so it does
+    /// not matter what a stray second read would have returned.
+    func testOnOutboundShutdownStopsThePumpFromReadingAgain() throws {
+        let relay = try SocketPairRelay()
+        relay.onOutbound = { [weak relay] _ in
+            relay?.shutdown()
+        }
+        relay.start()
+
+        let chunk: [UInt8] = [1, 2, 3]
+        _ = chunk.withUnsafeBytes { write(relay.localFD, $0.baseAddress, chunk.count) }
+
+        XCTAssertTrue(relay.waitUntilPumpExits(timeout: 5),
+                      "pump thread did not exit promptly after a reentrant shutdown() from onOutbound")
+        XCTAssertEqual(relay.outboundReadCount, 1,
+                      "pump must not read(remoteFD, …) again once onOutbound has torn the relay down " +
+                      "— a second attempt would race a freed, recyclable fd number")
+
+        close(relay.localFD)
+    }
+
     /// 1 MB through both directions exercises partial writes + backpressure
     /// (socketpair buffers are only a few KB).
     func testLargeTransfer() throws {

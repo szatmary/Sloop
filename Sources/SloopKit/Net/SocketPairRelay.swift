@@ -26,11 +26,15 @@ import Glibc
 /// `finishInbound()` calls from another thread — Task 7 drives this relay
 /// from URLSession's delegate queue while the SSH side can be tearing down
 /// on its own thread, so that overlap is the normal case, not an edge case.
-/// It is *also* safe to call `shutdown()` reentrantly from inside the
-/// `onLocalClosed` callback (the natural thing for an owner to do, and
-/// exactly what Task 7's dialer does) even though that callback runs on the
-/// relay's own pump thread, before the pump has finished exiting — see the
-/// comment on `shutdown()` for why that doesn't deadlock.
+/// It is *also* safe to call `shutdown()` reentrantly from inside either
+/// pump callback — `onLocalClosed` (the natural `onLocalClosed = {
+/// relay.shutdown() }` wiring) or `onOutbound` (e.g. tearing down after a
+/// send times out, which is what Task 7's dialer does) — even though both
+/// run on the relay's own pump thread, before the pump has finished
+/// exiting. See the comment on `shutdown()` for why the thread join is
+/// skipped in that case, and on `pumpOutbound()` for what actually makes
+/// skipping it safe for *every* reentrant caller, not just the one that
+/// happens to return immediately afterward.
 /// There is no `deinit` safety net: the pump thread's `[weak self]` capture
 /// only guards the instant before `pumpOutbound()` starts running — once it
 /// starts, the call keeps `self` strongly retained for the pump's entire
@@ -59,20 +63,57 @@ public final class SocketPairRelay {
     private var started = false
     private var activeFDUsers = 0
 
+    /// Backing storage for `remoteFDClosed`, below — guarded by `lock` on
+    /// both the read and the write side (see that property's comment).
+    private var remoteFDClosedStorage = false
+
     /// True only once `close(remoteFD)` has actually run, at the very end of
     /// `shutdown()` — unlike `teardownCommitted`, which flips true the
     /// instant `shutdown()` is *entered*, before the poison/join/drain
-    /// sequence even starts. `internal` (the default access level) and
-    /// `private(set)` so tests can observe the real difference between
-    /// "`shutdown()` returned" and "`shutdown()` actually freed the fd" via
-    /// `@testable import` — a second, idempotent `shutdown()` call proves
-    /// neither, since its early-return guard fires identically whether or
-    /// not `close()` ever ran.
-    private(set) var remoteFDClosed = false
+    /// sequence even starts. `internal` (the default access level) so tests
+    /// can observe the real difference between "`shutdown()` returned" and
+    /// "`shutdown()` actually freed the fd" via `@testable import` — a
+    /// second, idempotent `shutdown()` call proves neither, since its
+    /// early-return guard fires identically whether or not `close()` ever
+    /// ran. A computed property, not a stored `private(set)` one, so the
+    /// read goes through `lock` the same as the write does — a Bool this
+    /// small is exactly the kind of access TSan flags when only one side of
+    /// it is synchronized, and nothing here guarantees a happens-before edge
+    /// between the write in `shutdown()` and an arbitrary reader otherwise.
+    var remoteFDClosed: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return remoteFDClosedStorage
+    }
 
-    /// The pump thread, captured so `shutdown()` can tell whether it is
-    /// being called *from* that thread (reentrantly, via `onLocalClosed`)
-    /// versus from anywhere else.
+    /// Backing storage for `outboundReadCount`, below — guarded by `lock`,
+    /// same reasoning as `remoteFDClosedStorage`. Only ever written on the
+    /// pump thread, but read from arbitrary test threads.
+    private var outboundReadCountStorage = 0
+
+    /// Total number of `read(remoteFD, …)` calls `pumpOutbound()` has
+    /// issued. `internal`, test-only instrumentation — the one
+    /// non-timing-dependent way to prove "the pump performed no further
+    /// read" after a reentrant `shutdown()` call from `onOutbound` (see
+    /// `SocketPairRelayTests.testOnOutboundShutdownStopsThePumpFromReadingAgain`).
+    /// A plain "did the pump exit promptly" check can't distinguish the bug
+    /// from the fix on its own: the extra `read()` the bug performs targets
+    /// an fd number `shutdown()` just closed, which — absent something else
+    /// in the process reusing that exact number in that instant — fails
+    /// fast with EBADF either way, so the pump exits "promptly" whether or
+    /// not that extra syscall happened. Counting attempts, not inferring
+    /// from what a stray one would return, is what makes the assertion
+    /// deterministic instead of dependent on fd-recycling timing.
+    var outboundReadCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return outboundReadCountStorage
+    }
+
+    /// The pump thread, captured so `shutdown()` (and `pumpOutbound()`
+    /// itself) can tell whether it is being called/running *from* that
+    /// thread — reentrantly, via `onLocalClosed` or `onOutbound` — versus
+    /// from anywhere else.
     private var pumpThread: Thread?
 
     /// Signaled once by `pumpOutbound()` right before it returns, so
@@ -82,6 +123,10 @@ public final class SocketPairRelay {
     private var pumpHasExited = false
 
     /// Bytes the local side (libssh2) wrote, to be carried to the remote.
+    /// Fires *on the pump thread itself*; an owner that calls `shutdown()`
+    /// reentrantly from here (e.g. tearing down after a send timeout, as
+    /// Task 7's dialer does) is supported — see `shutdown()` and
+    /// `pumpOutbound()`.
     public var onOutbound: ((Data) -> Void)?
     /// The local side closed its fd, or the pair broke unexpectedly; pumping
     /// has stopped. Never fires as a result of the owner calling
@@ -172,14 +217,18 @@ public final class SocketPairRelay {
     /// `close()` the fd, which is the point the OS is free to recycle its
     /// number.
     ///
-    /// Safe to call *reentrantly from the pump thread itself* — the normal
-    /// shape of `onLocalClosed = { relay.shutdown() }` — because
-    /// `onLocalClosed` fires from inside `pumpOutbound()`, before its
-    /// `defer` marks `pumpHasExited`. Joining the pump in that case would
-    /// be the pump thread waiting for itself to finish: a guaranteed
-    /// deadlock. `pumpThread` lets us detect that case and skip the join;
-    /// the pump is already on its way out (that's *why* the callback
-    /// fired), so nothing but the `defer` is left to run there.
+    /// Safe to call *reentrantly from the pump thread itself* — both the
+    /// normal `onLocalClosed = { relay.shutdown() }` wiring and a callback
+    /// like `onOutbound` tearing down after its own timeout — because both
+    /// callbacks fire from inside `pumpOutbound()`, before its `defer` marks
+    /// `pumpHasExited`. Joining the pump in that case would be the pump
+    /// thread waiting for itself to finish: a guaranteed deadlock.
+    /// `pumpThread` lets us detect that case and skip the join. Skipping it
+    /// is only safe because `pumpOutbound()` itself guarantees it won't
+    /// touch `remoteFD` again after this call commits to closing it — see
+    /// that method's comment for how; it is *not* enough that "the callback
+    /// is on its way out," since `onOutbound` fires mid-loop and would
+    /// otherwise read `remoteFD` again right after returning here.
     public func shutdown() {
         lock.lock()
         guard !teardownCommitted else { lock.unlock(); return }
@@ -212,7 +261,7 @@ public final class SocketPairRelay {
         close(remoteFD)
 
         lock.lock()
-        remoteFDClosed = true
+        remoteFDClosedStorage = true
         lock.unlock()
     }
 
@@ -236,6 +285,48 @@ public final class SocketPairRelay {
         lock.unlock()
     }
 
+    /// Whether `shutdown()` has committed to closing `remoteFD` — used by
+    /// `pumpOutbound()` to decide whether it may safely read from `remoteFD`
+    /// again after a callback returns. See that method's comment.
+    private func isTeardownCommitted() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return teardownCommitted
+    }
+
+    /// Test-only: block until the pump thread has actually returned from
+    /// `pumpOutbound()`, or the timeout elapses. Returns whether it exited
+    /// in time. Deliberately does *not* go through a second `shutdown()`
+    /// call to observe this — once teardown is already committed (e.g. by a
+    /// reentrant call from `onOutbound`), a second `shutdown()` call returns
+    /// immediately via its own idempotency guard without waiting for
+    /// anything, so it would prove nothing either way (the same vacuous-test
+    /// trap `remoteFDClosed` exists to avoid — see its comment).
+    func waitUntilPumpExits(timeout: TimeInterval) -> Bool {
+        pumpDone.lock()
+        defer { pumpDone.unlock() }
+        let deadline = Date().addingTimeInterval(timeout)
+        while !pumpHasExited {
+            guard pumpDone.wait(until: deadline) else { return false }
+        }
+        return true
+    }
+
+    /// The pump loop. Its governing invariant, on which `shutdown()`'s
+    /// pump-thread join skip depends: once this method invokes *either*
+    /// callback, it must not touch `remoteFD` again if that callback caused
+    /// teardown to be committed. That was true "for free" for
+    /// `onLocalClosed` — it's the last thing on its branch before an
+    /// unconditional `return` — but `onOutbound` fires mid-loop, with
+    /// another `read(remoteFD, …)` waiting right after it; a reentrant
+    /// `shutdown()` call from inside `onOutbound` (e.g. tearing down after a
+    /// send timeout) closes `remoteFD` on this same thread — via the
+    /// pump-thread branch in `shutdown()`, which skips joining *this* method
+    /// because it assumes nothing but its `defer` is left to run here — so
+    /// looping back into `read` would reissue a syscall against an fd number
+    /// the OS may already have handed to something else entirely. Hence the
+    /// `isTeardownCommitted()` check after *every* callback invocation,
+    /// below: it's what makes that assumption actually true.
     private func pumpOutbound() {
         defer {
             pumpDone.lock()
@@ -246,8 +337,12 @@ public final class SocketPairRelay {
         var buffer = [UInt8](repeating: 0, count: 32 * 1024)
         while true {
             let n = read(remoteFD, &buffer, buffer.count)
+            lock.lock()
+            outboundReadCountStorage += 1
+            lock.unlock()
             if n > 0 {
                 onOutbound?(Data(buffer[0..<n]))
+                if isTeardownCommitted() { return }
             } else if n == 0 || errno != EINTR {
                 lock.lock()
                 let deliberate = deliberateTeardown
@@ -255,6 +350,12 @@ public final class SocketPairRelay {
                 if !deliberate {
                     onLocalClosed?()
                 }
+                // Unconditional regardless of what onLocalClosed did — this
+                // branch never loops back into read() either way, which is
+                // what has always made a reentrant shutdown() from here
+                // safe. Checking isTeardownCommitted() here too would be
+                // redundant, not incorrect; omitted so the one that matters,
+                // above, isn't lost among decorative ones.
                 return
             }
         }
