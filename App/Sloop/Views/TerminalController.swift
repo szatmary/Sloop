@@ -27,6 +27,16 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     let terminalView: TerminalView
     @Published private(set) var state: ConnectionState = .connecting
 
+    /// Modifiers armed by the iOS smart-keys bar, applied to the **next typed
+    /// character** and then cleared.
+    ///
+    /// Lives here rather than in the bar because characters typed on the
+    /// software keyboard reach SwiftTerm directly and surface through
+    /// `send(source:data:)` — the bar never sees them. While the armed state
+    /// was private to the bar, ⌃ only affected the bar's own special keys, so
+    /// combinations like tmux's ⌃B prefix could not be typed at all.
+    @Published var armedModifiers: KeyModifiers = []
+
     private let makeTransport: () -> Transport
     private var transport: Transport
 
@@ -141,7 +151,21 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     // MARK: TerminalViewDelegate
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        transport.send(data)
+        guard !armedModifiers.isEmpty else {
+            transport.send(data)
+            return
+        }
+        let modifiers = armedModifiers
+        armedModifiers = []
+        // Only a single ASCII byte is a keystroke worth re-encoding. Pastes and
+        // multi-byte (IME, emoji) input pass through untouched rather than
+        // being mangled by a control mask.
+        guard data.count == 1, let byte = data.first, byte < 0x80 else {
+            transport.send(data)
+            return
+        }
+        let character = Character(UnicodeScalar(byte))
+        transport.send(KeyEncoder.bytes(for: character, modifiers: modifiers)[...])
     }
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         transport.resize(cols: newCols, rows: newRows)

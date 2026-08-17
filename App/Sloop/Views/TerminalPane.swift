@@ -17,7 +17,8 @@ struct TerminalPane: View {
             SwiftTermView(controller: controller)
             #if os(iOS)
             KeyboardAccessoryBar(send: { controller.send($0) },
-                                 applicationCursor: { controller.applicationCursor })
+                                 applicationCursor: { controller.applicationCursor },
+                                 armed: $controller.armedModifiers)
             #endif
         }
     }

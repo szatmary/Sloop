@@ -66,9 +66,18 @@ public enum KeyEncoder {
     public static func bytes(for character: Character, modifiers: KeyModifiers = []) -> [UInt8] {
         var out: [UInt8]
         if modifiers.contains(.control), let ascii = character.asciiValue {
-            // Upper-case ASCII letters before masking so 'c' and 'C' both → 0x03.
-            let base = (ascii >= 0x61 && ascii <= 0x7a) ? ascii - 0x20 : ascii
-            out = [base & 0x1f]
+            // Digits don't follow the & 0x1F rule — masking '0' would emit 0x10
+            // (DLE) instead of the digit, which breaks things like tmux's
+            // "prefix then window number". xterm's mapping is explicit:
+            // Ctrl-2 → NUL, Ctrl-3…7 → ESC/FS/GS/RS/US, Ctrl-8 → DEL, and
+            // Ctrl-0/1/9 are just the digit.
+            if let digit = Self.controlDigit(ascii) {
+                out = [digit]
+            } else {
+                // Upper-case ASCII letters before masking so 'c' and 'C' both → 0x03.
+                let base = (ascii >= 0x61 && ascii <= 0x7a) ? ascii - 0x20 : ascii
+                out = [base & 0x1f]
+            }
         } else {
             out = Array(String(character).utf8)
         }
@@ -77,6 +86,21 @@ public enum KeyEncoder {
     }
 
     // MARK: - Private
+
+    /// xterm's Ctrl+digit mapping, or nil when `ascii` isn't a digit.
+    private static func controlDigit(_ ascii: UInt8) -> UInt8? {
+        switch ascii {
+        case 0x32: return 0x00        // Ctrl-2 → NUL
+        case 0x33: return 0x1b        // Ctrl-3 → ESC
+        case 0x34: return 0x1c        // Ctrl-4 → FS
+        case 0x35: return 0x1d        // Ctrl-5 → GS
+        case 0x36: return 0x1e        // Ctrl-6 → RS
+        case 0x37: return 0x1f        // Ctrl-7 → US
+        case 0x38: return 0x7f        // Ctrl-8 → DEL
+        case 0x30, 0x31, 0x39: return ascii  // Ctrl-0/1/9 → the digit itself
+        default: return nil
+        }
+    }
 
     /// Cursor / home / end keys (letters A B C D H F).
     private static func cursor(_ letter: UInt8, _ mods: KeyModifiers, _ app: Bool) -> [UInt8] {
