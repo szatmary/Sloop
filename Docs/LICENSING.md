@@ -39,7 +39,8 @@ GPLv3 app with mosh bundled is viable and is the recommended path.
 ## Recommendation
 
 1. License **Sloop's own code GPLv3** and keep this repository public, providing
-   corresponding source for every release.
+   corresponding source for every release. Bundling mosh forces GPLv3 on the
+   combined work regardless, so this is the path of least friction.
 2. Bundle **mosh** (M3) and libssh2, shipping their source/offer alongside.
    libssh2 is BSD (no issue); mosh is GPLv3 and provided as corresponding
    source.
@@ -57,3 +58,22 @@ first App Store submission.~~ **Done** — `LICENSE` (full GPL-3.0) and
 judgment call, not a file: confirm you accept the low residual risk of shipping
 Mosh (GPL-3.0) via the App Store with corresponding source kept public. See
 `Docs/HANDOFF.md` for the full path to shipping.
+
+## Considered and rejected: waiving copyright
+
+Most of Sloop's own code was written with LLM assistance, which raises the
+question of whether it is copyrightable at all — the US position is that purely
+machine-generated material without human authorship isn't protected. Dedicating
+it to the public domain (CC0-1.0) was considered and **rejected.**
+
+Two reasons. Copyright is what makes GPL-3.0 enforceable on our own code;
+waiving it would leave `SloopKit` — which is pure Foundation and has no
+dependencies to slow a fork down — free to be taken closed-source. And the legal
+question is genuinely unsettled rather than settled against us: there is real
+human authorship in the architecture, the selection and editing, and the specs,
+and other jurisdictions diverge (the UK grants authorship of computer-generated
+works to whoever made the arrangements). Asserting nothing keeps the options
+open; waiving is one-way.
+
+`THIRD-PARTY-NOTICES.md` discloses the LLM provenance as a matter of fact,
+without conceding the legal conclusion.

@@ -33,3 +33,29 @@ distribution coexist when the corresponding source stays public (this repo).
 If a formal per-dependency license dump is wanted for an App Store submission,
 generate one from the resolved SwiftPM graph plus the vendored xcframeworks'
 upstream `COPYING`/`LICENSE` files at release time.
+
+## How Sloop's own code was written
+
+Most of Sloop's own source — `Sources/SloopKit`, `App/Sloop`, the build scripts,
+and these docs — was written with LLM assistance (Anthropic's Claude) under human
+direction and review. Architecture, design decisions, and review are the
+author's; a large share of the typing is not.
+
+This covers Sloop's own code only. The third-party components listed above are
+separate upstream projects, vendored or fetched unmodified; how they were
+written is theirs to state, not ours.
+
+This is a statement of provenance, not a copyright disclaimer. Sloop's own code
+is copyrighted and licensed under GPL-3.0 along with the rest of the app, per
+`LICENSE`.
+
+## The name and icon are reserved
+
+GPL-3.0 covers **code.** It grants no rights in the name **Sloop** or the app
+icon (`App/Sloop/AppIcon.svg` and
+`App/Sloop/Assets.xcassets/AppIcon.appiconset/`), which are reserved. GPL-3.0
+§7(e) expressly permits "declining to grant rights under trademark law for use
+of some trade names, trademarks, or service marks."
+
+So: exercise your GPL rights in the code, but ship any fork under its own name
+and icon, not these.

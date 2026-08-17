@@ -55,3 +55,13 @@ swift test
 - [`Docs/SSH.md`](Docs/SSH.md) — building & wiring libssh2
 - [`Docs/MOSH.md`](Docs/MOSH.md) — the Mosh bootstrap and client
 - [`Docs/LICENSING.md`](Docs/LICENSING.md) — the GPL / App Store question (decide before shipping)
+- [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) — dependencies and their licenses
+
+## License
+
+Sloop is [GPL-3.0](LICENSE) — it bundles [Mosh](https://mosh.org), whose
+copyleft governs the combined work.
+
+Most of Sloop's own code was written with LLM assistance under human direction.
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) covers that, the
+dependencies, and the reservation on the Sloop name and icon.
