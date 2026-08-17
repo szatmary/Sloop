@@ -70,6 +70,59 @@ final class CloudflareAccessDialerTests: XCTestCase {
         XCTAssertEqual(got, sent)
     }
 
+    /// Reproduces the round-1 fix's own deadlock: blocking the pump thread
+    /// on a WebSocket send completion, without also moving inbound delivery
+    /// off URLSession's serial delegate queue, wedges the pipe solid the
+    /// moment both directions are active. A single thread alternates
+    /// writing outbound chunks and draining whatever has come back —
+    /// mirroring how a real (synchronous, single-threaded) libssh2 session
+    /// actually drives this fd, not two independent threads that could each
+    /// make progress regardless of what the other is doing. That
+    /// distinction matters: independent reader/writer threads don't
+    /// reliably reproduce this, because an independent reader can always
+    /// keep draining `localFD` no matter what URLSession's delegate queue
+    /// is doing. A single thread that's blocked *inside a write call* the
+    /// moment the pipe wedges can't get back around to read, which is
+    /// exactly the cross-direction dependency that makes it a permanent
+    /// hang instead of a slow-but-eventually-fine transfer.
+    func testBulkTransferDoesNotDeadlockOnConcurrentSendAndReceive() throws {
+        let server = try WSEchoServer()
+        server.start()
+        defer { server.listener.cancel() }
+
+        let dialer = CloudflareAccessDialer(
+            url: URL(string: "ws://127.0.0.1:\(server.port)")!,
+            hostname: "ssh.example.com", token: "test-token")
+        let fd = try dialer.dial()
+        defer { close(fd) }
+
+        let payload = Data((0..<1_000_000).map { UInt8(truncatingIfNeeded: $0) })
+        var echoed = Data()
+        echoed.reserveCapacity(payload.count)
+        let done = expectation(description: "round-tripped 1 MB without stalling")
+
+        Thread.detachNewThread {
+            var writeOffset = 0
+            var buf = [UInt8](repeating: 0, count: 32 * 1024)
+            payload.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+                while echoed.count < payload.count {
+                    if writeOffset < raw.count {
+                        let n = write(fd, raw.baseAddress!.advanced(by: writeOffset),
+                                     min(32 * 1024, raw.count - writeOffset))
+                        if n > 0 { writeOffset += n }
+                    }
+                    let n = read(fd, &buf, buf.count)
+                    guard n > 0 else { return }
+                    echoed.append(contentsOf: buf[0..<n])
+                }
+            }
+            done.fulfill()
+        }
+
+        wait(for: [done], timeout: 15)
+        XCTAssertEqual(echoed, payload)
+    }
+
     // MARK: Raw TCP server (header + error mapping)
 
     /// Accepts one TCP connection, captures what the client sent, replies with

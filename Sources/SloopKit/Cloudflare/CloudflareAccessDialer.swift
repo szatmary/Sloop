@@ -37,10 +37,20 @@ public final class CloudflareAccessDialer: NSObject, Dialer {
     private var didOpen = false
     private var openError: Error?
 
+    /// Serial queue that inbound WebSocket frames are drained through
+    /// instead of URLSession's delegate queue — see `deliverInbound`'s doc
+    /// comment for why that distinction is load-bearing, not cosmetic.
+    private let inboundQueue = DispatchQueue(label: "org.szatmary.sloop.cfaccessdialer.inbound")
+
     /// - Parameters:
     ///   - url: `wss://<hostname>` in production; tests inject `ws://127.0.0.1:…`.
     ///   - hostname: the Access app hostname, used in error messages.
     ///   - token: the raw Access JWT to present.
+    ///   - openTimeout: bounds both the initial WebSocket handshake and (see
+    ///     `onOutbound`) how long a single outbound frame's send is allowed
+    ///     to sit unacknowledged before the dialer gives up and tears down.
+    ///     One knob for both is deliberate: both are "how long is this
+    ///     network allowed to be silent before we call it dead."
     public init(url: URL, hostname: String, token: String,
                 openTimeout: TimeInterval = 20) {
         self.url = url
@@ -83,8 +93,8 @@ public final class CloudflareAccessDialer: NSObject, Dialer {
             throw error
         }
         self.relay = relay
-        relay.onOutbound = { [weak task] data in
-            guard let task else { return }
+        relay.onOutbound = { [weak self, weak task] data in
+            guard let self, let task else { return }
             // Block the pump thread until the send actually completes. This
             // *is* the relay's backpressure mechanism applied to the
             // WebSocket leg: without it, a fast local writer over a slow
@@ -93,9 +103,25 @@ public final class CloudflareAccessDialer: NSObject, Dialer {
             // then resolves `.failure`, and `receiveLoop` calls
             // `relay.finishInbound()` so libssh2 sees a clean EOF — the
             // failure reason itself is not surfaced anywhere else.
+            //
+            // Bounded by `openTimeout`: this thread never gets back to
+            // `read()` while parked here, so nothing else would notice a
+            // send whose completion never fires and tear things down —
+            // this is what has to do it instead. (This is also what makes
+            // "URLSession always invokes a completion exactly once" a
+            // non-load-bearing assumption: even if that contract were ever
+            // violated, this can't park a thread forever.) See
+            // `deliverInbound` for why this wait is safe from the deadlock
+            // a naive version of it had: with inbound delivery off
+            // URLSession's delegate queue, this send's completion can no
+            // longer be stuck behind a blocked `receive` callback on that
+            // same serial queue.
             let sent = DispatchSemaphore(value: 0)
             task.send(.data(data)) { _ in sent.signal() }
-            sent.wait()
+            guard sent.wait(timeout: .now() + self.openTimeout) == .success else {
+                self.tearDown()
+                return
+            }
         }
         relay.onLocalClosed = { [weak self] in self?.tearDown() }
         relay.start()
@@ -107,11 +133,9 @@ public final class CloudflareAccessDialer: NSObject, Dialer {
         task.receive { [weak self] result in
             switch result {
             case .success(.data(let data)):
-                relay.receive(data)
-                self?.receiveLoop(task, relay)
+                self?.deliverInbound(data, task, relay)
             case .success(.string(let text)):
-                relay.receive(Data(text.utf8))
-                self?.receiveLoop(task, relay)
+                self?.deliverInbound(Data(text.utf8), task, relay)
             case .success:
                 self?.receiveLoop(task, relay)
             case .failure:
@@ -123,6 +147,35 @@ public final class CloudflareAccessDialer: NSObject, Dialer {
                 // reason (if any) is not surfaced to the caller.
                 relay.finishInbound()
             }
+        }
+    }
+
+    /// Writing a received frame into the relay (`relay.receive`) blocks
+    /// until libssh2 drains `localFD` — that's the relay's whole
+    /// backpressure design, and it's correct at the fd level. But
+    /// `task.receive`'s completion handler fires on URLSession's *serial*
+    /// delegate queue — the very same queue that delivers `onOutbound`'s
+    /// `task.send` completions. Doing the blocking write inline, right
+    /// there on that queue (as an earlier version of this method did), can
+    /// park it — starving every completion queued behind it, including the
+    /// send completion `onOutbound` is blocked waiting for. With both
+    /// directions active at once that's a guaranteed deadlock: the pump
+    /// blocked on a send completion that's stuck behind a blocked receive
+    /// callback, which is itself stuck because the pump — the one thing
+    /// that could let `remoteFD` drain — isn't running to do so.
+    ///
+    /// So the write, and the re-arm (calling `task.receive()` again) that
+    /// only happens once it returns, are pushed onto `inboundQueue`
+    /// instead. That frees the delegate queue immediately, so send
+    /// completions always get to run. `inboundQueue` being serial, and only
+    /// re-arming after the current write finishes, keeps both properties
+    /// `relay.receive` was already providing: in-order delivery, and
+    /// backpressure — at most one frame is ever in flight between the
+    /// network and `remoteFD`.
+    private func deliverInbound(_ data: Data, _ task: URLSessionWebSocketTask, _ relay: SocketPairRelay) {
+        inboundQueue.async { [weak self] in
+            relay.receive(data)
+            self?.receiveLoop(task, relay)
         }
     }
 

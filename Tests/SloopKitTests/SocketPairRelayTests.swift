@@ -87,11 +87,14 @@ final class SocketPairRelayTests: XCTestCase {
 
         wait(for: [shutdownReturned], timeout: 5)
 
-        // Teardown genuinely finished (not just "returned early without
-        // doing anything"): a second, ordinary shutdown() call from this
-        // thread must also return immediately rather than hang, which it
-        // only can if the fd bookkeeping settled into its closed state.
-        relay.shutdown()
+        // Teardown genuinely finished — not just "returned early without
+        // doing anything": `shutdown()`'s own idempotency guard makes even
+        // a no-op call return promptly, so a second `shutdown()` call
+        // wouldn't prove anything either way. `remoteFDClosed` only flips
+        // true at the point `close(remoteFD)` actually runs, at the very
+        // end of `shutdown()`, so asserting on it is what actually shows
+        // teardown ran to completion rather than merely returning.
+        XCTAssertTrue(relay.remoteFDClosed)
     }
 
     /// 1 MB through both directions exercises partial writes + backpressure

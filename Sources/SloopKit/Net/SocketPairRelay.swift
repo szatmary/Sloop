@@ -40,12 +40,12 @@ public final class SocketPairRelay {
     public let localFD: Int32
     private let remoteFD: Int32
 
-    /// Guards `remoteClosed`, `deliberateTeardown`, `started`, and
+    /// Guards `teardownCommitted`, `deliberateTeardown`, `started`, and
     /// `activeFDUsers` together as one state machine — small, fast
     /// transitions only, never held across a blocking syscall (see
     /// `receive()`'s comment) — and doubles as the wait/signal condition for
     /// "`activeFDUsers` has reached zero". It has to be *the same* lock for
-    /// both jobs: checking `remoteClosed` and incrementing `activeFDUsers`
+    /// both jobs: checking `teardownCommitted` and incrementing `activeFDUsers`
     /// (in `beginUsingFD()`) must be one atomic step so no caller can start
     /// a new use of `remoteFD` after `shutdown()` has committed to closing
     /// it, and `shutdown()`'s wait for `activeFDUsers == 0` (in
@@ -54,10 +54,21 @@ public final class SocketPairRelay {
     /// `unlock()`) that also supports `wait()`/`signal()`, which is exactly
     /// this shape.
     private let lock = NSCondition()
-    private var remoteClosed = false
+    private var teardownCommitted = false
     private var deliberateTeardown = false
     private var started = false
     private var activeFDUsers = 0
+
+    /// True only once `close(remoteFD)` has actually run, at the very end of
+    /// `shutdown()` — unlike `teardownCommitted`, which flips true the
+    /// instant `shutdown()` is *entered*, before the poison/join/drain
+    /// sequence even starts. `internal` (the default access level) and
+    /// `private(set)` so tests can observe the real difference between
+    /// "`shutdown()` returned" and "`shutdown()` actually freed the fd" via
+    /// `@testable import` — a second, idempotent `shutdown()` call proves
+    /// neither, since its early-return guard fires identically whether or
+    /// not `close()` ever ran.
+    private(set) var remoteFDClosed = false
 
     /// The pump thread, captured so `shutdown()` can tell whether it is
     /// being called *from* that thread (reentrantly, via `onLocalClosed`)
@@ -154,7 +165,7 @@ public final class SocketPairRelay {
     /// first — it unblocks the pump's blocked `read()` and makes any
     /// in-flight or subsequent `receive()`/`finishInbound()` return
     /// promptly (via `beginUsingFD` rejecting new callers once
-    /// `remoteClosed` is set, and existing blocking syscalls failing once
+    /// `teardownCommitted` is set, and existing blocking syscalls failing once
     /// the endpoint is poisoned) — without freeing the fd number. Only once
     /// (a) the pump thread has actually exited and (b) every caller that
     /// was already inside `receive()`/`finishInbound()` has left do we
@@ -171,8 +182,8 @@ public final class SocketPairRelay {
     /// fired), so nothing but the `defer` is left to run there.
     public func shutdown() {
         lock.lock()
-        guard !remoteClosed else { lock.unlock(); return }
-        remoteClosed = true
+        guard !teardownCommitted else { lock.unlock(); return }
+        teardownCommitted = true
         deliberateTeardown = true
         let wasStarted = started
         let calledFromPumpThread = Thread.current === pumpThread
@@ -199,16 +210,20 @@ public final class SocketPairRelay {
         lock.unlock()
 
         close(remoteFD)
+
+        lock.lock()
+        remoteFDClosed = true
+        lock.unlock()
     }
 
     /// Registers a `receive()`/`finishInbound()` call as about to touch
     /// `remoteFD`, unless teardown has already been committed. The check
     /// and the increment happen under the same `lock` `shutdown()` sets
-    /// `remoteClosed` under, so there is no window where a new caller can
+    /// `teardownCommitted` under, so there is no window where a new caller can
     /// start after `shutdown()` has decided to close the fd.
     private func beginUsingFD() -> Bool {
         lock.lock()
-        guard !remoteClosed else { lock.unlock(); return false }
+        guard !teardownCommitted else { lock.unlock(); return false }
         activeFDUsers += 1
         lock.unlock()
         return true
