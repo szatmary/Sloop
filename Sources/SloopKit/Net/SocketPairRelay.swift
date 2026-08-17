@@ -26,6 +26,11 @@ import Glibc
 /// `finishInbound()` calls from another thread — Task 7 drives this relay
 /// from URLSession's delegate queue while the SSH side can be tearing down
 /// on its own thread, so that overlap is the normal case, not an edge case.
+/// It is *also* safe to call `shutdown()` reentrantly from inside the
+/// `onLocalClosed` callback (the natural thing for an owner to do, and
+/// exactly what Task 7's dialer does) even though that callback runs on the
+/// relay's own pump thread, before the pump has finished exiting — see the
+/// comment on `shutdown()` for why that doesn't deadlock.
 /// There is no `deinit` safety net: the pump thread's `[weak self]` capture
 /// only guards the instant before `pumpOutbound()` starts running — once it
 /// starts, the call keeps `self` strongly retained for the pump's entire
@@ -35,13 +40,29 @@ public final class SocketPairRelay {
     public let localFD: Int32
     private let remoteFD: Int32
 
-    /// Guards `remoteClosed`, `deliberateTeardown`, and `started` — small,
-    /// fast state transitions only. Never held across a blocking syscall
-    /// (see `receive()`'s comment), so it can't deadlock against those.
-    private let lock = NSLock()
+    /// Guards `remoteClosed`, `deliberateTeardown`, `started`, and
+    /// `activeFDUsers` together as one state machine — small, fast
+    /// transitions only, never held across a blocking syscall (see
+    /// `receive()`'s comment) — and doubles as the wait/signal condition for
+    /// "`activeFDUsers` has reached zero". It has to be *the same* lock for
+    /// both jobs: checking `remoteClosed` and incrementing `activeFDUsers`
+    /// (in `beginUsingFD()`) must be one atomic step so no caller can start
+    /// a new use of `remoteFD` after `shutdown()` has committed to closing
+    /// it, and `shutdown()`'s wait for `activeFDUsers == 0` (in
+    /// `endUsingFD()`) needs to observe that same counter under that same
+    /// lock to avoid missing a signal. `NSCondition` is a lock (`lock()`/
+    /// `unlock()`) that also supports `wait()`/`signal()`, which is exactly
+    /// this shape.
+    private let lock = NSCondition()
     private var remoteClosed = false
     private var deliberateTeardown = false
     private var started = false
+    private var activeFDUsers = 0
+
+    /// The pump thread, captured so `shutdown()` can tell whether it is
+    /// being called *from* that thread (reentrantly, via `onLocalClosed`)
+    /// versus from anywhere else.
+    private var pumpThread: Thread?
 
     /// Signaled once by `pumpOutbound()` right before it returns, so
     /// `shutdown()` can wait for the pump to actually stop touching
@@ -53,7 +74,10 @@ public final class SocketPairRelay {
     public var onOutbound: ((Data) -> Void)?
     /// The local side closed its fd, or the pair broke unexpectedly; pumping
     /// has stopped. Never fires as a result of the owner calling
-    /// `shutdown()` — only when the local side went away on its own.
+    /// `shutdown()` — only when the local side went away on its own. Fires
+    /// *on the pump thread itself*; an owner that calls `shutdown()` from
+    /// here (the natural thing to do) is calling it reentrantly, which is
+    /// supported — see `shutdown()`.
     public var onLocalClosed: (() -> Void)?
 
     public init() throws {
@@ -79,20 +103,24 @@ public final class SocketPairRelay {
 
     /// Begin pumping. Set `onOutbound`/`onLocalClosed` before calling.
     public func start() {
-        lock.lock()
-        started = true
-        lock.unlock()
         let thread = Thread { [weak self] in self?.pumpOutbound() }
         thread.name = "org.szatmary.sloop.relay"
+        lock.lock()
+        started = true
+        pumpThread = thread
+        lock.unlock()
         thread.start()
     }
 
     /// Feed bytes from the remote toward the local side. Blocks for
     /// backpressure; safe (a no-op) once the local side has closed or the
-    /// relay has been shut down. Deliberately never takes `lock`: a
-    /// blocking write here must never be able to stall a concurrent
-    /// `shutdown()` (or vice versa).
+    /// relay has been shut down. The blocking write itself is never done
+    /// under `lock` — only the cheap bookkeeping in `beginUsingFD`/
+    /// `endUsingFD` is — so a blocking write here can never stall a
+    /// concurrent `shutdown()` (or vice versa).
     public func receive(_ data: Data) {
+        guard beginUsingFD() else { return }
+        defer { endUsingFD() }
         data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
             guard let base = raw.baseAddress else { return }
             var offset = 0
@@ -108,6 +136,8 @@ public final class SocketPairRelay {
     /// The remote sent EOF: after any buffered bytes, reads on `localFD`
     /// return 0 so libssh2 sees a normal connection close.
     public func finishInbound() {
+        guard beginUsingFD() else { return }
+        defer { endUsingFD() }
         // Unqualified `shutdown` here would resolve to the `shutdown()`
         // instance method below, not the libc call — qualify explicitly.
         #if canImport(Darwin)
@@ -119,21 +149,33 @@ public final class SocketPairRelay {
 
     /// Tear down the relay's end. Idempotent, and safe to call concurrently
     /// with another thread's in-flight `receive()`/`finishInbound()`:
-    /// `remoteFD`'s number is never freed while another thread could still
+    /// `remoteFD`'s number is never freed while another caller could still
     /// be about to use it. `shutdown(remoteFD, SHUT_RDWR)` poisons the fd
     /// first — it unblocks the pump's blocked `read()` and makes any
-    /// concurrent `receive()` write fail cleanly with EPIPE, without
-    /// freeing the fd number. Only once the pump thread has actually exited
-    /// (confirmed via `pumpDone`, not assumed) do we `close()` the fd,
-    /// which is the point the OS is free to recycle its number. This closes
-    /// the window where a racing `receive()`/`finishInbound()` call could
-    /// otherwise land on an unrelated fd the OS handed out in between.
+    /// in-flight or subsequent `receive()`/`finishInbound()` return
+    /// promptly (via `beginUsingFD` rejecting new callers once
+    /// `remoteClosed` is set, and existing blocking syscalls failing once
+    /// the endpoint is poisoned) — without freeing the fd number. Only once
+    /// (a) the pump thread has actually exited and (b) every caller that
+    /// was already inside `receive()`/`finishInbound()` has left do we
+    /// `close()` the fd, which is the point the OS is free to recycle its
+    /// number.
+    ///
+    /// Safe to call *reentrantly from the pump thread itself* — the normal
+    /// shape of `onLocalClosed = { relay.shutdown() }` — because
+    /// `onLocalClosed` fires from inside `pumpOutbound()`, before its
+    /// `defer` marks `pumpHasExited`. Joining the pump in that case would
+    /// be the pump thread waiting for itself to finish: a guaranteed
+    /// deadlock. `pumpThread` lets us detect that case and skip the join;
+    /// the pump is already on its way out (that's *why* the callback
+    /// fired), so nothing but the `defer` is left to run there.
     public func shutdown() {
         lock.lock()
         guard !remoteClosed else { lock.unlock(); return }
         remoteClosed = true
         deliberateTeardown = true
         let wasStarted = started
+        let calledFromPumpThread = Thread.current === pumpThread
         lock.unlock()
 
         #if canImport(Darwin)
@@ -142,14 +184,41 @@ public final class SocketPairRelay {
         Glibc.shutdown(remoteFD, Int32(SHUT_RDWR))
         #endif
 
-        if wasStarted {
+        if wasStarted && !calledFromPumpThread {
             pumpDone.lock()
             while !pumpHasExited {
                 pumpDone.wait()
             }
             pumpDone.unlock()
         }
+
+        lock.lock()
+        while activeFDUsers > 0 {
+            lock.wait()
+        }
+        lock.unlock()
+
         close(remoteFD)
+    }
+
+    /// Registers a `receive()`/`finishInbound()` call as about to touch
+    /// `remoteFD`, unless teardown has already been committed. The check
+    /// and the increment happen under the same `lock` `shutdown()` sets
+    /// `remoteClosed` under, so there is no window where a new caller can
+    /// start after `shutdown()` has decided to close the fd.
+    private func beginUsingFD() -> Bool {
+        lock.lock()
+        guard !remoteClosed else { lock.unlock(); return false }
+        activeFDUsers += 1
+        lock.unlock()
+        return true
+    }
+
+    private func endUsingFD() {
+        lock.lock()
+        activeFDUsers -= 1
+        if activeFDUsers == 0 { lock.signal() }
+        lock.unlock()
     }
 
     private func pumpOutbound() {

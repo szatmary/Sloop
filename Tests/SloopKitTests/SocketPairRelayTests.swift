@@ -61,6 +61,39 @@ final class SocketPairRelayTests: XCTestCase {
         relay.shutdown()
     }
 
+    /// The natural, expected way for an owner to wire this relay is
+    /// `onLocalClosed = { relay.shutdown() }` — exactly what Task 7's
+    /// `CloudflareAccessDialer` does via `tearDown()`. `onLocalClosed` fires
+    /// *on the pump thread itself*, from inside `pumpOutbound()`, before its
+    /// `defer` marks the pump as exited. A `shutdown()` that unconditionally
+    /// tries to join the pump thread would therefore have the pump thread
+    /// wait for itself to finish: a permanent deadlock, on the guaranteed
+    /// end-of-session path (every `Dialer` contract closure of `localFD`
+    /// goes through here). This test reproduces exactly that call shape and
+    /// bounds the wait so a regression shows up as a timed-out expectation
+    /// instead of a hung test run.
+    func testShutdownFromOnLocalClosedDoesNotDeadlock() throws {
+        let relay = try SocketPairRelay()
+        let localFD = relay.localFD
+
+        let shutdownReturned = expectation(description: "reentrant shutdown() returned")
+        relay.onLocalClosed = { [weak relay] in
+            relay?.shutdown()
+            shutdownReturned.fulfill()
+        }
+        relay.start()
+
+        close(localFD)   // simulates libssh2 closing its end, as a real caller would
+
+        wait(for: [shutdownReturned], timeout: 5)
+
+        // Teardown genuinely finished (not just "returned early without
+        // doing anything"): a second, ordinary shutdown() call from this
+        // thread must also return immediately rather than hang, which it
+        // only can if the fd bookkeeping settled into its closed state.
+        relay.shutdown()
+    }
+
     /// 1 MB through both directions exercises partial writes + backpressure
     /// (socketpair buffers are only a few KB).
     func testLargeTransfer() throws {

@@ -123,13 +123,48 @@ final class CloudflareAccessDialerTests: XCTestCase {
             XCTAssertEqual(host, "ssh.example.com")
         }
         wait(for: [server.sawRequest], timeout: 5)
-        XCTAssertTrue(server.request.lowercased().contains("cf-access-token: sekrit-token"),
-                      "upgrade request must carry the token header; got:\n\(server.request)")
+        // Lowercase only the header *name* for matching (header names are
+        // case-insensitive; values are not) — a mixed-case JWT compared
+        // after lowercasing the whole request would silently pass even if
+        // the value got mangled.
+        let headerLine = server.request
+            .components(separatedBy: "\r\n")
+            .first { $0.lowercased().hasPrefix("cf-access-token:") }
+        guard let headerLine else {
+            return XCTFail("upgrade request must carry the cf-access-token header; got:\n\(server.request)")
+        }
+        let value = String(headerLine.drop(while: { $0 != ":" }).dropFirst())
+            .trimmingCharacters(in: .whitespaces)
+        XCTAssertEqual(value, "sekrit-token",
+                      "token header value must be sent verbatim (case-sensitive); got:\n\(server.request)")
     }
 
     func testMapsRedirectToAccessLoginRequired() throws {
+        // Stand-in for the IdP the Access redirect would send a *following*
+        // client to. Asserting this listener is never contacted is what
+        // actually proves the redirect wasn't followed — checking only for
+        // `accessLoginRequired` doesn't: that error comes from the original
+        // 302's status code either way, so it would just as happily "pass"
+        // with the redirect-refusal delegate method deleted entirely, and
+        // on a network with wildcard DNS a `Location` pointing at a bogus
+        // hostname could make a real outbound connection instead of failing
+        // to resolve.
+        let canary = try NWListener(using: .tcp, on: .any)
+        let canaryContacted = XCTestExpectation(description: "canary must not be contacted")
+        canaryContacted.isInverted = true
+        canary.newConnectionHandler = { conn in
+            conn.cancel()
+            canaryContacted.fulfill()
+        }
+        let canaryReady = DispatchSemaphore(value: 0)
+        canary.stateUpdateHandler = { if case .ready = $0 { canaryReady.signal() } }
+        canary.start(queue: .global())
+        canaryReady.wait()
+        let canaryPort = canary.port!.rawValue
+        defer { canary.cancel() }
+
         let server = try CannedHTTPServer(
-            response: "HTTP/1.1 302 Found\r\nLocation: https://login.example\r\nContent-Length: 0\r\n\r\n")
+            response: "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:\(canaryPort)/\r\nContent-Length: 0\r\n\r\n")
         server.start()
         defer { server.listener.cancel() }
 
@@ -141,6 +176,7 @@ final class CloudflareAccessDialerTests: XCTestCase {
                 return XCTFail("expected accessLoginRequired, got \(error)")
             }
         }
+        wait(for: [canaryContacted], timeout: 1)
     }
 }
 #endif
