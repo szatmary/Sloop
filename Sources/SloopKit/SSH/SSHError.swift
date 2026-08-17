@@ -7,14 +7,17 @@ import Foundation
 public enum SSHError: Error, LocalizedError {
     case notImplemented(String)
     case connectionFailed(String)
-    case authenticationFailed
+    /// Carries why: a wrong password, a key the server rejected, and a host
+    /// with no credential configured at all are three different problems and
+    /// must not present as the same message.
+    case authenticationFailed(String)
     case channelFailure(String)
 
     public var errorDescription: String? {
         switch self {
         case .notImplemented(let what): return "not implemented: \(what)"
         case .connectionFailed(let why): return "connection failed: \(why)"
-        case .authenticationFailed:      return "authentication failed"
+        case .authenticationFailed(let why): return "authentication failed: \(why)"
         case .channelFailure(let why):   return "channel failure: \(why)"
         }
     }

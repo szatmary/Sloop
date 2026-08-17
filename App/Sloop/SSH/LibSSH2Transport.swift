@@ -165,20 +165,34 @@ final class LibSSH2Transport: Transport {
         let user = host.username
 
         if let key = credential.privateKeyPEM {
+            // The public key is not optional in practice: libssh2's mbedTLS
+            // backend can't derive it from the private key in memory, so
+            // passing NULL here fails every key auth. Refuse up front with an
+            // actionable message rather than letting the server report a
+            // misleading "Username/PublicKey combination invalid".
+            guard let publicKey = credential.publicKey, !publicKey.isEmpty else {
+                return SSHError.authenticationFailed(
+                    "this key has no public key stored alongside it, which this build " +
+                    "requires — re-import it with `sloop import-key` (it picks up the " +
+                    "matching .pub file automatically)")
+            }
             let rc = user.withCString { userPtr -> Int32 in
                 key.withCString { keyPtr in
-                    (credential.passphrase ?? "").withCString { passPtr in
-                        retry(session, sock) {
-                            libssh2_userauth_publickey_frommemory(
-                                session, userPtr, user.utf8.count,
-                                nil, 0,
-                                keyPtr, key.utf8.count,
-                                passPtr)
+                    publicKey.withCString { pubPtr in
+                        (credential.passphrase ?? "").withCString { passPtr in
+                            retry(session, sock) {
+                                libssh2_userauth_publickey_frommemory(
+                                    session, userPtr, user.utf8.count,
+                                    pubPtr, publicKey.utf8.count,
+                                    keyPtr, key.utf8.count,
+                                    passPtr)
+                            }
                         }
                     }
                 }
             }
-            return rc == 0 ? nil : SSHError.authenticationFailed
+            return rc == 0 ? nil : SSHError.authenticationFailed(
+                "server rejected the private key for '\(user)' — \(libssh2LastError(session))")
         }
 
         if let password = credential.password {
@@ -191,10 +205,13 @@ final class LibSSH2Transport: Transport {
                     }
                 }
             }
-            return rc == 0 ? nil : SSHError.authenticationFailed
+            return rc == 0 ? nil : SSHError.authenticationFailed(
+                "server rejected the password for '\(user)' — \(libssh2LastError(session))")
         }
 
-        return SSHError.authenticationFailed
+        return SSHError.authenticationFailed(
+            "no password or private key is configured for this host — edit it and " +
+            "choose a key from the library, or enter a password")
     }
 
     private func openShell(_ session: OpaquePointer, _ sock: Int32) -> OpaquePointer? {

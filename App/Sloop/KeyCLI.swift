@@ -83,7 +83,11 @@ enum KeyCLI {
                 if !force, store.key(named: keyName) != nil {
                     throw KeyExistsError(name: keyName)
                 }
-                try store.setKey(NamedKey(name: keyName, privateKeyPEM: pem, passphrase: passphrase))
+                let publicKey = try publicKey(forPrivateKeyAt: path)
+                try store.setKey(NamedKey(name: keyName,
+                                          privateKeyPEM: pem,
+                                          publicKey: publicKey,
+                                          passphrase: passphrase))
                 print("Imported '\(keyName)'. It will appear in Sloop on all your devices (iCloud Keychain).")
             case .listKeys:
                 let keys = store.keys()
@@ -118,6 +122,39 @@ enum KeyCLI {
         return text.contains("bcrypt")
     }
 
+    /// The public key to store with a private key, which key auth cannot work
+    /// without (libssh2's mbedTLS backend won't derive one — see
+    /// `Credential.publicKey`).
+    ///
+    /// Prefers the sibling `<path>.pub` that `ssh-keygen` writes by convention;
+    /// falls back to deriving it with `ssh-keygen -y`, which is why an
+    /// encrypted key without a `.pub` file would prompt for its passphrase
+    /// again. Throws rather than importing a key that is guaranteed to fail.
+    static func publicKey(forPrivateKeyAt path: String) throws -> String {
+        let expanded = (path as NSString).expandingTildeInPath
+        let sibling = expanded + ".pub"
+        if let pub = try? String(contentsOfFile: sibling, encoding: .utf8),
+           !pub.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return pub
+        }
+
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/ssh-keygen")
+        task.arguments = ["-y", "-f", expanded]
+        let out = Pipe()
+        task.standardOutput = out
+        task.standardError = FileHandle.nullDevice
+        try task.run()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        let derived = String(decoding: data, as: UTF8.self)
+        guard task.terminationStatus == 0,
+              !derived.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw MissingPublicKeyError(path: expanded)
+        }
+        return derived
+    }
+
     private static let usageText = """
     usage: sloop import-key <path> [--name <name>] [--force]
            sloop list-keys
@@ -136,6 +173,17 @@ private struct KeyExistsError: LocalizedError {
         "a key named '\(name)' already exists in the library. Re-run with " +
         "--force to overwrite it on every synced device, or --name <other> " +
         "to import under a different name."
+    }
+}
+
+/// Thrown when neither a sibling `.pub` nor `ssh-keygen -y` could produce the
+/// public key. Importing anyway would store a key that cannot authenticate.
+private struct MissingPublicKeyError: LocalizedError {
+    let path: String
+    var errorDescription: String? {
+        "couldn't find or derive the public key for '\(path)'. Key auth needs " +
+        "it stored alongside the private key. Put the matching '\(path).pub' " +
+        "next to it (ssh-keygen -y -f '\(path)' > '\(path).pub') and retry."
     }
 }
 #endif

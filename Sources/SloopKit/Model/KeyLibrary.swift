@@ -22,7 +22,9 @@ public enum KeyLibrary {
                                   credentials: CredentialStore) -> Credential? {
         if case .publicKey(let name) = host.auth {
             if let key = keys.key(named: name) {
-                return Credential(privateKeyPEM: key.privateKeyPEM, passphrase: key.passphrase)
+                return Credential(privateKeyPEM: key.privateKeyPEM,
+                                  publicKey: key.publicKey,
+                                  passphrase: key.passphrase)
             }
             guard let legacy = credentials.credential(for: host.id),
                   legacy.privateKeyPEM != nil else { return nil }

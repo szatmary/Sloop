@@ -95,4 +95,20 @@ final class KeyLibraryTests: XCTestCase {
         KeyLibrary.migrate(hosts: [pw, keyless], credentials: credentials, keys: keys)
         XCTAssertTrue(keys.keys().isEmpty)
     }
+
+    /// The public key must reach the transport: libssh2's mbedTLS backend
+    /// can't derive it from the private key, so dropping it here breaks every
+    /// key authentication — the bug that made SSH unusable on device.
+    func testResolvedCredentialCarriesThePublicKey() throws {
+        let keys = InMemoryKeyStore()
+        try keys.setKey(NamedKey(name: "id_rsa",
+                                 privateKeyPEM: "pem",
+                                 publicKey: "ssh-rsa AAAAB3Nz…",
+                                 passphrase: nil))
+        let credential = KeyLibrary.credential(for: host(auth: .publicKey(name: "id_rsa")),
+                                               keys: keys,
+                                               credentials: InMemoryCredentialStore())
+        XCTAssertEqual(credential?.publicKey, "ssh-rsa AAAAB3Nz…")
+        XCTAssertEqual(credential?.privateKeyPEM, "pem")
+    }
 }
