@@ -1,3 +1,6 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
 // Real libssh2-backed one-shot command runner (SSH *exec* channel).
 //
 // Like `LibSSH2Transport`, this whole file compiles only when the `CSSH`

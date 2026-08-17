@@ -1,3 +1,6 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
 // Real libssh2-backed transport.
 //
 // This whole file compiles only when the `CSSH` module (the libssh2

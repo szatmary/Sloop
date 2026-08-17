@@ -59,6 +59,19 @@ judgment call, not a file: confirm you accept the low residual risk of shipping
 Mosh (GPL-3.0) via the App Store with corresponding source kept public. See
 `Docs/HANDOFF.md` for the full path to shipping.
 
+## Additional terms (§7)
+
+Sloop adds two terms on top of the GPL, both from the menu §7 explicitly
+permits: **attribution** (§7(b)) and a **reservation on the name and icon**
+(§7(e)). Because §7 lists them, they don't make the work non-free and don't
+count as a "further restriction" a downstream recipient may strip under §10.
+
+§7 also requires that a work carrying additional terms state them in the
+relevant source files, or point to where they live. Every Swift file under
+`Sources/`, `App/`, and `Tests/` therefore carries a two-line notice naming the
+copyright holder and pointing at `LICENSE` and `THIRD-PARTY-NOTICES.md`, which
+has the full text. New source files need that notice too.
+
 ## Considered and rejected: waiving copyright
 
 Most of Sloop's own code was written with LLM assistance, which raises the

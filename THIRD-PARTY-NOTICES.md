@@ -49,13 +49,27 @@ This is a statement of provenance, not a copyright disclaimer. Sloop's own code
 is copyrighted and licensed under GPL-3.0 along with the rest of the app, per
 `LICENSE`.
 
-## The name and icon are reserved
+## Additional terms under GPL-3.0 §7
 
-GPL-3.0 covers **code.** It grants no rights in the name **Sloop** or the app
-icon (`App/Sloop/AppIcon.svg` and
-`App/Sloop/Assets.xcassets/AppIcon.appiconset/`), which are reserved. GPL-3.0
-§7(e) expressly permits "declining to grant rights under trademark law for use
-of some trade names, trademarks, or service marks."
+Sloop is GPL-3.0 with the two additional terms below. Both are expressly
+permitted by §7 of that license, so they sit on top of the GPL without making
+the work non-free — and they carry forward: a fork must keep them.
 
-So: exercise your GPL rights in the code, but ship any fork under its own name
-and icon, not these.
+**Attribution — §7(b).** If you convey this software or a modified version of
+it, you must preserve the attribution to Sloop and its authors: the notice at
+the head of each source file, and the credit in any "About", credits, or
+legal-notices screen the work displays. §7(b) permits "requiring preservation
+of specified reasonable legal notices or author attributions in that material
+or in the Appropriate Legal Notices displayed by works containing it."
+
+**Name and icon — §7(e).** This license grants no rights in the name **Sloop**
+or the app icon (`App/Sloop/AppIcon.svg` and
+`App/Sloop/Assets.xcassets/AppIcon.appiconset/`), which are reserved. §7(e)
+permits "declining to grant rights under trademark law for use of some trade
+names, trademarks, or service marks."
+
+Together: build on the code freely, keep the credit, and ship under your own
+name and icon.
+
+As §7 requires, every one of Sloop's own source files carries a short notice
+stating that additional terms apply and pointing here.
