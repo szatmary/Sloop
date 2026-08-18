@@ -19,30 +19,22 @@ struct AccessLoginView: View {
     let onToken: (String) -> Void
     let onFailure: (String) -> Void
 
-    /// Set once a token is delivered, so a subsequent dismissal (the sheet
-    /// closing itself after success) isn't also reported as a failure.
-    @State private var delivered = false
-    /// Set by the Cancel button. The web view's cookie lookup is async, so a
-    /// lookup already in flight when the user cancels could otherwise still
-    /// land afterward and deliver a token for a connection the user just
-    /// called off; this guard closes that race regardless of how the
-    /// coordinator's own (separate) `delivered` flag is timed.
-    @State private var cancelled = false
-    /// The most specific reason available when the sheet disappears without
-    /// a token — set by a navigation failure before dismissal, if any.
-    @State private var lastFailureReason: String?
+    /// The sheet can end in several independent, sometimes-racing ways: a
+    /// token arrives, the user taps Cancel, the user swipes the sheet away
+    /// (no explicit action at all), or a navigation fails. All of them route
+    /// through this one gate so whichever gets there first wins and every
+    /// other — including a `getAllCookies` completion that resolves after
+    /// the sheet is already gone — is a no-op. See `AccessLoginOutcomeGate`.
+    @State private var outcome = AccessLoginOutcomeGate()
+
+    private var noTokenMessage: String { "No Access token was captured for \(hostname)." }
 
     var body: some View {
         NavigationStack {
             AccessWebView(hostname: hostname, onToken: { token in
-                guard !cancelled, !delivered else { return }
-                delivered = true
-                onToken(token)
-                dismiss()
+                if outcome.commit({ onToken(token) }) { dismiss() }
             }, onFailure: { message in
-                guard !cancelled, !delivered else { return }
-                lastFailureReason = message
-                dismiss()
+                if outcome.commit({ onFailure(message) }) { dismiss() }
             })
             .navigationTitle(hostname)
             #if os(iOS)
@@ -51,8 +43,7 @@ struct AccessLoginView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
-                        cancelled = true
-                        dismiss()
+                        if outcome.commit({ onFailure(noTokenMessage) }) { dismiss() }
                     }
                 }
             }
@@ -61,11 +52,12 @@ struct AccessLoginView: View {
         .frame(minWidth: 480, minHeight: 560)
         #endif
         .onDisappear {
-            // Covers every non-success path in one place: an explicit Cancel,
-            // an interactive swipe-to-dismiss, or a navigation failure that
-            // already recorded a specific reason above.
-            guard !delivered else { return }
-            onFailure(lastFailureReason ?? "No Access token was captured for \(hostname).")
+            // Catches the one exit with no explicit action of its own: an
+            // interactive swipe-to-dismiss. Every other exit above already
+            // committed the gate before dismissing, so this is a no-op for
+            // them — and once the gate is committed here, nothing async
+            // arriving later can still succeed or double-report either.
+            outcome.commit { onFailure(noTokenMessage) }
         }
     }
 }
