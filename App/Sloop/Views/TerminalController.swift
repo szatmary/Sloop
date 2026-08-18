@@ -123,14 +123,15 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     init(makeTransport: @escaping () -> Transport,
          onConnectCommand: String? = nil,
          appearance: TerminalAppearance = .default,
-         suggestionsFor hostID: UUID? = nil) {
+         suggestionsFor hostID: UUID? = nil,
+         historyStore: CommandHistoryStore = CommandHistoryStore()) {
         self.makeTransport = makeTransport
         self.onConnectCommand = onConnectCommand
         // No host, no suggestions: a session with nowhere to keep a history
         // has nothing to suggest from, and inventing a shared one would offer
         // each host the other's commands.
         if appearance.suggestions, let hostID {
-            self.suggester = CommandSuggester(hostID: hostID)
+            self.suggester = CommandSuggester(hostID: hostID, store: historyStore)
         }
         self.terminalView = TerminalView(frame: .zero)
         self.transport = makeTransport()
@@ -433,9 +434,14 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
 
     // MARK: TerminalViewDelegate
 
+    /// Everything typed goes through `send(_:)`, never straight to the
+    /// transport. Three calls here bypassed it, which meant the suggestion
+    /// tracker saw the smart-keys bar's output and nothing the user actually
+    /// typed — the bar simply never appeared. One outbound path or the tracker
+    /// is guessing.
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
         guard !armedModifiers.isEmpty else {
-            transport.send(data)
+            send(data)
             return
         }
         let modifiers = armedModifiers
@@ -444,11 +450,11 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         // multi-byte (IME, emoji) input pass through untouched rather than
         // being mangled by a control mask.
         guard data.count == 1, let byte = data.first, byte < 0x80 else {
-            transport.send(data)
+            send(data)
             return
         }
         let character = Character(UnicodeScalar(byte))
-        transport.send(KeyEncoder.bytes(for: character, modifiers: modifiers)[...])
+        send(KeyEncoder.bytes(for: character, modifiers: modifiers)[...])
     }
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         transport.resize(cols: newCols, rows: newRows)
