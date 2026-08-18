@@ -158,7 +158,7 @@ private struct AccessWebView {
         /// of those; see `isCancelledNavigationError`.
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             guard !delivered, !isCancelledNavigationError(error) else { return }
-            onFailure("Couldn't reach \(hostname): \(error.localizedDescription)")
+            onFailure(accessLoginFailureMessage(hostname: hostname, error: error))
         }
 
         /// A later navigation — somewhere in the IdP redirect chain — failed
@@ -167,7 +167,7 @@ private struct AccessWebView {
         /// arrives here as a -999.
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             guard !delivered, !isCancelledNavigationError(error) else { return }
-            onFailure("Sign-in to \(hostname) failed: \(error.localizedDescription)")
+            onFailure(accessLoginFailureMessage(hostname: hostname, error: error))
         }
     }
 }

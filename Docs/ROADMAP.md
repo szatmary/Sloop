@@ -139,6 +139,15 @@ top of a working SSH terminal rather than first.
   through `ConnectionState` so the UI can say which one fired. Arguably the
   most-felt gap on this list: it costs nothing to hit and every mobile user
   hits it.
+- **Sloop as its own tailnet node** — a host set to Tailscale connects today
+  through the Tailscale app's system VPN, which routes 100.64.0.0/10 and
+  MagicDNS for every app on the device; Sloop adds nothing to it. Embedding
+  libtailscale/TailscaleKit would let Sloop join the tailnet itself, which
+  matters only when the user won't run the Tailscale app — on iOS, where one
+  VPN excludes another, that case is real but secondary. It costs a Go
+  toolchain, an xcframework, its own login flow and a device risk gate (see the
+  Tailscale section of
+  `Docs/superpowers/specs/2026-08-12-tunnel-integrations-design.md`).
 - **Jump hosts / ProxyJump** — `SSHConfigParser` reads exactly four keys
   (`Host`, `HostName`, `Port`, `User`). Anyone whose infrastructure sits behind
   a bastion cannot connect at all, and an imported `~/.ssh/config` silently

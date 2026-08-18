@@ -23,6 +23,29 @@ public func isCancelledNavigationError(_ error: Error) -> Bool {
     return error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled
 }
 
+/// What to tell the user when the sign-in page itself never loaded.
+///
+/// The generic phrasing ("Sign-in to X failed: …") is wrong for the most
+/// common cause by far, a mistyped hostname: nothing about signing in is
+/// broken, the name simply doesn't resolve, and a message about sign-in sends
+/// the user to re-authenticate — which cannot possibly help — instead of to
+/// the one field that can. These three URL errors mean the name or the address
+/// is wrong, so they say so and point at the setting to fix.
+public func accessLoginFailureMessage(hostname: String, error: Error) -> String {
+    let error = error as NSError
+    let nameOrAddressIsWrong = error.domain == NSURLErrorDomain
+        && [NSURLErrorCannotFindHost,
+            NSURLErrorDNSLookupFailed,
+            NSURLErrorCannotConnectToHost].contains(error.code)
+    if nameOrAddressIsWrong {
+        return "There's nothing at \"\(hostname)\". Check the hostname in this " +
+               "host's settings — it should be the Cloudflare Access " +
+               "application's public hostname. This isn't a sign-in problem, so " +
+               "signing in again won't help."
+    }
+    return "Couldn't load the sign-in page for \(hostname): \(error.localizedDescription)"
+}
+
 /// How a browser SSO sheet ended (see `AccessLoginView` in the app target).
 ///
 /// Three cases, not two, because "the user closed the sheet" and "the sign-in

@@ -140,3 +140,35 @@ final class CancelledNavigationErrorTests: XCTestCase {
             NSError(domain: "org.szatmary.sloop.test", code: NSURLErrorCancelled)))
     }
 }
+
+/// What the sheet says when the sign-in page never loaded.
+final class AccessLoginFailureMessageTests: XCTestCase {
+    private func urlError(_ code: Int) -> NSError {
+        NSError(domain: NSURLErrorDomain, code: code,
+                userInfo: [NSLocalizedDescriptionKey: "the system's wording"])
+    }
+
+    /// A hostname that doesn't resolve is not a sign-in problem, and saying so
+    /// sends the user to re-authenticate instead of to the field that's wrong.
+    /// This is the mistake that cost a real debugging session.
+    func testAnUnresolvableHostnamePointsAtTheHostnameNotTheSignIn() {
+        for code in [NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed, NSURLErrorCannotConnectToHost] {
+            let message = accessLoginFailureMessage(hostname: "typo.example.com",
+                                                    error: urlError(code))
+            XCTAssertTrue(message.contains("typo.example.com"))
+            XCTAssertTrue(message.contains("Check the hostname"),
+                          "URL error \(code) should point at the hostname setting")
+            XCTAssertTrue(message.contains("signing in again won't help"),
+                          "URL error \(code) must not read as a sign-in failure")
+        }
+    }
+
+    /// Anything else keeps the system's own wording, which is more specific
+    /// than anything this could invent.
+    func testOtherFailuresKeepTheSystemsDescription() {
+        let message = accessLoginFailureMessage(hostname: "ssh.example.com",
+                                                error: urlError(NSURLErrorSecureConnectionFailed))
+        XCTAssertTrue(message.contains("the system's wording"))
+        XCTAssertFalse(message.contains("Check the hostname"))
+    }
+}

@@ -121,7 +121,7 @@ struct HostEditView: View {
                         // MagicDNS name or tailnet address and sshd listens
                         // on it as usual.
                         Stepper("Port: \(host.port)", value: $host.port, in: 1...65535)
-                        Text("Tailscale isn't built into this app yet, so a host set to it can't connect — see Docs/ROADMAP.md.")
+                        Text("Reached over your tailnet, so the Tailscale app has to be installed and connected on this device. The hostname is the MagicDNS name or the 100.x address.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -219,7 +219,7 @@ struct HostEditView: View {
                 Section("Options") {
                     HStack {
                         Toggle("Use Mosh", isOn: $host.useMosh)
-                            .disabled(host.connectionMethod != .direct)
+                            .disabled(host.connectionMethod == .cloudflareAccess)
                         Button {
                             showingMoshHelp = true
                         } label: {
@@ -228,7 +228,7 @@ struct HostEditView: View {
                         .buttonStyle(.borderless)
                         .accessibilityLabel("What is Mosh?")
                     }
-                    if host.connectionMethod != .direct {
+                    if host.connectionMethod == .cloudflareAccess {
                         Text("Mosh needs UDP, which can't pass through this tunnel — SSH is used instead.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -236,7 +236,12 @@ struct HostEditView: View {
                 }
             }
             .onChange(of: host.connectionMethod) { _, method in
-                if method != .direct { host.useMosh = false }
+                // Only the Access tunnel rules Mosh out — it carries TCP over a
+                // WebSocket and there is nowhere for UDP to go. A tailnet is a
+                // network, so Mosh works over it exactly as it does directly,
+                // which is a good pairing: Tailscale roams between networks and
+                // so does Mosh.
+                if method == .cloudflareAccess { host.useMosh = false }
             }
             .navigationTitle(host.hostname.isEmpty ? "New Host" : host.alias)
             #if os(iOS)
