@@ -534,3 +534,43 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 288.7778, accuracy: 0.001)
     }
 }
+
+/// The iPad layout, pinned key by key.
+///
+/// It took a long conversation at a real iPad to arrive at this arrangement,
+/// and most of what was wrong with the versions before it — a symbol bar
+/// spelling out what shift does, digits in two places, arrows strung along a
+/// row instead of an inverted T, return in the wrong corner — was invisible in
+/// code and obvious in the hand. The invariants above check properties; this
+/// checks the actual keyboard, so changing it has to be deliberate.
+final class PadKeyboardSnapshotTests: XCTestCase {
+    private func description(of cap: KeyCap) -> String {
+        switch cap.primary {
+        case .character(let character): return character == " " ? "space" : String(character)
+        case .key(let key):            return "\(key)"
+        case .modifier(let modifiers):
+            if modifiers == .control { return "ctrl" }
+            if modifiers == .shift { return "shift" }
+            return "opt"
+        case .command(let command):    return "\(command)"
+        case .chord(_, let character): return "^\(character)"
+        case .functionLayer:           return "fn"
+        case .blank:                   return "_"
+        }
+    }
+
+    func testTheKeyboardIsWhatItIs() {
+        let expected = [
+            "escape tab q w e r t y u i o p [ ] backspace _ home pageUp 7 8 9 /",
+            "paste ctrl a s d f g h j k l ; ' \\ return _ end pageDown 4 5 6 *",
+            "copy shift z x c v b n m , . / return _ up _ 1 2 3 -",
+            "dismissKeyboard fn opt ` space ^b ^c ^d ^z ^l delete left down right 0 . =",
+        ]
+        for context in [KeyboardLayout.Context(idiom: .pad, orientation: .landscape),
+                        KeyboardLayout.Context(idiom: .pad, orientation: .portrait)] {
+            let rows = KeyboardLayout.resolve(for: context).rows
+                .map { $0.map(description(of:)).joined(separator: " ") }
+            XCTAssertEqual(rows, expected, "\(context)")
+        }
+    }
+}
