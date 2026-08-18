@@ -107,11 +107,31 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     private let onConnectCommand: String?
     private var transport: Transport
 
+    /// What the user is typing, and what to offer for it. Both are nil when
+    /// suggestions are switched off — the setting stops the recording, not just
+    /// the display, since the recording is the part worth a choice.
+    private var suggester: CommandSuggester?
+
+    /// The suggestions for the line as it stands, best first. The bar above
+    /// the keyboard observes this.
+    @Published private(set) var suggestions: [String] = []
+
+    /// What we believe has been typed on the current line, so the bar can dim
+    /// it and show the completion in full strength.
+    var typedLine: String { suggester?.typedLine ?? "" }
+
     init(makeTransport: @escaping () -> Transport,
          onConnectCommand: String? = nil,
-         appearance: TerminalAppearance = .default) {
+         appearance: TerminalAppearance = .default,
+         suggestionsFor hostID: UUID? = nil) {
         self.makeTransport = makeTransport
         self.onConnectCommand = onConnectCommand
+        // No host, no suggestions: a session with nowhere to keep a history
+        // has nothing to suggest from, and inventing a shared one would offer
+        // each host the other's commands.
+        if appearance.suggestions, let hostID {
+            self.suggester = CommandSuggester(hostID: hostID)
+        }
         self.terminalView = TerminalView(frame: .zero)
         self.transport = makeTransport()
         super.init()
@@ -249,10 +269,19 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
                 guard let self, let transport else { return }
                 self.state = .connected
                 self.runOnConnectCommand(on: transport)
+                // After the shell is up, never alongside it: the import rides
+                // a second channel on this same connection, and it is not
+                // allowed to be in the way of the thing the user asked for.
+                self.suggester?.importHistory(over: transport)
             }
         }
-        transport.onData = { [weak terminalView] bytes in
-            DispatchQueue.main.async { terminalView?.feed(byteArray: bytes) }
+        transport.onData = { [weak self, weak terminalView] bytes in
+            DispatchQueue.main.async {
+                terminalView?.feed(byteArray: bytes)
+                // The host redrew the screen; whatever we thought was on the
+                // command line may not be. Cheaper to admit than to guess.
+                self?.refreshSuggestions(hostRedrew: true)
+            }
         }
         transport.onClose = { [weak self] error in
             let reason = error?.localizedDescription
@@ -289,6 +318,34 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     /// Send bytes to the remote end (used by the smart-keys bar).
     func send(_ bytes: ArraySlice<UInt8>) {
         transport.send(bytes)
+        observeTyping(bytes)
+    }
+
+    /// Accept a suggestion: send only what hasn't been typed yet, as keystrokes.
+    /// The host sees typing, so its own line editing, history and completion all
+    /// behave exactly as they would have.
+    func acceptSuggestion(_ suggestion: String) {
+        guard let suggester,
+              let completion = suggester.completion(for: suggestion) else { return }
+        send(ArraySlice(Array(completion.utf8)))
+    }
+
+    /// Feed everything sent to the tracker, and refresh what's on offer.
+    private func observeTyping(_ bytes: ArraySlice<UInt8>) {
+        guard suggester != nil else { return }
+        suggester?.observe(bytes)
+        refreshSuggestions(hostRedrew: false)
+    }
+
+    private func refreshSuggestions(hostRedrew: Bool) {
+        guard let suggester else { return }
+        if hostRedrew, terminalView.getTerminal().isCurrentBufferAlternate {
+            // vim, htop, tmux's copy mode: keystrokes are not a command line
+            // there, and a completion bar over one is noise at best.
+            suggestions = []
+            return
+        }
+        suggestions = suggester.suggestions()
     }
 
     #if os(iOS)

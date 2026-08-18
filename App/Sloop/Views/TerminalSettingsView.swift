@@ -41,6 +41,16 @@ struct TerminalSettingsView: View {
                     .pickerStyle(.segmented)
                 }
 
+                Section("Suggestions") {
+                    Toggle("Suggest commands", isOn: $store.appearance.suggestions)
+                    Text("Completes what you type from commands you've run on this host, "
+                       + "seeded once from the host's own shell history. Kept on this device "
+                       + "and never synced. Turning this off stops recording as well as "
+                       + "suggesting.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 #if os(iOS)
                 Section("Keyboard") {
                     Picker("Style", selection: $store.appearance.keyboard) {

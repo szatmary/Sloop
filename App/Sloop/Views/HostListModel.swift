@@ -212,7 +212,8 @@ final class HostListModel: ObservableObject {
         }
 
         return TerminalSession(title: host.alias,
-                               onConnectCommand: host.trimmedOnConnectCommand) {
+                               onConnectCommand: host.trimmedOnConnectCommand,
+                               hostID: host.id) {
             // Mosh needs UDP, which no tunnel method carries — tunneled hosts
             // are SSH-only regardless of the saved toggle.
             guard host.useMosh, host.connectionMethod == .direct else { return makeSSH() }
