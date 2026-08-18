@@ -19,6 +19,8 @@ struct HostEditView: View {
     @State private var pastedPassphrase: String = ""
     @State private var saveError: String?
     @State private var showingMoshHelp = false
+    @State private var showingSuggestionsHelp = false
+    @State private var showingConnectionHelp = false
     @FocusState private var commandFocused: Bool
 
     /// Ready-made on-connect commands. Reattaching to a multiplexer is why
@@ -73,8 +75,11 @@ struct HostEditView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Connection") {
-                    TextField("Alias", text: $host.alias)
+                // What this host is called, on its own: it is how the host
+                // list reads and which colour rail it gets, and it has nothing
+                // to do with reaching the machine.
+                Section("Name") {
+                    TextField("Name", text: $host.alias)
                         #if os(iOS)
                         // Host names are lowercase far more often than not, and
                         // iOS capitalising the first letter meant a lowercase
@@ -83,12 +88,73 @@ struct HostEditView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         #endif
+                }
+
+                Section("Connection") {
+                    // First, because it changes what everything below it means:
+                    // a hostname is a machine on Direct, an Access application's
+                    // public name on Cloudflare, a MagicDNS name on Tailscale —
+                    // and whether there is a port at all depends on it.
+                    HStack {
+                        Picker("Connect via", selection: $host.connectionMethod) {
+                            ForEach(ConnectionMethod.allCases, id: \.self) { method in
+                                Text(method.displayName).tag(method)
+                            }
+                        }
+                        Button {
+                            showingConnectionHelp = true
+                        } label: {
+                            Image(systemName: "info.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("About connection methods")
+                    }
+
                     TextField("Hostname", text: $host.hostname)
                         .textContentType(.URL)
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         #endif
+                    // A switch rather than an if/else, so a new connection
+                    // method has to answer "and what does its port mean?"
+                    // here rather than inheriting whatever the else branch
+                    // happens to do.
+                    // A switch rather than an if/else, so a new connection
+                    // method has to answer "and what does its port mean?" here
+                    // rather than inheriting whatever the else branch happens to
+                    // do. The explanations that used to sit underneath are in
+                    // the ⓘ beside the picker, where they aren't in the way of
+                    // the fields.
+                    switch host.connectionMethod {
+                    case .direct, .tailscale:
+                        // A field, not a stepper. Ports are typed, not walked
+                        // to: the useful ones are 22 and whatever four- or
+                        // five-digit number someone's sshd listens on, and a
+                        // stepper asks for sixty-five thousand taps to reach
+                        // the second kind.
+                        //
+                        // A tailnet host has a real port too — the hostname is
+                        // a MagicDNS name and sshd listens on it as usual.
+                        LabeledContent("Port") {
+                            TextField("22", value: $host.port,
+                                      format: .number.grouping(.never))
+                                .multilineTextAlignment(.trailing)
+                                #if os(iOS)
+                                .keyboardType(.numberPad)
+                                #endif
+                        }
+                    case .cloudflareAccess:
+                        // No port to show: wss/443 outside the tunnel, sshd
+                        // inside it, and neither is the user's to choose.
+                        EmptyView()
+                    }
+                }
+
+                Section("Authentication") {
+                    // Who you sign in as, beside how you prove it. It sat in
+                    // Connection, which is where the machine is described, not
+                    // who is knocking.
                     TextField("Username", text: $host.username)
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
@@ -98,36 +164,7 @@ struct HostEditView: View {
                     // saved as .tailscale used to open this editor with no
                     // matching option at all, so the picker showed nothing
                     // selected and saving silently reinterpreted the host.
-                    Picker("Connect via", selection: $host.connectionMethod) {
-                        ForEach(ConnectionMethod.allCases, id: \.self) { method in
-                            Text(method.displayName).tag(method)
-                        }
-                    }
 
-                    // A switch rather than an if/else, so a new connection
-                    // method has to answer "and what does its port mean?"
-                    // here rather than inheriting whatever the else branch
-                    // happens to do.
-                    switch host.connectionMethod {
-                    case .direct:
-                        Stepper("Port: \(host.port)", value: $host.port, in: 1...65535)
-                    case .cloudflareAccess:
-                        // No port: wss/443 outside the tunnel, sshd inside it.
-                        Text("The hostname above is the Access application's public hostname. A browser sign-in runs on first connect.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    case .tailscale:
-                        // The port is a real port here — the hostname is a
-                        // MagicDNS name or tailnet address and sshd listens
-                        // on it as usual.
-                        Stepper("Port: \(host.port)", value: $host.port, in: 1...65535)
-                        Text("For devices without Tailscale installed — Sloop joins the tailnet itself. If you already run the Tailscale app here, choose Direct instead and use the MagicDNS name: the system VPN already routes it, and that path is in use today.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Authentication") {
                     Picker("Method", selection: $authKind) {
                         ForEach(AuthKind.allCases) { kind in
                             Text(kind.rawValue).tag(kind)
@@ -218,6 +255,17 @@ struct HostEditView: View {
 
                 Section("Options") {
                     HStack {
+                        Toggle("Suggest commands", isOn: $host.suggestions)
+                        Button {
+                            showingSuggestionsHelp = true
+                        } label: {
+                            Image(systemName: "info.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("About command suggestions")
+                    }
+
+                    HStack {
                         Toggle("Use Mosh", isOn: $host.useMosh)
                             .disabled(host.connectionMethod == .cloudflareAccess)
                         Button {
@@ -282,6 +330,40 @@ struct HostEditView: View {
                 }
             }
             #endif
+            .alert("Connecting to This Host", isPresented: $showingConnectionHelp) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("""
+                Direct — an ordinary SSH connection to the hostname and port \
+                below. Use this on a local network, over a VPN, or for anything \
+                reachable from where you are.
+
+                Cloudflare Access — for a host behind a Cloudflare tunnel. The \
+                hostname is the Access application's public name, there is no \
+                port, and the first connection opens a browser sign-in.
+
+                Tailscale — for a host on your tailnet. Sloop joins the tailnet \
+                itself, so the Tailscale app doesn't have to be running; the \
+                hostname is the machine's MagicDNS name or its 100.x address.
+                """)
+            }
+            .alert("Command Suggestions", isPresented: $showingSuggestionsHelp) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("""
+                As you type, Sloop offers the word that usually comes next, \
+                taken from the commands you've run on this host and from the \
+                host's own shell history, which it reads once when you connect. \
+                Tap a suggestion to use it.
+
+                That list of commands stays on this device. It isn't synced to \
+                iCloud, isn't shared with your other devices, and is never sent \
+                to a server or to anyone else. There's no account and nothing to \
+                opt out of, because there is nowhere for it to go.
+
+                You can clear the list whenever you like, in Terminal settings.
+                """)
+            }
             .alert("What is Mosh?", isPresented: $showingMoshHelp) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -305,6 +387,10 @@ struct HostEditView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        // Typed, so it can be anything. A saved 0 or 99999 is a
+                        // host that will never connect, failing somewhere far
+                        // from the field that caused it.
+                        host.port = min(max(host.port, 1), 65535)
                         do {
                             switch authKind {
                             case .password:

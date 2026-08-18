@@ -43,6 +43,15 @@ public struct SSHHost: Identifiable, Codable, Hashable {
     public var username: String
     public var auth: AuthMethod
     /// Prefer Mosh when `mosh-server` is available on the host.
+    /// Whether Sloop suggests commands on this host, and records them to do
+    /// so.
+    ///
+    /// Per host rather than per app: a personal box and a customer's production
+    /// jump box are not the same decision, and the history is per host anyway —
+    /// keeping the switch beside the thing it governs means turning it off for
+    /// one machine says nothing about the others.
+    public var suggestions: Bool = true
+
     public var useMosh: Bool
     /// How to reach the host. Tunneled methods are SSH-only (no Mosh — UDP
     /// can't traverse them).
@@ -61,7 +70,8 @@ public struct SSHHost: Identifiable, Codable, Hashable {
                 auth: AuthMethod = .password,
                 useMosh: Bool = false,
                 connectionMethod: ConnectionMethod = .direct,
-                onConnectCommand: String? = nil) {
+                onConnectCommand: String? = nil,
+                suggestions: Bool = true) {
         self.id = id
         self.alias = alias
         self.hostname = hostname
@@ -71,11 +81,12 @@ public struct SSHHost: Identifiable, Codable, Hashable {
         self.useMosh = useMosh
         self.connectionMethod = connectionMethod
         self.onConnectCommand = onConnectCommand
+        self.suggestions = suggestions
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, alias, hostname, port, username, auth, useMosh, connectionMethod
-        case onConnectCommand
+        case onConnectCommand, suggestions
     }
 
     public init(from decoder: Decoder) throws {
@@ -90,6 +101,7 @@ public struct SSHHost: Identifiable, Codable, Hashable {
         connectionMethod = try c.decodeIfPresent(ConnectionMethod.self,
                                                  forKey: .connectionMethod) ?? .direct
         onConnectCommand = try c.decodeIfPresent(String.self, forKey: .onConnectCommand)
+        suggestions = try c.decodeIfPresent(Bool.self, forKey: .suggestions) ?? true
     }
 
     /// The command to send on connect, or nil when there's nothing to run.
