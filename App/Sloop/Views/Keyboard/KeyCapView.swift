@@ -279,8 +279,14 @@ final class KeyCapView: UIControl {
             self.repeatTimer = Timer.scheduledTimer(
                 withTimeInterval: Self.repeatInterval, repeats: true
             ) { [weak self] _ in
-                guard let self else { return }
-                self.delegate?.keyCapView(self, didProduce: self.cap.primary)
+                // Same guard as the delay timer above, and needed for the same
+                // reason: a drag that begins *after* auto-repeat has started
+                // reaches for the secondary, and until it crosses the drag
+                // threshold this timer would keep sending the primary — so a
+                // slow drag off a repeating key emits a burst of the key the
+                // user is trying to move away from.
+                guard let self, !self.didDrag else { return }
+                self.firePrimary()
             }
         }
     }

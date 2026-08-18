@@ -179,6 +179,12 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
                 // `controller.onCloseTabRequested` is the bridge: TerminalPane
                 // sets it once (in `onAppear`) to raise its own confirmation,
                 // the same way `KeyboardAccessoryBar`'s ✕ already does.
+                //
+                // Cleared first, as the ⌃-letter keys and ⌨︎↓ do: the dialog
+                // this raises can be cancelled, and an armed modifier left
+                // over from before it would then modify the next character
+                // typed, with nothing on screen still claiming to be armed.
+                clearArmedModifiers()
                 controller.onCloseTabRequested()
             }
 

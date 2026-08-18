@@ -75,7 +75,14 @@ struct KeyboardAccessoryBar: View {
                     }
                 }
                 divider
-                special("⌨︎↓") { dismissKeyboard() }
+                special("⌨︎↓") {
+                    // The bar goes away with the keyboard, taking the armed
+                    // key's highlight with it — so an armed modifier that
+                    // survived here would be invisible and still live, and
+                    // would silently mangle the next character typed.
+                    armed = []
+                    dismissKeyboard()
+                }
                 divider
                 special("✕ tab") {
                     armed = []
