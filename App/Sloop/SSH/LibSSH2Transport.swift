@@ -30,22 +30,33 @@ final class LibSSH2Transport: Transport {
     private let knownHosts: KnownHostsStore
     private let hostKeyVerifier: HostKeyVerifier
     private let dialer: Dialer
+    private let forwardedKeys: [NamedKey]
+    private let signConfirmer: AgentSignConfirming
 
     private let lock = NSLock()
     private var outbound: [UInt8] = []
     private var pendingResize: (cols: Int, rows: Int)?
     private var shouldClose = false
 
+    /// Non-nil only while a forwarded agent is running. Touched solely on the
+    /// SSH thread — the callback that sets it is invoked by libssh2 from
+    /// inside packet processing, which happens on that same thread.
+    private var forwardedAgent: ForwardedAgent?
+
     init(host: SSHHost,
          credential: Credential,
          dialer: Dialer,
          knownHosts: KnownHostsStore,
-         hostKeyVerifier: HostKeyVerifier = AutoAcceptHostKeyVerifier()) {
+         hostKeyVerifier: HostKeyVerifier = AutoAcceptHostKeyVerifier(),
+         forwardedKeys: [NamedKey] = [],
+         signConfirmer: AgentSignConfirming = AgentSignPrompter.shared) {
         self.host = host
         self.credential = credential
         self.dialer = dialer
         self.knownHosts = knownHosts
         self.hostKeyVerifier = hostKeyVerifier
+        self.forwardedKeys = forwardedKeys
+        self.signConfirmer = signConfirmer
     }
 
     func start() {
@@ -87,7 +98,17 @@ final class LibSSH2Transport: Transport {
         }
         defer { Darwin.close(sock) }
 
-        guard let session = libssh2_session_init_ex(nil, nil, nil, nil) else {
+        // The fourth argument is libssh2's "abstract" slot — an opaque void*
+        // it stores on the session and hands back, unexamined, to callbacks
+        // registered on that session. Stashing `self` there is how the
+        // AUTHAGENT callback below (a bare C function pointer, so it can't
+        // capture anything) finds its way back to this transport.
+        // `passUnretained` rather than a leak-forever `passRetained`: this
+        // very `run()` frame outlives the session (see the `defer` below),
+        // so `self` is guaranteed alive for as long as the session — and
+        // therefore the callback — can possibly fire.
+        guard let session = libssh2_session_init_ex(
+            nil, nil, nil, Unmanaged.passUnretained(self).toOpaque()) else {
             return finish(SSHError.connectionFailed("session_init failed"))
         }
         defer {
@@ -95,6 +116,32 @@ final class LibSSH2Transport: Transport {
             libssh2_session_free(session)
         }
         libssh2_session_set_blocking(session, 0)
+
+        // A remote can open the forwarded-agent channel at any point after
+        // auth completes, so this has to be registered before the handshake
+        // — not just before openShell, where forwarding is requested — or an
+        // early request could arrive with nothing listening for it.
+        //
+        // The AUTHAGENT callback's real type is
+        //   (LIBSSH2_SESSION *, LIBSSH2_CHANNEL *, void **) -> Void
+        // but callback_set2 takes a generic void(*)(void), so the cast below
+        // is required and is the same one libssh2's own examples use.
+        let authAgentCallback: @convention(c) (OpaquePointer?, OpaquePointer?,
+                                               UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Void = {
+            _, channel, abstract in
+            // Runs inside libssh2 packet processing, on the SSH thread that
+            // is already inside a libssh2_channel_read_ex call — so this
+            // does the absolute minimum and returns. No read, write, sign,
+            // or prompt: any of those would re-enter libssh2 from inside
+            // libssh2. Servicing the newly-adopted channel happens on
+            // eventLoop's own next pass, off this callback's stack.
+            guard let channel,
+                  let box = abstract?.pointee else { return }
+            let transport = Unmanaged<LibSSH2Transport>.fromOpaque(box).takeUnretainedValue()
+            transport.adoptAgentChannel(channel)
+        }
+        _ = libssh2_session_callback_set2(session, LIBSSH2_CALLBACK_AUTHAGENT,
+                                          unsafeBitCast(authAgentCallback, to: (@convention(c) () -> Void).self))
 
         // Handshake
         let rc = retry(session, sock) { libssh2_session_handshake(session, sock) }
@@ -106,11 +153,25 @@ final class LibSSH2Transport: Transport {
         // Authenticate
         if let error = authenticate(session, sock) { return finish(error) }
 
+        // The agent needs a session that has finished authenticating —
+        // AgentSigner derives identities from it — and must exist before
+        // openShell, which is where forwarding is actually requested.
+        if !forwardedKeys.isEmpty {
+            forwardedAgent = ForwardedAgent(
+                signer: AgentSigner(session: session, keys: forwardedKeys),
+                confirming: signConfirmer,
+                endpoint: "\(host.hostname):\(host.port)")
+        }
+
         // Open a shell channel with a PTY
         guard let channel = openShell(session, sock) else {
             return finish(SSHError.channelFailure("could not open shell"))
         }
         defer {
+            // Tear down the agent channel alongside the shell channel rather
+            // than leaving its fate to whatever libssh2_session_free happens
+            // to do with a channel nobody explicitly closed.
+            forwardedAgent?.close()
             _ = retry(session, sock) { libssh2_channel_close(channel) }
             libssh2_channel_free(channel)
         }
@@ -270,7 +331,30 @@ final class LibSSH2Transport: Transport {
                 libssh2_channel_process_startup(channel, shellPtr, 5, nil, 0)
             }
         }
-        return rc == 0 ? channel : nil
+        guard rc == 0 else { return nil }
+
+        if host.forwardsAgent {
+            let agentRC = retry(session, sock) { libssh2_channel_request_auth_agent(channel) }
+            if agentRC != 0 {
+                // Not fatal: a working shell that can't forward beats no
+                // shell at all. A server without
+                // "auth-agent-req@openssh.com" support is common enough that
+                // failing the whole connection over it would be wrong.
+                let message = "sloop: agent forwarding request failed (rc=\(agentRC)) for " +
+                    "\(host.hostname) — continuing without it\n"
+                FileHandle.standardError.write(Data(message.utf8))
+            }
+        }
+
+        return channel
+    }
+
+    /// Invoked by the AUTHAGENT C callback with the channel libssh2 just
+    /// opened for the remote's forwarding request. Only ever called on the
+    /// SSH thread, same as everything else in this class — `eventLoop`
+    /// services the newly-adopted channel on its own next pass.
+    private func adoptAgentChannel(_ channel: OpaquePointer) {
+        forwardedAgent?.adopt(LibSSH2AgentChannel(channel: channel))
     }
 
     private func eventLoop(session: OpaquePointer, channel: OpaquePointer, sock: Int32) {
@@ -326,6 +410,11 @@ final class LibSSH2Transport: Transport {
                     break
                 }
             }
+
+            // Service the agent channel in the same pass as the shell.
+            // `readData` absorbs its result so a loop that only had agent
+            // traffic does not sleep for 200 ms with a reply already queued.
+            if let forwardedAgent, forwardedAgent.service() { readData = true }
 
             if !readData { waitSocket(sock, session) }
         }

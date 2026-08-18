@@ -14,13 +14,15 @@ enum TransportFactory {
                     credential: Credential,
                     knownHosts: KnownHostsStore,
                     hostKeyVerifier: HostKeyVerifier,
-                    accessTokens: AccessTokenStore) -> Transport {
+                    accessTokens: AccessTokenStore,
+                    forwardedKeys: [NamedKey] = []) -> Transport {
         #if canImport(CSSH)
         switch dialer(for: host, accessTokens: accessTokens) {
         case .ready(let dialer):
             return LibSSH2Transport(host: host, credential: credential,
                                     dialer: dialer,
-                                    knownHosts: knownHosts, hostKeyVerifier: hostKeyVerifier)
+                                    knownHosts: knownHosts, hostKeyVerifier: hostKeyVerifier,
+                                    forwardedKeys: forwardedKeys)
         case .unavailable(let explanation):
             return MessageTransport(message: explanation)
         }
