@@ -49,4 +49,28 @@ final class SSHWireTests: XCTestCase {
         XCTAssertEqual(try reader.readString(), Array("hello".utf8))
         XCTAssertTrue(reader.isAtEnd)
     }
+
+    /// Every byte position must be correctly shifted and indexed. Swapping shifts
+    /// or indices would pass tests that only exercise zero bytes in certain positions.
+    func testReadsEveryBytePositionOfAUInt32() throws {
+        var reader = SSHWireReader([0x12, 0x34, 0x56, 0x78])
+        XCTAssertEqual(try reader.readUInt32(), 0x12345678)
+    }
+
+    /// The length check must use remaining bytes, not total buffer size. If a reader
+    /// has already consumed bytes, a string header claiming more than what's left
+    /// must be rejected even if it fits within the original buffer.
+    func testStringLengthIsCheckedAgainstRemainingNotBufferSize() throws {
+        // 10-byte buffer: first 4 bytes are a UInt32, next 4 are a length header claiming 8 bytes, last 2 are data
+        let buffer = [UInt8(0x12), UInt8(0x34), UInt8(0x56), UInt8(0x78),  // first UInt32
+                      UInt8(0x00), UInt8(0x00), UInt8(0x00), UInt8(0x08),  // length header: claims 8 bytes
+                      UInt8(0x01), UInt8(0x02)]  // only 2 bytes of data available
+        var reader = SSHWireReader(buffer)
+        _ = try reader.readUInt32()  // consume 4 bytes, leaving 6
+        // Now attempt readString: it reads length (4 bytes), leaving 2 bytes remaining
+        // but the length header claims 8 bytes, which exceeds remaining (2)
+        XCTAssertThrowsError(try reader.readString()) { error in
+            XCTAssertEqual(error as? SSHWireError, .lengthExceedsRemaining)
+        }
+    }
 }

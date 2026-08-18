@@ -42,11 +42,10 @@ public struct SSHWireReader {
     public mutating func readString() throws -> [UInt8] {
         let length = try readUInt32()
         // Compare against what is actually here before trusting the header.
-        // Widening to Int first: a length near UInt32.max would overflow the
-        // addition this check replaces.
-        guard Int(length) <= remaining else { throw SSHWireError.lengthExceedsRemaining }
-        defer { offset += Int(length) }
-        return Array(bytes[offset ..< offset + Int(length)])
+        // Use non-trapping conversion to safely validate on 32-bit platforms.
+        guard let count = Int(exactly: length), count <= remaining else { throw SSHWireError.lengthExceedsRemaining }
+        defer { offset += count }
+        return Array(bytes[offset ..< offset + count])
     }
 }
 
