@@ -95,8 +95,49 @@ top of a working SSH terminal rather than first.
   (pinch to shrink) helps today but cannot be invoked programmatically — there
   is no public API — so a real fix means owning the keyboard. Design work:
   key sizes, symbol/digit layers, portrait vs landscape.
-- SFTP / file transfer.
-- Port forwarding.
+- **Connection timeouts and keepalives** — there are none. `grep -ri
+  "timeout\|keepalive\|ServerAlive"` over `Sources/` and `App/` returns nothing,
+  so an unreachable host hangs on `connect()` with no deadline and no way for
+  the user to tell "still trying" from "never going to work", and a connection
+  that dies silently (NAT timeout, sleeping laptop, dropped VPN) is never
+  detected — the terminal just stops responding. Wants a connect timeout, a
+  read/write deadline, and `ServerAliveInterval`-style keepalives, surfaced
+  through `ConnectionState` so the UI can say which one fired. Arguably the
+  most-felt gap on this list: it costs nothing to hit and every mobile user
+  hits it.
+- **Jump hosts / ProxyJump** — `SSHConfigParser` reads exactly four keys
+  (`Host`, `HostName`, `Port`, `User`). Anyone whose infrastructure sits behind
+  a bastion cannot connect at all, and an imported `~/.ssh/config` silently
+  drops the `ProxyJump`/`ProxyCommand` line that made it work on the desktop.
+  Blink, Termius and Prompt all support it. Adjacent to the Cloudflare Access
+  tunnel work, which is the same shape of problem: reaching a host you cannot
+  route to directly.
+- **Agent forwarding, and `ssh-agent` generally** — `AuthMethod.agent` is
+  declared in `SSHHost.swift` but has **no implementation anywhere** in the SSH
+  layer or the UI; it currently reads as a supported auth method that silently
+  isn't one. Either implement it or delete the case. Forwarding specifically is
+  what lets `git pull` on the remote use the key held on the phone, which is
+  one of the most common reasons to SSH from a phone at all.
+- **SFTP / file transfer** — and the version that actually matters is a
+  `FileProvider` extension, so a remote host appears in Files.app and any app
+  can open and save to it. Secure ShellFish built its whole identity on that;
+  a transfer sheet inside the app is a much smaller feature.
+- **Port forwarding** — local forwarding especially: reaching a remote dev
+  server from mobile Safari.
+- **`ssh://` URL scheme** — no `CFBundleURLTypes` in `project.yml`, so tapping
+  an `ssh://user@host` link does nothing. It is how people share hosts, and it
+  is close to free.
+- **Snippets, or something better than snippets** — every competitor ships a
+  saved-command library (Prompt calls them Clips; Blink and Termius call them
+  Snippets) because typing `docker compose -f prod.yml logs -f --tail=100 api`
+  on a phone is miserable. That is the same problem the compact keyboard
+  attacks, from the other end. **Open question, not yet decided:** whether the
+  answer is a plain saved-command list or something that suggests commands.
+  If it suggests, the design questions are which model and where it runs —
+  Apple's on-device Foundation Models framework needs no key, no network and
+  no privacy story, while a hosted model is far more capable but means terminal
+  context leaving the device, which for a shell client is a much bigger promise
+  than it looks. Decide the privacy posture before the model.
 - ~~Key management~~ → DONE: shared key library synced via iCloud Keychain;
   `sloop import-key` CLI on the Mac (embedded in the app binary). Spec:
   `Docs/superpowers/specs/2026-08-11-key-library-design.md`.
