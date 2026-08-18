@@ -19,12 +19,26 @@ struct TerminalPane: View {
             ConnectionStatusBar(state: controller.state) { controller.reconnect() }
             SwiftTermView(controller: controller)
             #if os(iOS)
-            KeyboardAccessoryBar(send: { controller.send($0) },
-                                 applicationCursor: { controller.applicationCursor },
-                                 armed: $controller.armedModifiers,
-                                 closeTab: { confirmingClose = true })
+            if showsFullBar {
+                KeyboardAccessoryBar(send: { controller.send($0) },
+                                     applicationCursor: { controller.applicationCursor },
+                                     armed: $controller.armedModifiers,
+                                     closeTab: { confirmingClose = true },
+                                     dismissKeyboard: { controller.dismissKeyboard() })
+            }
             #endif
         }
+        #if os(iOS)
+        .overlay(alignment: .bottomTrailing) {
+            if !showsFullBar {
+                FloatingKeyPill(send: { controller.send($0) },
+                                applicationCursor: { controller.applicationCursor },
+                                restore: { _ = controller.terminalView.becomeFirstResponder() })
+                    .padding(.trailing, 8)
+                    .padding(.bottom, 8)
+            }
+        }
+        #endif
         // The close key sits in the row your thumbs live in, and it drops a
         // live SSH session — a mis-tap costs real work. Confirm rather than
         // relocate: anywhere on that bar is somewhere you tap constantly.
@@ -37,6 +51,15 @@ struct TerminalPane: View {
             Text("The connection will be closed.")
         }
     }
+
+    #if os(iOS)
+    /// The full bar earns its 44pt only while you are typing. A hardware keyboard
+    /// counts as typing: no software keyboard appears, so there is no height to
+    /// reclaim, and the bar is the only place those keys exist.
+    private var showsFullBar: Bool {
+        controller.keyboardVisible || controller.hardwareKeyboardAttached
+    }
+    #endif
 }
 
 /// A thin status bar above the terminal. Hidden while connected (to maximize the

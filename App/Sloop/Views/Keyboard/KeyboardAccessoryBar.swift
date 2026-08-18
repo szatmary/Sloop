@@ -31,6 +31,9 @@ struct KeyboardAccessoryBar: View {
     /// a hardware keyboard — without this, sessions could never be closed by
     /// touch. Deliberately last so it isn't mis-tapped next to ⌃.
     var closeTab: () -> Void = {}
+    /// Put the keyboard away. The single biggest recovery of terminal rows
+    /// available, and until now there was no way to do it at all.
+    var dismissKeyboard: () -> Void = {}
 
     private var control: Bool { armed.contains(.control) }
     private var option: Bool { armed.contains(.option) }
@@ -65,6 +68,8 @@ struct KeyboardAccessoryBar: View {
                         send(KeyEncoder.bytes(for: letter, modifiers: .control)[...])
                     }
                 }
+                divider
+                special("⌨︎↓") { dismissKeyboard() }
                 divider
                 special("✕ tab") { closeTab() }
             }
