@@ -31,6 +31,13 @@ final class KeyCapView: UIControl {
     private let secondaryLabel = UILabel()
     private var repeatTimer: Timer?
     private var didDrag = false
+    /// Set once the primary has actually been delivered for the current
+    /// touch. For a plain repeating key (no secondary) that happens
+    /// immediately on touch-down. For a repeating key that also carries a
+    /// secondary it's delayed until `repeatDelay` elapses without a drag
+    /// (see `startRepeating`), so `endTracking` consults this — not
+    /// `cap.repeats` — to know whether it still owes a primary emission.
+    private var didFirePrimary = false
     /// Where the touch began, in this view's coordinates — the drag distance
     /// is measured from here, not from one tracking callback to the next.
     private var dragOrigin: CGPoint = .zero
@@ -187,6 +194,7 @@ final class KeyCapView: UIControl {
 
     override func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
         didDrag = false
+        didFirePrimary = false
         dragOrigin = touch.location(in: self)
         alpha = 0.6
         UIDevice.current.playInputClick()
@@ -219,17 +227,23 @@ final class KeyCapView: UIControl {
         alpha = 1
         stopRepeating()
         if didDrag, let secondary = cap.secondary {
-            // Checked before `cap.repeats`: a repeating key that also carries
-            // a secondary (see `continueTracking`) must still deliver it on a
-            // committed drag, or that secondary would be permanently
-            // unreachable on every such key.
+            // Checked before `didFirePrimary`: a repeating key that also
+            // carries a secondary (see `continueTracking`) must still
+            // deliver it on a committed drag, or that secondary would be
+            // permanently unreachable on every such key. `startRepeating`
+            // never fires the primary once a drag has committed, so there is
+            // nothing to guard against here.
             delegate?.keyCapView(self, didProduce: secondary)
             return
         }
-        // A repeating key already fired on touch-down and on every tick;
-        // firing again here would emit one extra character per press.
-        guard !cap.repeats else { return }
-        delegate?.keyCapView(self, didProduce: cap.primary)
+        // A plain repeating key already fired on touch-down (and possibly
+        // every tick since); a repeating key with a secondary defers its
+        // first primary to `startRepeating`'s delay timer instead, so it may
+        // not have fired yet — e.g. a quick tap that releases before
+        // `repeatDelay` elapses. `didFirePrimary` is the source of truth for
+        // either case; firing again here would emit one extra character.
+        guard !didFirePrimary else { return }
+        firePrimary()
     }
 
     override func cancelTracking(with event: UIEvent?) {
@@ -240,10 +254,28 @@ final class KeyCapView: UIControl {
     // MARK: Repeat
 
     private func startRepeating() {
-        delegate?.keyCapView(self, didProduce: cap.primary)
+        // A key with no secondary has nothing to drag to, so there's no
+        // reason to wait: fire the primary right away, same as always.
+        //
+        // A key that also carries a secondary must not fire on touch-down —
+        // that's what let a drag-up gesture deliver the primary as well as
+        // the secondary. Instead wait out `repeatDelay` below; if no drag
+        // has committed by then this is a hold, not a drag, so start firing
+        // the primary from there. `endTracking` covers the remaining case, a
+        // quick tap that releases before the delay elapses.
+        if cap.secondary == nil {
+            firePrimary()
+        }
         repeatTimer = Timer.scheduledTimer(withTimeInterval: Self.repeatDelay,
                                            repeats: false) { [weak self] _ in
-            guard let self else { return }
+            // `continueTracking` invalidates this same timer, synchronously,
+            // the instant a drag commits — so by the time this runs, a true
+            // `didDrag` means the drag won the race and this timer should
+            // have never fired in the first place. Guarded anyway as
+            // defence in depth against firing the primary underneath a
+            // committed drag.
+            guard let self, !self.didDrag else { return }
+            self.firePrimary()
             self.repeatTimer = Timer.scheduledTimer(
                 withTimeInterval: Self.repeatInterval, repeats: true
             ) { [weak self] _ in
@@ -251,6 +283,11 @@ final class KeyCapView: UIControl {
                 self.delegate?.keyCapView(self, didProduce: self.cap.primary)
             }
         }
+    }
+
+    private func firePrimary() {
+        delegate?.keyCapView(self, didProduce: cap.primary)
+        didFirePrimary = true
     }
 
     private func stopRepeating() {
