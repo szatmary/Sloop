@@ -23,6 +23,26 @@ public func isCancelledNavigationError(_ error: Error) -> Bool {
     return error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled
 }
 
+/// How a browser SSO sheet ended (see `AccessLoginView` in the app target).
+///
+/// Three cases, not two, because "the user closed the sheet" and "the sign-in
+/// broke" call for opposite treatment: the first is a decision the user just
+/// made and needs no acknowledgement, the second is news they can act on. The
+/// sheet used to report both through one failure channel, so dismissing it
+/// deliberately raised an error alert in the host list — an app arguing with
+/// the user about a button they pressed on purpose. Separating them at the
+/// type level means a caller cannot conflate them again without deleting a
+/// `case`.
+public enum AccessLoginOutcome: Equatable {
+    /// A usable `CF_Authorization` JWT was captured.
+    case token(String)
+    /// The user dismissed the sheet — the Cancel button, or a swipe. Nothing
+    /// to report.
+    case cancelled
+    /// The sign-in could not be completed, with a reason worth showing.
+    case failed(String)
+}
+
 /// Guards the terminal outcome of a browser SSO sheet (see `AccessLoginView`
 /// in the app target) so exactly one of several racing exits — success, an
 /// explicit cancel, a navigation failure, or an interactive swipe-dismiss —

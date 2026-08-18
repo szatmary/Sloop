@@ -12,15 +12,13 @@ import SloopKit
 /// web view's cookie store. That store is deliberately non-persistent; see
 /// `AccessWebView.makeWebView`.
 ///
-/// Every way the sheet can end without a token — the user cancels, swipes
-/// the sheet away, the hostname doesn't parse as a URL, or the navigation
-/// itself fails — reports a specific reason via `onFailure` instead of
-/// silently leaving the caller waiting.
+/// Every way the sheet can end reports exactly one `AccessLoginOutcome`, so
+/// the caller is never left waiting — and never told that the user closing
+/// the sheet was an error.
 struct AccessLoginView: View {
     @Environment(\.dismiss) private var dismiss
     let hostname: String
-    let onToken: (String) -> Void
-    let onFailure: (String) -> Void
+    let onOutcome: (AccessLoginOutcome) -> Void
 
     /// The sheet can end in several independent, sometimes-racing ways: a
     /// token arrives, the user taps Cancel, the user swipes the sheet away
@@ -28,26 +26,20 @@ struct AccessLoginView: View {
     /// through this one gate so whichever gets there first wins and every
     /// other — including a `getAllCookies` completion that resolves after
     /// the sheet is already gone — is a no-op. See `AccessLoginOutcomeGate`.
-    @State private var outcome = AccessLoginOutcomeGate()
-
-    private var noTokenMessage: String { "No Access token was captured for \(hostname)." }
+    @State private var gate = AccessLoginOutcomeGate()
 
     var body: some View {
         NavigationStack {
-            AccessWebView(hostname: hostname, onToken: { token in
-                if outcome.commit({ onToken(token) }) { dismiss() }
-            }, onFailure: { message in
-                if outcome.commit({ onFailure(message) }) { dismiss() }
-            })
+            AccessWebView(hostname: hostname,
+                          onToken: { finish(.token($0)) },
+                          onFailure: { finish(.failed($0)) })
             .navigationTitle(hostname)
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        if outcome.commit({ onFailure(noTokenMessage) }) { dismiss() }
-                    }
+                    Button("Cancel") { finish(.cancelled) }
                 }
             }
         }
@@ -56,12 +48,19 @@ struct AccessLoginView: View {
         #endif
         .onDisappear {
             // Catches the one exit with no explicit action of its own: an
-            // interactive swipe-to-dismiss. Every other exit above already
-            // committed the gate before dismissing, so this is a no-op for
-            // them — and once the gate is committed here, nothing async
-            // arriving later can still succeed or double-report either.
-            outcome.commit { onFailure(noTokenMessage) }
+            // interactive swipe-to-dismiss, which is a cancellation just as
+            // much as the button is. Every other exit above already committed
+            // the gate before dismissing, so this is a no-op for them — and
+            // once the gate is committed here, nothing async arriving later
+            // can still succeed or double-report either.
+            gate.commit { onOutcome(.cancelled) }
         }
+    }
+
+    /// Report the sheet's one outcome and close it, if nothing else got there
+    /// first.
+    private func finish(_ outcome: AccessLoginOutcome) {
+        if gate.commit({ onOutcome(outcome) }) { dismiss() }
     }
 }
 

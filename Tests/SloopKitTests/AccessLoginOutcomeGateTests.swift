@@ -70,6 +70,44 @@ final class AccessLoginOutcomeGateTests: XCTestCase {
     func testIsFinishedStartsFalse() {
         XCTAssertFalse(AccessLoginOutcomeGate().isFinished)
     }
+
+    /// Dismissing the sheet fires the Cancel action *and then* `onDisappear`.
+    /// Driven through the gate the way `AccessLoginView` drives them, that
+    /// must produce exactly one outcome, and it must be `.cancelled`: the
+    /// host list raises an alert for `.failed` and nothing at all for this.
+    func testCancelThenDisappearReportsASingleCancellation() {
+        let gate = AccessLoginOutcomeGate()
+        var reported: [AccessLoginOutcome] = []
+
+        gate.commit { reported.append(.cancelled) }        // the Cancel button
+        gate.commit { reported.append(.cancelled) }        // .onDisappear, right after
+
+        XCTAssertEqual(reported, [.cancelled])
+    }
+
+    /// A swipe-dismiss has no explicit action of its own — `onDisappear` is
+    /// the only thing that fires — and it is still a cancellation, not the
+    /// "no token was captured" failure it used to report.
+    func testSwipeDismissAloneReportsCancellation() {
+        let gate = AccessLoginOutcomeGate()
+        var reported: [AccessLoginOutcome] = []
+
+        gate.commit { reported.append(.cancelled) }
+
+        XCTAssertEqual(reported, [.cancelled])
+    }
+
+    /// A token that lands first still wins over the `onDisappear` that
+    /// follows the sheet closing itself.
+    func testCapturedTokenSurvivesTheDismissThatFollowsIt() {
+        let gate = AccessLoginOutcomeGate()
+        var reported: [AccessLoginOutcome] = []
+
+        gate.commit { reported.append(.token("jwt")) }
+        gate.commit { reported.append(.cancelled) }
+
+        XCTAssertEqual(reported, [.token("jwt")])
+    }
 }
 
 /// The other half of "don't report a failure that isn't one": a web view

@@ -118,15 +118,23 @@ struct HostListView: View {
                 }
             }
             .sheet(item: $accessLogin) { host in
-                AccessLoginView(hostname: host.hostname) { token in
-                    do {
-                        try model.storeAccessToken(token, for: host)
-                        open(model.connect(host))
-                    } catch {
-                        importResult = "Couldn't store the Access token: \(error.localizedDescription)"
+                AccessLoginView(hostname: host.hostname) { outcome in
+                    switch outcome {
+                    case .token(let token):
+                        do {
+                            try model.storeAccessToken(token, for: host)
+                            open(model.connect(host))
+                        } catch {
+                            importResult = "Couldn't store the Access token: \(error.localizedDescription)"
+                        }
+                    case .cancelled:
+                        // The user closed the sheet. They know; telling them
+                        // so in an alert is the app arguing with a button
+                        // they pressed on purpose.
+                        break
+                    case .failed(let message):
+                        importResult = message
                     }
-                } onFailure: { message in
-                    importResult = message
                 }
             }
             .sheet(isPresented: $showingSupport) {
