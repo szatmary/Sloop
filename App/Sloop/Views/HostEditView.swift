@@ -308,8 +308,7 @@ struct HostEditView: View {
                 a server or to anyone else. There's no account and nothing to \
                 opt out of, because there is nowhere for it to go.
 
-                Turn it off for any host you'd rather Sloop didn't learn from, \
-                and clear what it already knows whenever you like, in Terminal \
+                You can clear what it has learned whenever you like, in Terminal \
                 settings.
                 """)
             }

@@ -62,9 +62,8 @@ struct TerminalSettingsView: View {
                     As you type, Sloop offers the word that usually comes next — \
                     learnt from the commands you run on a host, and from that \
                     host's own shell history, which it reads once when you \
-                    connect. Each host decides for itself, in its own settings \
-                    beside Use Mosh — turn it off for any host you'd rather \
-                    Sloop didn't learn from.
+                    connect. Each host has its own switch, in that host's \
+                    settings beside Use Mosh.
                     """)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
