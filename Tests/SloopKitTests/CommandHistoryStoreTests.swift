@@ -81,3 +81,26 @@ final class CommandHistoryStoreTests: XCTestCase {
         XCTAssertEqual(store.history(for: host).suggestions(for: "up", limit: 1), ["uptime"])
     }
 }
+
+extension CommandHistoryStoreTests {
+    /// "Clear command history" has to clear all of it — someone asking this is
+    /// making a decision about what their device holds, and per-host bookkeeping
+    /// is not how they think about it.
+    func testForgettingEverythingLeavesNothingBehind() throws {
+        let (first, second) = (UUID(), UUID())
+        var history = CommandHistory()
+        history.record("psql -h db.internal -U admin")
+        try store.save(history, for: first)
+        try store.save(history, for: second)
+
+        try store.forgetEverything()
+
+        XCTAssertTrue(store.history(for: first).isEmpty)
+        XCTAssertTrue(store.history(for: second).isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    func testForgettingEverythingWhenThereIsNothingIsNotAnError() {
+        XCTAssertNoThrow(try store.forgetEverything())
+    }
+}

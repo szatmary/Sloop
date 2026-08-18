@@ -8,8 +8,24 @@ import SloopKit
 /// on iOS, keyboard style). Bound to the shared `AppearanceStore`, so changes
 /// persist and restyle live terminals immediately.
 struct TerminalSettingsView: View {
+    /// Set when the user asks to clear history, so the confirmation can be
+    /// answered before anything is deleted.
+    @State private var clearingHistory = false
+    @State private var clearingFailed: String?
+
     @ObservedObject var store: AppearanceStore
     @Environment(\.dismiss) private var dismiss
+
+    /// Delete every host's history. Reported rather than swallowed: someone
+    /// clearing this is making a decision about what is stored on their device,
+    /// and "done" when it isn't would be the worst possible answer.
+    private func clearHistory() {
+        do {
+            try CommandHistoryStore().forgetEverything()
+        } catch {
+            clearingFailed = error.localizedDescription
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -43,12 +59,36 @@ struct TerminalSettingsView: View {
 
                 Section("Suggestions") {
                     Toggle("Suggest commands", isOn: $store.appearance.suggestions)
-                    Text("Completes what you type from commands you've run on this host, "
-                       + "seeded once from the host's own shell history. Kept on this device "
-                       + "and never synced. Turning this off stops recording as well as "
-                       + "suggesting.")
+
+                    Text("""
+                    As you type, Sloop offers the word that usually comes next — \
+                    ranked by how often and how recently it followed what you've \
+                    already typed on this host. Tap a suggestion to use it.
+
+                    It learns from the commands you run here, and reads the \
+                    host's own shell history once per connection to be useful \
+                    before you've typed anything.
+                    """)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+
+                    Label("""
+                    Nothing leaves this device. Your command history is stored \
+                    on this iPhone or iPad, separately for each host. It is never \
+                    synced — not to iCloud, not to another device you own — and \
+                    it is never sent to a server, to Sloop's author, or to \
+                    anyone else, for any reason. There is no analytics, no \
+                    telemetry, and no account. Turning this off stops the \
+                    recording as well as the suggestions.
+                    """, systemImage: "lock")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Button(role: .destructive) {
+                        clearingHistory = true
+                    } label: {
+                        Text("Clear Command History")
+                    }
                 }
 
                 #if os(iOS)
@@ -76,6 +116,23 @@ struct TerminalSettingsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .confirmationDialog("Clear command history?",
+                                isPresented: $clearingHistory, titleVisibility: .visible) {
+                Button("Clear History", role: .destructive) { clearHistory() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Deletes everything Sloop has learned about the commands you run, "
+                   + "on every host. Suggestions start again from your hosts' own shell "
+                   + "history the next time you connect.")
+            }
+            .alert("Couldn't Clear History", isPresented: Binding(
+                get: { clearingFailed != nil },
+                set: { if !$0 { clearingFailed = nil } })
+            ) {
+                Button("OK", role: .cancel) { clearingFailed = nil }
+            } message: {
+                Text(clearingFailed ?? "")
             }
         }
     }

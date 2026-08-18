@@ -60,6 +60,13 @@ public final class CommandHistoryStore {
         try fileManager.removeItem(at: url)
     }
 
+    /// Delete every host's history. What "clear command history" has to mean
+    /// when the user doesn't think in terms of which host learned what.
+    public func forgetEverything() throws {
+        guard fileManager.fileExists(atPath: directory.path) else { return }
+        try fileManager.removeItem(at: directory)
+    }
+
     private func url(for hostID: UUID) -> URL {
         directory.appendingPathComponent("\(hostID.uuidString).json")
     }
