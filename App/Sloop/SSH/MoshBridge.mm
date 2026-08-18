@@ -54,6 +54,8 @@
 #include "terminalframebuffer.h"
 #include "parseraction.h"
 #include "timestamp.h"
+#include "locale_utils.h"
+#include <clocale>
 
 typedef Network::Transport<Network::UserStream, Terminal::Complete> MoshTransportType;
 
@@ -105,6 +107,43 @@ struct MoshSession {
 // MARK: - Network loop
 
 static void mosh_run_loop(MoshSession *s) {
+  // Put this thread's C locale into UTF-8 before Mosh renders anything.
+  //
+  // Mosh emits the remote screen through the C library's multibyte routines,
+  // so its output encoding follows LC_CTYPE. An app process starts in the "C"
+  // locale, where those routines are single-byte: every multi-byte character
+  // came out as its lead byte alone. A horizontal line (U+2500, e2 94 80) was
+  // written as a bare 0xe2, which is not valid UTF-8 at all, and the terminal
+  // drew "â" — box drawing, block characters and every accented letter were
+  // mangled the same way, which reads as broken terminal emulation rather
+  // than a locale problem.
+  //
+  // mosh-client does this in main() via set_native_locale(); nothing had done
+  // it here. setlocale is process-global, so it is set once, explicitly, to a
+  // locale Apple platforms always provide rather than trusting the
+  // environment (an app has no LANG to inherit).
+  if (!std::setlocale(LC_CTYPE, "en_US.UTF-8")) {
+    std::setlocale(LC_CTYPE, "UTF-8");
+  }
+
+  // Put the process into a UTF-8 locale before Mosh renders anything.
+  //
+  // Mosh's client parses the host's bytes with the C library's multibyte
+  // routines, so what counts as one character follows LC_CTYPE. An app
+  // process starts in the "C" locale, where those routines are single-byte:
+  // every multi-byte character was stored as its lead byte alone. A
+  // horizontal line (U+2500, e2 94 80) reached the terminal as a bare 0xe2 —
+  // not valid UTF-8 at all — and drew as "â". Box drawing, block characters
+  // and every accented letter were mangled the same way, which reads as
+  // broken terminal emulation rather than a locale problem. Plain SSH is
+  // unaffected because it passes bytes straight through without parsing them.
+  //
+  // mosh-client does this in main() via set_native_locale(); nothing did it
+  // here. An app has no LANG to inherit, so the locale is named explicitly.
+  if (std::setlocale(LC_CTYPE, "en_US.UTF-8") == nullptr) {
+    std::setlocale(LC_CTYPE, "UTF-8");
+  }
+
   Terminal::Display display(false);  // curses-free (see terminaldisplayinit stub)
   Terminal::Framebuffer last_fb(1, 1);
   bool initialized = false;
