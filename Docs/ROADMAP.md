@@ -9,7 +9,9 @@ top of a working SSH terminal rather than first.
 - SloopKit core: `Transport`, `EchoTransport`, `TerminalSession`, `Host`,
   `HostStore`, `Credential`, `LibSSH2Transport` skeleton, `MoshBootstrap`.
 - SwiftUI multiplatform app wrapping SwiftTerm; host list + editor.
-- **Local terminal** (echo) runs on device/simulator.
+- ~~**Local terminal** (echo) runs on device/simulator~~ — removed once SSH and
+  Mosh both shipped: a fake shell that echoed keystrokes and connected to
+  nothing was a dead end, not a feature (`Drop the local echo terminal`).
 - Unit tests for echo, Mosh handshake parsing, host persistence.
 
 ## M1 — SSH terminal ✅
@@ -97,13 +99,11 @@ top of a working SSH terminal rather than first.
   to diagnose and cannot be recovered from automatically. It wants its own
   piece of work: it changes `ConnectionState`, which both the terminal UI and
   the tunnel work build on. (Found by the Cloudflare Access session, 2026-08.)
-- **On-connect command** — a per-host command run automatically once the shell
-  is up, so a host can drop you straight into a session rather than a bare
-  prompt. The motivating case is `tmux attach || tmux new` (or `tmux a`):
-  reconnecting to the same multiplexed session is the normal workflow on a
-  phone or tablet, where the network drops constantly. Worth deciding whether
-  it runs in the PTY (visible, and the user can Ctrl-C out of it) or as an
-  exec channel, and whether a failed command should leave the plain shell.
+- ~~On-connect command~~ → DONE: a per-host command (`SSHHost.onConnectCommand`,
+  set in the host editor) typed into the shell as ordinary input once it
+  opens, and again on every reconnect — the motivating case is `tmux attach
+  || tmux new`, so a dropped connection lands back in the same session
+  instead of a bare prompt.
 - **Custom compact keyboard** — replace the system keyboard with a
   terminal-shaped one via SwiftTerm's settable `inputView`, folding today's
   smart-keys bar into the keyboard instead of stacking a row above it. The

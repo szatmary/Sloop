@@ -17,8 +17,8 @@ biggest open risk and needs a human at a Mac with Xcode.
 
 ### Done and green in CI
 
-- **Local echo terminal**, **SSH** (libssh2: connect, host-key TOFU + mismatch
-  refusal, password & private-key auth, PTY shell, resize).
+- **SSH** (libssh2: connect, host-key TOFU + mismatch refusal, password &
+  private-key auth, PTY shell, resize).
 - **Mosh**: mosh 1.4.0's client core + protobuf cross-compiled to
   `mosh.xcframework`; an Objective-C++ bridge (`MoshBridge`) over
   `Network::Transport`; `MoshTransport` wired to per-host "Use Mosh" with
@@ -58,7 +58,7 @@ biggest open risk and needs a human at a Mac with Xcode.
 brew install xcodegen
 # Pick a variant. libssh2/mosh xcframeworks come from Scripts/build-*.sh or the
 # CI artifacts of the latest run.
-xcodegen generate                       # base: local echo only, no SSH
+xcodegen generate                       # base: no SSH (each host shows build instructions)
 xcodegen generate --spec project.ssh.yml   # + SSH  (needs Vendor/libssh2.xcframework)
 xcodegen generate --spec project.mosh.yml  # + SSH + Mosh (needs libssh2 + mosh xcframeworks)
 open Sloop.xcodeproj
@@ -129,7 +129,6 @@ problem — it goes away with Developer ID signing + notarization (a ship step).
 ## First-device-test checklist
 
 - [ ] App launches on iPhone, iPad, and Mac; host list renders.
-- [ ] **Local terminal** echoes input.
 - [ ] **SSH password** login to a real host; shell is interactive; resize works.
 - [x] **SSH key** login — RSA verified on an iPad against a live host
       (2026-08-17).
