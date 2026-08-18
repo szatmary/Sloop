@@ -110,5 +110,44 @@ final class AgentSignerTests: XCTestCase {
         let identity = try XCTUnwrap(signer.identities.first)
         XCTAssertEqual(signer.identity(matching: identity.blob)?.keyName, "k")
     }
+
+    /// `identity(matching:)` decides which private key signs a remote's
+    /// challenge, and the confirmation prompt names whatever key it picks. A
+    /// prefix match here would let a crafted, truncated blob select a key the
+    /// user never intended — and the prompt naming that wrong key would not
+    /// catch it either. A strict prefix of the real blob must not match.
+    func testBlobThatIsAStrictPrefixOfTheRealBlobDoesNotMatch() throws {
+        let signer = signer(pem: try generateKey(type: "ed25519"))
+        let identity = try XCTUnwrap(signer.identities.first)
+        let prefix = Array(identity.blob.dropLast())
+        XCTAssertFalse(prefix.isEmpty,
+                       "the real blob must have more than one byte for this test to mean anything")
+        XCTAssertNil(signer.identity(matching: prefix))
+    }
+
+    /// The other half of exactness: the real blob with bytes appended must
+    /// not match either. Together with the prefix test above, this rules out
+    /// both directions `starts(with:)` could be substituted for `==`.
+    func testBlobWithTrailingBytesAppendedDoesNotMatch() throws {
+        let signer = signer(pem: try generateKey(type: "ed25519"))
+        let identity = try XCTUnwrap(signer.identities.first)
+        let extended = identity.blob + [0xFF]
+        XCTAssertNil(signer.identity(matching: extended))
+    }
+
+    /// If both SHA-2 flags are set, SHA-512 must win — silently downgrading to
+    /// SHA-256 would still verify but is a weaker signature than the request
+    /// asked for. No other test sets both flags at once.
+    func testRSAWithBothSHA2FlagsSetPrefersSHA512() throws {
+        let signer = signer(pem: try generateKey(type: "rsa", bits: "2048"))
+        let identity = try XCTUnwrap(signer.identities.first)
+        let message = Array("challenge".utf8)
+        let bothFlags = AgentSignFlags.rsaSHA2_256 | AgentSignFlags.rsaSHA2_512
+
+        let (algorithm, signature) = try signer.sign(identity: identity, data: message, flags: bothFlags)
+        XCTAssertEqual(algorithm, "rsa-sha2-512")
+        XCTAssertTrue(signer.verifyForTesting(identity: identity, signature: signature,
+                                              message: message, flags: bothFlags))
+    }
 }
 #endif
