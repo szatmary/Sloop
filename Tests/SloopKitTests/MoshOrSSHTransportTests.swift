@@ -231,3 +231,55 @@ extension MoshOrSSHTransportTests {
         XCTAssertNil(output)
     }
 }
+
+extension MoshOrSSHTransportTests {
+    /// Mosh hosts get their history from the bootstrap channel, since that
+    /// connection is the only one they ever have.
+    func testTheBootstrapCarriesTheShellHistoryWhenAsked() {
+        let mosh = RecordingTransport("mosh")
+        let composite = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: {
+                MockCommandRunner(stdout: """
+                MOSH CONNECT 60001 key==
+                \(MoshServer.historyMarker)
+                terraform apply
+                """)
+            },
+            makeSSHTransport: { RecordingTransport("ssh") },
+            makeMoshTransport: { _ in mosh })
+
+        var history: String?
+        composite.onShellHistory = { history = $0 }
+        composite.start()
+
+        XCTAssertTrue(mosh.started)
+        XCTAssertEqual(ShellHistoryImporter.commands(fromHistoryOutput: history ?? ""),
+                       ["terraform apply"])
+    }
+
+    /// A host that doesn't want suggestions has its history left alone: no
+    /// callback, so the bootstrap command doesn't ask for it in the first place.
+    func testNoHistoryIsReadWhenNobodyIsListening() {
+        let runner = RecordingCommandRunner(stdout: "MOSH CONNECT 60001 key==\n")
+        let composite = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: { runner },
+            makeSSHTransport: { RecordingTransport("ssh") },
+            makeMoshTransport: { _ in RecordingTransport("mosh") })
+        composite.start()
+
+        XCTAssertEqual(runner.ranCommand, MoshServer.bootstrapCommand,
+                       "the history read must not be appended for a host that didn't ask")
+    }
+
+    private final class RecordingCommandRunner: CommandRunner {
+        private let stdout: String
+        private(set) var ranCommand: String?
+        init(stdout: String) { self.stdout = stdout }
+        func run(_ command: String, completion: @escaping (Result<CommandResult, Error>) -> Void) {
+            ranCommand = command
+            completion(.success(CommandResult(stdout: Data(stdout.utf8), stderr: Data(), exitStatus: 0)))
+        }
+    }
+}

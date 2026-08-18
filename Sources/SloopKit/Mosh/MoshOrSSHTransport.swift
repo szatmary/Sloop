@@ -29,6 +29,14 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
     private let makeSSHTransport: () -> Transport
     private let makeMoshTransport: ((MoshBootstrap) -> Transport)?
 
+    /// Receives the host's shell history, read on the Mosh bootstrap channel.
+    ///
+    /// Mosh's only SSH connection is the one that starts `mosh-server`, and it
+    /// is gone before the terminal opens — so unlike an SSH session, there is
+    /// nothing left to ask afterwards. Set this before `start()`; left nil,
+    /// nothing is read.
+    public var onShellHistory: ((String) -> Void)?
+
     /// Guards everything below: the bootstrap completion arrives on the probe's
     /// worker thread while `send`/`resize`/`close` are called from the main one.
     private let lock = NSLock()
@@ -73,6 +81,7 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
 
         emit("[sloop] mosh: probing server…\r\n")
         let bootstrapper = MoshBootstrapper(runner: makeCommandRunner())
+        bootstrapper.onShellHistory = onShellHistory
         self.bootstrapper = bootstrapper
         bootstrapper.bootstrap { [weak self] startup in
             guard let self else { return }

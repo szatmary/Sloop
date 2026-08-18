@@ -261,6 +261,17 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     }
 
     private func wire(_ transport: Transport) {
+        // A Mosh session reads the host's history on its bootstrap channel,
+        // which runs before this transport ever opens — so the callback has to
+        // be in place before `start()`, not after `onOpen`.
+        if let suggester, let composite = transport as? MoshOrSSHTransport {
+            composite.onShellHistory = { [weak self] output in
+                suggester.absorb(historyOutput: output) { [weak self] notice in
+                    DispatchQueue.main.async { self?.terminalView.feed(text: notice) }
+                }
+            }
+        }
+
         // `transport` is captured weakly on purpose. This closure is stored ON
         // the transport, so capturing it strongly makes it retain itself: no
         // transport would ever deallocate, and each one holds a `Credential`

@@ -82,21 +82,29 @@ final class CommandSuggester {
         hasImported = true
         guard let runner = transport as? SessionCommandRunner else { return }
         runner.runOnSession(ShellHistoryImporter.command) { [weak self] output in
-            guard let self else { return }
-            let commands = output.map(ShellHistoryImporter.commands(fromHistoryOutput:)) ?? []
-            DispatchQueue.main.async {
-                let before = self.history.commands.count
-                self.history.importLines(commands)
-                self.persist()
-                let learned = self.history.commands.count - before
-                // Said once, on the connection where it happened. The import is
-                // invisible by design, and an invisible feature that quietly
-                // does nothing — as this did on every Mosh host — looks exactly
-                // like one that works.
-                report(learned > 0
-                       ? "[sloop] suggestions: read \(learned) commands from this host's shell history\r\n"
-                       : "[sloop] suggestions: no shell history on this host — building the list as you type\r\n")
-            }
+            self?.absorb(historyOutput: output, report: report)
+        }
+    }
+
+    /// Take history that arrived by some other route — Mosh reads it on the
+    /// bootstrap channel, because that connection is the only one it will ever
+    /// have and it closes before the terminal opens.
+    func absorb(historyOutput output: String?, report: @escaping (String) -> Void = { _ in }) {
+        guard !hasImported || output != nil else { return }
+        hasImported = true
+        let commands = output.map(ShellHistoryImporter.commands(fromHistoryOutput:)) ?? []
+        DispatchQueue.main.async {
+            let before = self.history.commands.count
+            self.history.importLines(commands)
+            self.persist()
+            let learned = self.history.commands.count - before
+            // Said once, on the connection where it happened. The import is
+            // invisible by design, and an invisible feature that quietly does
+            // nothing — as this did on every Mosh host — looks exactly like one
+            // that works.
+            report(learned > 0
+                   ? "[sloop] suggestions: read \(learned) commands from this host's shell history\r\n"
+                   : "[sloop] suggestions: no shell history on this host — building the list as you type\r\n")
         }
     }
 

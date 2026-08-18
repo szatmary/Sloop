@@ -30,6 +30,32 @@ public enum MoshServer {
     /// increment can forward the client's own locale instead.)
     public static let bootstrapCommand = "mosh-server new -s -c 256 -l LANG=en_US.UTF-8"
 
+    /// Separates the server's handshake from anything run after it in the same
+    /// command. Chosen to be something no shell prints by accident.
+    static let historyMarker = "@@sloop-history@@"
+
+    /// The bootstrap, optionally with the host's shell history read straight
+    /// afterwards on the same channel.
+    ///
+    /// A Mosh session leaves no SSH connection behind — this exec is the only
+    /// one there will ever be, and it closes as soon as mosh-server daemonizes.
+    /// Reading the history here costs nothing extra: no second connection, no
+    /// second authentication, and nothing to schedule after the session opens,
+    /// because by then there is nothing left to ask.
+    public static func bootstrapCommand(includingShellHistory: Bool) -> String {
+        guard includingShellHistory else { return bootstrapCommand }
+        return bootstrapCommand + "; echo \(historyMarker); " + ShellHistoryImporter.command
+    }
+
+    /// Split a combined bootstrap output into the server's part and the
+    /// history's.
+    public static func separateShellHistory(from output: String) -> (banner: String, history: String?) {
+        guard let range = output.range(of: historyMarker) else { return (output, nil) }
+        let history = String(output[range.upperBound...])
+        return (String(output[..<range.lowerBound]),
+                history.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : history)
+    }
+
     /// Classify the combined stdout/stderr of the bootstrap command.
     public static func interpret(_ output: String) -> MoshStartup {
         if let bootstrap = MoshBootstrap(serverBanner: output) {
@@ -56,6 +82,11 @@ public enum MoshServer {
 public final class MoshBootstrapper {
     private let runner: CommandRunner
 
+    /// Set to also read the host's shell history on the bootstrap channel, and
+    /// receive it here. Left nil, nothing is read — a host that doesn't want
+    /// suggestions shouldn't have its history opened for any reason.
+    public var onShellHistory: ((String) -> Void)?
+
     public init(runner: CommandRunner) {
         self.runner = runner
     }
@@ -63,13 +94,16 @@ public final class MoshBootstrapper {
     /// Start `mosh-server` and classify the result. The completion is invoked
     /// once, off the main thread.
     public func bootstrap(completion: @escaping (MoshStartup) -> Void) {
-        runner.run(MoshServer.bootstrapCommand) { result in
+        let wantsHistory = onShellHistory != nil
+        runner.run(MoshServer.bootstrapCommand(includingShellHistory: wantsHistory)) { [weak self] result in
             switch result {
             case .success(let output):
                 // mosh-server prints its handshake on stdout and errors on
                 // stderr; a missing binary shows up as a shell error on stderr.
                 let combined = output.stdoutText + "\n" + output.stderrText
-                completion(MoshServer.interpret(combined))
+                let (banner, history) = MoshServer.separateShellHistory(from: combined)
+                if let history { self?.onShellHistory?(history) }
+                completion(MoshServer.interpret(banner))
             case .failure(let error):
                 completion(.unavailable(reason: error.localizedDescription))
             }
