@@ -271,15 +271,70 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    func testEveryRowsRightEdgeLandsOnWidthMinusPadding() {
+    /// Every letter is the same size as every other letter, in every row and
+    /// every context. Sizing each row by its own key count made the 9-key home
+    /// row wider than the 10-key top row, and keys that change size between
+    /// rows shift under the thumbs while typing.
+    ///
+    /// Letters specifically, not every unit-width key: the iPad's symbol row
+    /// carries about twenty keys and takes a smaller unit of its own, because
+    /// the alternative is an alphabet sized to fit the symbols.
+    func testEveryUnitKeyIsTheSameWidth() {
+        for (context, width) in zip(allContexts, allWidths) {
+            let layout = KeyboardLayout.resolve(for: context)
+            let frames = layout.frames(width: width, padding: framePadding, spacing: frameSpacing)
+            let caps = layout.rows.flatMap { $0 }
+            let unitWidths = zip(caps, frames)
+                .filter { cap, _ in
+                    if case .character(let character) = cap.primary {
+                        return cap.width == .unit && character.isLetter
+                    }
+                    return false
+                }
+                .map(\.1.width)
+            guard let first = unitWidths.first else {
+                return XCTFail("\(context) has no letter keys at all")
+            }
+            for unitWidth in unitWidths {
+                XCTAssertEqual(unitWidth, first, accuracy: 0.001, "\(context)")
+            }
+        }
+    }
+
+    /// A row that doesn't fill the width is centred rather than left-hung —
+    /// the home row sitting flush left with a gap on the right is the tell
+    /// that keys were stretched to fit instead of shared.
+    func testShortRowsAreCentred() {
         for (context, width) in zip(allContexts, allWidths) {
             let layout = KeyboardLayout.resolve(for: context)
             let frames = layout.frames(width: width, padding: framePadding, spacing: frameSpacing)
             var index = 0
             for (rowIndex, row) in layout.rows.enumerated() {
+                let first = frames[index]
                 let last = frames[index + row.count - 1]
-                XCTAssertEqual(last.x + last.width, width - framePadding, accuracy: 0.001,
-                               "row \(rowIndex) of \(context)")
+                let leading = first.x - framePadding
+                let trailing = (width - framePadding) - (last.x + last.width)
+                XCTAssertEqual(leading, trailing, accuracy: 0.001,
+                               "row \(rowIndex) of \(context) is lopsided")
+                index += row.count
+            }
+        }
+    }
+
+    /// The space bar absorbs its row's slack, so a row carrying one still runs
+    /// the full width — otherwise the bottom row would float in the middle
+    /// with dead margins either side.
+    func testRowsWithASpaceBarStillFillTheWidth() {
+        for (context, width) in zip(allContexts, allWidths) {
+            let layout = KeyboardLayout.resolve(for: context)
+            let frames = layout.frames(width: width, padding: framePadding, spacing: frameSpacing)
+            var index = 0
+            for (rowIndex, row) in layout.rows.enumerated() {
+                if row.contains(where: { $0.width == .flexible }) {
+                    let last = frames[index + row.count - 1]
+                    XCTAssertEqual(last.x + last.width, width - framePadding, accuracy: 0.001,
+                                   "row \(rowIndex) of \(context)")
+                }
                 index += row.count
             }
         }
@@ -340,16 +395,18 @@ final class KeyboardLayoutTests: XCTestCase {
             frames[flat.firstIndex(where: predicate)!]
         }
 
-        // Rows 0–2 (escape/digit, tab/letter, control/home rows): 12 unit
-        // caps each on a 393pt-wide screen.
-        XCTAssertEqual(frame { $0.primary == .key(.escape) }.width, 29.3333, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 29.3333, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 29.3333, accuracy: 0.001)
-        // Row 3 (bottom row): 14 caps now (13 + closeTab, added so a session
-        // opened in compact mode can be closed by touch) including the
-        // flexible space bar, so the unit slot shrinks and the space bar
-        // absorbs two slots.
+        // Every row draws at the letter unit, which is whatever the tightest
+        // letter row can afford. That's the bottom row: 14 caps, 13 fixed slots
+        // plus two reserved for the space bar, so (385 - 13×3) / 15 = 23.0667.
+        // The digit and qwerty rows could afford 29.3333 on their own and are
+        // centred at 23.0667 instead — letters that change width between rows
+        // is what this gives up 6pt to avoid.
+        XCTAssertEqual(frame { $0.primary == .key(.escape) }.width, 23.0667, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 23.0667, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 23.0667, accuracy: 0.001)
         XCTAssertEqual(frame { $0.primary == .modifier(.option) }.width, 23.0667, accuracy: 0.001)
+        // The space bar takes its row's slack: 385 - 13×3 - 13×23.0667, which
+        // is exactly its two-unit floor here.
         XCTAssertEqual(frame { $0.width == .flexible }.width, 46.1333, accuracy: 0.001)
     }
 
@@ -361,15 +418,20 @@ final class KeyboardLayoutTests: XCTestCase {
             frames[flat.firstIndex(where: predicate)!]
         }
 
-        // Symbol row: 24 caps now (19 + the 5 paging/delete keys).
-        XCTAssertEqual(frame { $0.primary == .character("~") }.width, 46.5417, accuracy: 0.001) // symbol row
-        XCTAssertEqual(frame { $0.primary == .key(.escape) }.width, 92.24, accuracy: 0.01)       // digit row unit
-        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 138.36, accuracy: 0.01)   // digit row wide
-        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 96.0833, accuracy: 0.001)       // qwerty row
-        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 92.24, accuracy: 0.01) // home row unit
-        XCTAssertEqual(frame { $0.primary == .key(.return) }.width, 138.36, accuracy: 0.01)      // home row wide
-        // Bottom row: 16 caps now (15 + closeTab).
-        XCTAssertEqual(frame { $0.primary == .modifier(.option) }.width, 67.1176, accuracy: 0.01)   // bottom row unit
-        XCTAssertEqual(frame { $0.width == .flexible }.width, 134.2353, accuracy: 0.01)             // bottom row space
+        // Letter unit: the tightest letter row is the bottom one — 16 caps, 15
+        // fixed slots plus two for the space bar — so (1186 - 15×3) / 17 =
+        // 67.1176. The qwerty and home rows could afford 96.08 and 92.24 alone.
+        XCTAssertEqual(frame { $0.primary == .key(.escape) }.width, 67.1176, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 67.1176, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 67.1176, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.option) }.width, 67.1176, accuracy: 0.001)
+        // Wide caps stay a multiple of the same unit: 1.5 × 67.1176.
+        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 100.6765, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.return) }.width, 100.6765, accuracy: 0.001)
+        // The symbol row is the exception the rule needs: 24 caps can't fit at
+        // 67.1176, so it takes the largest unit that does — (1186 - 23×3) / 24.
+        // Sizing the alphabet to match this instead would have halved it.
+        XCTAssertEqual(frame { $0.primary == .character("~") }.width, 46.5417, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.width == .flexible }.width, 134.2353, accuracy: 0.001)
     }
 }

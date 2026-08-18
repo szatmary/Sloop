@@ -79,42 +79,103 @@ public struct KeyboardLayout: Equatable, Sendable {
 
     // MARK: Frames
 
+    /// Slots a row's fixed-width caps claim, in key units.
+    private func fixedSlots(in row: [KeyCap]) -> Double {
+        row.reduce(0.0) { total, cap in
+            switch cap.width {
+            case .unit:            return total + 1
+            case .wide(let scale): return total + scale
+            case .flexible:        return total
+            }
+        }
+    }
+
+    /// The largest key unit a row can use without overflowing.
+    private func maximumUnit(in row: [KeyCap], content: Double, spacing: Double) -> Double {
+        let gaps = spacing * Double(max(row.count - 1, 0))
+        // A flexible cap is reserved at two units when sizing, so a row with a
+        // space bar can't claim a unit the letter rows are unable to match.
+        let slots = fixedSlots(in: row) + (row.contains { $0.width == .flexible } ? 2 : 0)
+        return slots > 0 ? (content - gaps) / slots : content
+    }
+
+    /// The unit every letter is drawn at: whatever the tightest *letter* row
+    /// can afford.
+    ///
+    /// Letter rows only. The iPad's symbol row carries about twenty keys, and
+    /// sizing the alphabet to fit that would halve it — the goal is letters
+    /// that match each other, not a keyboard shrunk to its densest row. A row
+    /// too crowded for this unit gets its own smaller one instead (see
+    /// `frames`), which is what the symbol row has always effectively used.
+    private func letterUnit(content: Double, spacing: Double) -> Double {
+        // Alphabetic, not merely "a character key": the symbol row is nothing
+        // but character keys, and letting it qualify is what made the alphabet
+        // shrink to fit twenty symbols.
+        let letterRows = rows.filter { row in
+            row.contains { cap in
+                if case .character(let character) = cap.primary {
+                    return cap.width == .unit && character.isLetter
+                }
+                return false
+            }
+        }
+        let candidates = (letterRows.isEmpty ? rows : letterRows)
+            .map { maximumUnit(in: $0, content: content, spacing: spacing) }
+        return candidates.min() ?? content
+    }
+
     /// One frame per cap, across all rows, in the same row-major order the
     /// caller built its key views in — so zipping `frames(...)` against those
     /// views lines them up positionally, with no index of its own to drift
     /// out of sync.
     ///
-    /// Grid math, not a real layout engine: fixed-width caps (`.unit`,
-    /// `.wide`) claim their share of a row first; a `.flexible` cap — the
-    /// space bar — absorbs whatever's left, reserved at two slots so it stays
-    /// a usable target rather than collapsing to a sliver. This lives here
-    /// (pure, platform-agnostic) rather than in `CompactKeyboardView` (UIKit,
-    /// unreachable from a package test) specifically so `KeyboardLayoutTests`
-    /// can check it against hand-computed values instead of a reviewer having
-    /// to hand-trace `layoutSubviews`.
+    /// Grid math, not a real layout engine. Letters are all drawn at one unit
+    /// width — whatever the tightest letter row can afford — so a letter is the
+    /// same size in every row. Dividing each row's width by its own key count
+    /// instead, which this used to do, made the 9-key home row wider than the
+    /// 10-key top row, and keys that change size between rows shift under the
+    /// thumbs while typing.
+    ///
+    /// A row too crowded for that unit (the iPad's symbol row, around twenty
+    /// keys) uses the largest unit that fits it instead, rather than dragging
+    /// the whole alphabet down to its size.
+    /// A row that then doesn't fill the width is centred, the way every phone
+    /// keyboard lays out its home row. Rows containing the space bar are the
+    /// exception: `.flexible` absorbs the slack, so those still run edge to
+    /// edge — reserved at two units minimum so space stays a real target.
+    ///
+    /// This lives here (pure, platform-agnostic) rather than in
+    /// `CompactKeyboardView` (UIKit, unreachable from a package test)
+    /// specifically so `KeyboardLayoutTests` can check it against
+    /// hand-computed values instead of a reviewer having to hand-trace
+    /// `layoutSubviews`.
     public func frames(width: Double, padding: Double, spacing: Double) -> [KeyFrame] {
+        let content = width - padding * 2
+        let letters = letterUnit(content: content, spacing: spacing)
+
         var result: [KeyFrame] = []
         var y = padding
         for row in rows {
-            let fixedSlots = row.reduce(0.0) { total, cap in
-                switch cap.width {
-                case .unit:            return total + 1
-                case .wide(let scale): return total + scale
-                case .flexible:        return total
-                }
-            }
+            // The letter unit everywhere it fits; a row too crowded for it —
+            // the iPad's symbol row — falls back to the largest unit that does.
+            let unit = min(letters, maximumUnit(in: row, content: content, spacing: spacing))
             let gaps = spacing * Double(max(row.count - 1, 0))
-            let available = width - padding * 2 - gaps
-            let hasFlexible = row.contains { $0.width == .flexible }
-            let slotWidth = available / (fixedSlots + (hasFlexible ? 2 : 0))
+            let fixed = fixedSlots(in: row) * unit
+            let flexibleCount = Double(row.filter { $0.width == .flexible }.count)
+            // Whatever a row's fixed keys don't use goes to its flexible cap,
+            // never below two units.
+            let flexibleWidth = flexibleCount > 0
+                ? max(unit * 2, (content - gaps - fixed) / flexibleCount)
+                : 0
 
-            var x = padding
+            let used = fixed + flexibleWidth * flexibleCount + gaps
+            var x = padding + max(0, (content - used) / 2)
             for cap in row {
                 let capWidth: Double
                 switch cap.width {
-                case .unit:            capWidth = slotWidth
-                case .wide(let scale): capWidth = slotWidth * scale
-                case .flexible:        capWidth = slotWidth * 2
+                case .unit:            capWidth = unit
+                case .wide(let scale): capWidth = unit * scale
+                case .flexible:        capWidth = flexibleWidth
                 }
                 result.append(KeyFrame(x: x, y: y, width: capWidth, height: rowHeight - spacing))
                 x += capWidth + spacing
