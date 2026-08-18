@@ -11,12 +11,15 @@ final class HostListModel: ObservableObject {
     private let store = HostStore()
     private let knownHosts = KnownHostsStore()
     private let credentials: CredentialStore
+    private let accessTokens: AccessTokenStore
 
     init() {
         #if canImport(Security)
         credentials = KeychainCredentialStore()
+        accessTokens = KeychainAccessTokenStore()
         #else
         credentials = InMemoryCredentialStore()
+        accessTokens = InMemoryAccessTokenStore()
         #endif
         hosts = store.hosts
     }
@@ -64,6 +67,18 @@ final class HostListModel: ObservableObject {
         hosts = store.hosts
     }
 
+    /// True when connecting to this host must be preceded by a Cloudflare
+    /// Access browser login (no stored token, or it expired).
+    func needsAccessLogin(_ host: SSHHost) -> Bool {
+        host.connectionMethod == .cloudflareAccess
+            && accessTokens.validToken(for: host.hostname) == nil
+    }
+
+    /// Persist a freshly captured Access token for the host's hostname.
+    func storeAccessToken(_ raw: String, for host: SSHHost) throws {
+        try accessTokens.setRawToken(raw, for: host.hostname)
+    }
+
     /// Build a session for a host, pulling its credential from the store. The
     /// session holds a factory (not a single transport) so it can reconnect by
     /// building a fresh connection.
@@ -75,16 +90,22 @@ final class HostListModel: ObservableObject {
     func connect(_ host: SSHHost) -> TerminalSession {
         let credential = credentials.credential(for: host.id) ?? Credential()
         let knownHosts = self.knownHosts
+        let accessTokens = self.accessTokens
 
+        // Resolves the Access token at call time, so a reconnect after a fresh
+        // login picks up the new token.
         let makeSSH: () -> Transport = {
             TransportFactory.ssh(host: host,
                                  credential: credential,
                                  knownHosts: knownHosts,
-                                 hostKeyVerifier: HostKeyPrompter.shared)
+                                 hostKeyVerifier: HostKeyPrompter.shared,
+                                 accessTokens: accessTokens)
         }
 
         return TerminalSession(title: host.alias) {
-            guard host.useMosh else { return makeSSH() }
+            // Mosh needs UDP, which no tunnel method carries — tunneled hosts
+            // are SSH-only regardless of the saved toggle.
+            guard host.useMosh, host.connectionMethod == .direct else { return makeSSH() }
             // The real Mosh UDP/SSP transport is only built into the Mosh variant
             // (project.mosh.yml, which defines SLOOP_MOSH); elsewhere
             // `makeMoshTransport` stays nil and the composite transport falls back
