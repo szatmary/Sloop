@@ -17,6 +17,20 @@ public enum ConnectionMethod: String, Codable, Hashable, CaseIterable {
     case direct
     case cloudflareAccess
     case tailscale
+
+    /// How this reads in the host editor's picker. In the model, beside the
+    /// cases, so a new method cannot be added without a name to show for it —
+    /// the picker iterates `allCases` and would otherwise be one hand-written
+    /// list that quietly stops covering the enum. (`SSHHost` already carries
+    /// `connectionSummary` for the same kind of reason.) The raw values won't
+    /// do: "CloudflareAccess" is a spelling no one would choose.
+    public var displayName: String {
+        switch self {
+        case .direct: return "Direct"
+        case .cloudflareAccess: return "Cloudflare Access"
+        case .tailscale: return "Tailscale"
+        }
+    }
 }
 
 /// A saved connection. Persisted as plain JSON via `HostStore`; the matching

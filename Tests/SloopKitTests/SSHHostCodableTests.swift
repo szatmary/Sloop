@@ -43,6 +43,19 @@ final class SSHHostCodableTests: XCTestCase {
         XCTAssertTrue(back.useMosh)
     }
 
+    /// The host editor's picker iterates `allCases` and labels each with
+    /// `displayName`, so every case has to have one and no two may collide —
+    /// a picker with two identically-labelled rows is a picker the user
+    /// cannot use. This is what a hand-written list of picker rows could not
+    /// guarantee: it used to name two of the three cases, and a `.tailscale`
+    /// host opened the editor with nothing selected.
+    func testEveryConnectionMethodHasADistinctName() {
+        let names = ConnectionMethod.allCases.map(\.displayName)
+        XCTAssertEqual(names.count, ConnectionMethod.allCases.count)
+        XCTAssertEqual(Set(names).count, names.count, "names must be distinct: \(names)")
+        XCTAssertFalse(names.contains { $0.isEmpty })
+    }
+
     /// A method this build doesn't know must FAIL to decode (Task 3 makes the
     /// store skip such hosts instead of silently connecting them directly).
     func testUnknownMethodThrows() {

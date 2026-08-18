@@ -80,17 +80,36 @@ struct HostEditView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         #endif
+                    // Driven by the enum, not by a hand-written pair: a host
+                    // saved as .tailscale used to open this editor with no
+                    // matching option at all, so the picker showed nothing
+                    // selected and saving silently reinterpreted the host.
                     Picker("Connect via", selection: $host.connectionMethod) {
-                        Text("Direct").tag(ConnectionMethod.direct)
-                        Text("Cloudflare Access").tag(ConnectionMethod.cloudflareAccess)
+                        ForEach(ConnectionMethod.allCases, id: \.self) { method in
+                            Text(method.displayName).tag(method)
+                        }
                     }
 
-                    if host.connectionMethod == .cloudflareAccess {
+                    // A switch rather than an if/else, so a new connection
+                    // method has to answer "and what does its port mean?"
+                    // here rather than inheriting whatever the else branch
+                    // happens to do.
+                    switch host.connectionMethod {
+                    case .direct:
+                        Stepper("Port: \(host.port)", value: $host.port, in: 1...65535)
+                    case .cloudflareAccess:
+                        // No port: wss/443 outside the tunnel, sshd inside it.
                         Text("The hostname above is the Access application's public hostname. A browser sign-in runs on first connect.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
-                    } else {
+                    case .tailscale:
+                        // The port is a real port here — the hostname is a
+                        // MagicDNS name or tailnet address and sshd listens
+                        // on it as usual.
                         Stepper("Port: \(host.port)", value: $host.port, in: 1...65535)
+                        Text("Tailscale isn't built into this app yet, so a host set to it can't connect — see Docs/ROADMAP.md.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
