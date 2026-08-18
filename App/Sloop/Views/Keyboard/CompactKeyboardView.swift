@@ -177,6 +177,25 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
                 // typed via a reattached keyboard would still be modified.
                 clearArmedModifiers()
                 controller.dismissKeyboard()
+
+            case .paste:
+                // Sent as if typed, which is what paste means in a terminal:
+                // the remote decides how to interpret it, exactly as it does
+                // for the characters around it. Nothing is sent when the
+                // pasteboard holds no text — an image or a file promise is not
+                // something a shell can be handed.
+                if let text = UIPasteboard.general.string, !text.isEmpty {
+                    controller.send(ArraySlice(Array(text.utf8)))
+                }
+                clearArmedModifiers()
+
+            case .previousSession:
+                SessionsModel.shared.selectPrevious()
+                clearArmedModifiers()
+
+            case .nextSession:
+                SessionsModel.shared.selectNext()
+                clearArmedModifiers()
             }
 
         case .blank:

@@ -334,7 +334,11 @@ public struct KeyboardLayout: Equatable, Sendable {
                    .key(.backspace, width: .wide(2), repeats: true)],
             // Control in the caps-lock position, which is where anyone who uses
             // a terminal puts it anyway.
-            [.modifier(.control, width: .wide(1.75))]
+            // Paste fills the space this row leaves on the left. A tablet has
+            // no ⌘V, and pasting a command or a URL into a terminal is
+            // something people do constantly — until now by long-pressing the
+            // terminal and hunting for a menu.
+            [.command(.paste), .modifier(.control, width: .wide(1.75))]
                 + "asdfghjkl".map { KeyCap.character($0) }
                 + [.character(";"), .character("'"), .character("\\"),
                    // Upper half of the reverse-L return key, spanning this row
@@ -345,7 +349,11 @@ public struct KeyboardLayout: Equatable, Sendable {
                    .key(.return, width: .wide(1.5), join: .below)],
             // One shift, at the left. The right-hand one is where the wide
             // half of the return key goes.
-            [.modifier(.shift, width: .wide(2.25))]
+            // Session switching, in the same spare space. It was reachable
+            // only by an edge swipe — a gesture nothing announces, and one
+            // VoiceOver and Switch Control cannot perform at all.
+            [.command(.previousSession), .command(.nextSession),
+             .modifier(.shift, width: .wide(2.25))]
                 + "zxcvbnm".map { KeyCap.character($0) }
                 + [.character(","), .character("."), .character("/"),
                    .key(.return, width: .wide(2.25))],

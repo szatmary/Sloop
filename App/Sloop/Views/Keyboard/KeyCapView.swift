@@ -79,7 +79,10 @@ final class KeyCapView: UIControl {
 
         if functionLayerActive, let number = functionKeyNumber(forCharacter: character) {
             primaryLabel.text = "F\(number)"
-            primaryLabel.font = Self.font(forLabel: primaryLabel.text ?? "")
+            // One size across the whole F-row: sizing by label length made F12
+            // smaller than F1, so pressing fn turned a straight row of keys
+            // into a ragged one.
+            primaryLabel.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
             secondaryLabel.text = nil
             return
         }
@@ -204,6 +207,7 @@ final class KeyCapView: UIControl {
         guard case .command(let command) = value else { return nil }
         switch command {
         case .dismissKeyboard: return "keyboard.chevron.compact.down"
+        case .paste, .previousSession, .nextSession: return nil
         }
     }
 
@@ -218,7 +222,10 @@ final class KeyCapView: UIControl {
             return "fn"
         case .command(let command):
             switch command {
-            case .dismissKeyboard: return "⌨︎↓"
+            case .dismissKeyboard:   return "⌨︎↓"
+            case .paste:             return "paste"
+            case .previousSession:   return "‹ tab"
+            case .nextSession:       return "tab ›"
             }
         case .blank:
             return ""
@@ -292,6 +299,9 @@ final class KeyCapView: UIControl {
         case .command(let command):
             switch command {
             case .dismissKeyboard: return "dismiss keyboard"
+            case .paste:           return "paste"
+            case .previousSession: return "previous session"
+            case .nextSession:     return "next session"
             }
         case .blank:
             return ""

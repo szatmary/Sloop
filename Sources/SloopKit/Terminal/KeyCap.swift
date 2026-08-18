@@ -41,6 +41,12 @@ public struct KeyCap: Equatable, Sendable {
     /// Actions the keyboard asks the app to take, rather than sending onward.
     public enum Command: Equatable, Sendable {
         case dismissKeyboard
+        /// Send the pasteboard's contents as if typed. A tablet has no ⌘V, and
+        /// the alternative is a long-press on the terminal itself.
+        case paste
+        /// Move between open sessions. Otherwise reachable only by an edge
+        /// swipe, which nothing announces and VoiceOver cannot perform.
+        case previousSession, nextSession
     }
 
     /// How much horizontal room a key takes, in grid slots.
