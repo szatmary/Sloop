@@ -128,6 +128,107 @@ final class SSHConfigParserTests: XCTestCase {
         XCTAssertFalse(text.contains("User"))       // empty → omitted
     }
 
+    // MARK: connection method
+
+    /// The one that matters: a tunneled host must not come back as `.direct`.
+    /// It used to — `format`/`parse` carried no connection method at all — and
+    /// `TransportFactory` would then hand the re-imported host a `TCPDialer`
+    /// aimed at the Access application's public hostname, sending its username
+    /// and secret to whatever answers there on port 22.
+    func testConnectionMethodSurvivesFormatAndParse() {
+        let originals = [
+            SSHHost(alias: "tunnel", hostname: "ssh.example.com", username: "matt",
+                    connectionMethod: .cloudflareAccess),
+            SSHHost(alias: "tailnet", hostname: "box.tail1234.ts.net", username: "matt",
+                    connectionMethod: .tailscale),
+            SSHHost(alias: "plain", hostname: "plain.example.com", username: "matt"),
+        ]
+        let reparsed = SSHConfigParser.parse(SSHConfigParser.format(originals))
+        XCTAssertEqual(reparsed.map(\.alias), ["tunnel", "tailnet", "plain"])
+        XCTAssertEqual(reparsed.map(\.connectionMethod),
+                       [.cloudflareAccess, .tailscale, .direct])
+    }
+
+    /// The directive rides in a comment so the export is still something
+    /// `ssh -F` will read: an unknown *keyword* is a hard error in OpenSSH.
+    func testConnectionMethodIsEmittedAsAComment() {
+        let text = SSHConfigParser.format([
+            SSHHost(alias: "tunnel", hostname: "ssh.example.com", username: "matt",
+                    connectionMethod: .cloudflareAccess)])
+        XCTAssertTrue(text.contains("# SloopConnectionMethod cloudflareAccess"), text)
+    }
+
+    /// `.direct` is the default, so it stays out of the file — same rule as
+    /// `Port 22` and an empty `User`.
+    func testDirectMethodEmitsNoDirective() {
+        let text = SSHConfigParser.format([
+            SSHHost(alias: "plain", hostname: "plain.example.com", username: "matt")])
+        XCTAssertFalse(text.contains("SloopConnectionMethod"), text)
+    }
+
+    /// A method this build doesn't understand — a config written by a newer
+    /// Sloop — must drop the host, not import it as a direct connection. The
+    /// host is recoverable (re-add it, or import with a build that knows the
+    /// method); a credential sent to the wrong server is not.
+    func testUnknownConnectionMethodDropsTheHostInsteadOfDowngradingIt() {
+        let config = """
+        Host future
+            HostName future.example.com
+            User matt
+            # SloopConnectionMethod wireguard
+
+        Host plain
+            HostName plain.example.com
+            User matt
+        """
+        let hosts = SSHConfigParser.parse(config)
+        XCTAssertEqual(hosts.map(\.alias), ["plain"])
+    }
+
+    /// The directive is scoped to its own block: an unknown method in one
+    /// block must not leak into, or discard, the next.
+    func testUnknownConnectionMethodDoesNotAffectLaterBlocks() {
+        let config = """
+        Host future
+            # SloopConnectionMethod wireguard
+
+        Host tunnel
+            HostName ssh.example.com
+            # SloopConnectionMethod cloudflareAccess
+
+        Host plain
+            HostName plain.example.com
+        """
+        let hosts = SSHConfigParser.parse(config)
+        XCTAssertEqual(hosts.map(\.alias), ["tunnel", "plain"])
+        XCTAssertEqual(hosts.map(\.connectionMethod), [.cloudflareAccess, .direct])
+    }
+
+    /// Ordinary comments — including ones that merely mention the app — are
+    /// still comments.
+    func testUnrelatedCommentsAreStillIgnored() {
+        let config = """
+        # Sloop wrote this file
+        Host plain
+            HostName plain.example.com
+            # SloopConnectionMethod
+            #
+        """
+        let hosts = SSHConfigParser.parse(config)
+        XCTAssertEqual(hosts.map(\.alias), ["plain"])
+        XCTAssertEqual(hosts[0].connectionMethod, .direct)
+    }
+
+    /// Same spelling tolerance as every other keyword here: case-insensitive,
+    /// `=` or whitespace separated, with or without a space after the `#`.
+    func testConnectionMethodDirectiveSpellingIsTolerant() {
+        let config = """
+        Host a
+            #sloopconnectionmethod=cloudflareAccess
+        """
+        XCTAssertEqual(SSHConfigParser.parse(config).first?.connectionMethod, .cloudflareAccess)
+    }
+
     func testRoundTripThroughFormatAndParse() {
         let originals = [
             SSHHost(alias: "a", hostname: "a.example.com", port: 22, username: "alice"),
