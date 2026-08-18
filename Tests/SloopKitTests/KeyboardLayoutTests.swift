@@ -496,19 +496,18 @@ final class KeyboardLayoutTests: XCTestCase {
             frames[flat.firstIndex(where: predicate)!]
         }
 
-        // One unit, 47.5319, shared by the letters, the navigation cluster and
+        // One unit, 47.6596, shared by the letters, the navigation cluster and
         // the number pad — one key size on the keyboard, not three. It is
         // solved for directly: the busiest letter row has to fit all three
         // blocks plus the gap between them, and that equation sets it.
-        XCTAssertEqual(frame { $0.primary == .character("q") }.width, 47.5319, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 47.5319, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.up) }.width, 47.5319, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 47.5319, accuracy: 0.001)
-        // ANSI widths as multiples of it: control 1.75 at caps lock, shift 3.25
-        // (this keyboard's rows are 16.5 units, so its shifts are wider than a
-        // 15-unit board's 2.25), space 5.5.
-        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 83.1809, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 154.4787, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 261.4255, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character("q") }.width, 47.6596, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 47.6596, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.up) }.width, 47.6596, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 47.6596, accuracy: 0.001)
+        // ANSI widths as multiples of it: control 1.75 at caps lock, shift
+        // 2.25, space 4.5.
+        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 83.4043, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 107.2340, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 214.4681, accuracy: 0.001)
     }
 }

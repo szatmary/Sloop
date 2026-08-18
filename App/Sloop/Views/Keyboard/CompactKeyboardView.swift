@@ -229,7 +229,13 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
     }
 
     private func applyArmed(_ armed: KeyModifiers) {
+        let shifted = armed.contains(.shift)
         for view in keyViews {
+            // Every key redraws for shift, the way the system keyboard does:
+            // the letters go upper case and the symbols show what they will
+            // actually produce. Arming shift and then reading `,` on a key that
+            // is about to send `<` is the keyboard lying about itself.
+            view.setShifted(shifted)
             guard case .modifier(let modifiers) = view.cap.primary else { continue }
             view.setArmed(armed.contains(modifiers))
         }

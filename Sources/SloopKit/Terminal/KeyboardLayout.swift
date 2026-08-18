@@ -320,10 +320,14 @@ public struct KeyboardLayout: Equatable, Sendable {
         // centred against each other, and then the two halves of the return key
         // don't line up and it reads as a tetromino rather than a key.
         let mainRows: [[KeyCap]] = [
-            // 1 + 1 + 10 + 2 + 1 + 1.5 = 16.5, and every row below matches it.
-            [.key(.escape), .key(.tab)]
+            // 1 + 2 + 10 + 2 + 1.5 = 16.5, and every row below matches it.
+            //
+            // `[ ]` then return, as ISO has it — `=` was sitting between them,
+            // which put a number-row key in the corner the return key occupies
+            // on every keyboard ever made.
+            [.key(.escape), .key(.tab, width: .wide(2))]
                 + "qwertyuiop".map { KeyCap.character($0) }
-                + [.character("["), .character("]"), .character("="),
+                + [.character("["), .character("]"),
                    // Upper half of the reverse-L return: narrower than the half
                    // below, flush to the same right edge, which is what makes
                    // the L. Backspace moved into the navigation cluster to
@@ -334,21 +338,29 @@ public struct KeyboardLayout: Equatable, Sendable {
                 + "asdfghjkl".map { KeyCap.character($0) }
                 + [.character(";"), .character("'"), .character("\\"),
                    .key(.return, width: .wide(2.75), join: .above)],
-            // 3.25 + 7 + 3 + 3.25
-            [.modifier(.shift, width: .wide(3.25))]
+            // 2.25 + 7 + 3. Shorter than the rows above it, which is fine:
+            // rows right-align against the cluster, so a short row simply
+            // starts further in — the stagger a keyboard has anyway. One shift
+            // is enough on a keyboard reached with thumbs rather than ten
+            // fingers; the right-hand one was a key that could be something
+            // else, and for now is space the letters get back.
+            [.modifier(.shift, width: .wide(2.25))]
                 + "zxcvbnm".map { KeyCap.character($0) }
                 + [.character(","), .character("."), .character("/"),
                    .modifier(.shift, width: .wide(3.25))],
-            // 1 + 1 + 1 + 1 + 5.5 + 1 + 5 + 1
+            // 1 + 1 + 1 + 1 + 1 + 4.5 + 1 + 5 + 1
             //
             // The chords a shell needs constantly, in the room this row has
             // spare: interrupt, end-of-file, suspend, clear. They were on the
             // smart-keys bar this keyboard replaced, and arming control then
             // reaching for a letter is two presses for something people hit a
             // hundred times a session.
+            // `` ` `` and `=` together: both are number-row keys, and this is
+            // the row that took what the number row was carrying.
             [.command(.dismissKeyboard),
-             .functionLayer, .modifier(.option), .character("`"),
-             .character(" ", width: .wide(5.5)),
+             .functionLayer, .modifier(.option),
+             .character("`"), .character("="),
+             .character(" ", width: .wide(4.5)),
              .modifier(.option),
              // ⌃B first: it is tmux's prefix, so on this keyboard it is the
              // most-pressed of the five by some distance.

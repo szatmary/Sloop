@@ -52,6 +52,25 @@ final class KeyCapView: UIControl {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// Redraw for shift: the character a tap will actually produce goes on the
+    /// face, and the other one drops to the small legend above it.
+    func setShifted(_ isShifted: Bool) {
+        guard case .character(let character) = cap.primary,
+              cap.secondary == nil else { return }
+        let shifted = KeyboardLayout.shifted(character)
+        guard shifted != character else {
+            // Letters have no separate legend — upper case is the whole change.
+            if character.isLetter {
+                primaryLabel.text = isShifted
+                    ? String(character).uppercased()
+                    : String(character)
+            }
+            return
+        }
+        primaryLabel.text = String(isShifted ? shifted : character)
+        secondaryLabel.text = String(isShifted ? character : shifted)
+    }
+
     /// Highlight a sticky modifier that is currently armed.
     func setArmed(_ isArmed: Bool) {
         backgroundColor = isArmed ? .tintColor : .secondarySystemFill
