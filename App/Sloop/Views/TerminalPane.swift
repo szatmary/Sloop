@@ -10,6 +10,9 @@ import SloopKit
 /// its connection.
 struct TerminalPane: View {
     @ObservedObject var controller: TerminalController
+    /// Close this session's tab, from the smart-keys bar on iOS.
+    var closeTab: () -> Void = {}
+    @State private var confirmingClose = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,8 +21,20 @@ struct TerminalPane: View {
             #if os(iOS)
             KeyboardAccessoryBar(send: { controller.send($0) },
                                  applicationCursor: { controller.applicationCursor },
-                                 armed: $controller.armedModifiers)
+                                 armed: $controller.armedModifiers,
+                                 closeTab: { confirmingClose = true })
             #endif
+        }
+        // The close key sits in the row your thumbs live in, and it drops a
+        // live SSH session — a mis-tap costs real work. Confirm rather than
+        // relocate: anywhere on that bar is somewhere you tap constantly.
+        .confirmationDialog("Close this session?",
+                            isPresented: $confirmingClose,
+                            titleVisibility: .visible) {
+            Button("Close Session", role: .destructive) { closeTab() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The connection will be closed.")
         }
     }
 }

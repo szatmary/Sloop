@@ -47,6 +47,16 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         self.transport = makeTransport()
         super.init()
         terminalView.terminalDelegate = self
+        #if os(iOS)
+        // SwiftTerm installs its own TerminalAccessory (esc / ctrl / tab / …)
+        // as the input accessory view. Sloop ships `KeyboardAccessoryBar`,
+        // which covers the same keys plus arrows, paging and one-tap Ctrl
+        // combos, so leaving both in place stacked two bars — two Control
+        // buttons — above the keyboard and ate the screen. Ours wins because
+        // it stays visible with a hardware keyboard attached, when an input
+        // accessory view isn't shown at all.
+        terminalView.inputAccessoryView = nil
+        #endif
         apply(appearance)
         wire(transport)
         transport.start()

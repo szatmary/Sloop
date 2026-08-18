@@ -26,6 +26,11 @@ struct KeyboardAccessoryBar: View {
     /// The armed modifiers, owned by `TerminalController` so they also apply to
     /// characters typed on the software keyboard.
     @Binding var armed: KeyModifiers
+    /// Close the current tab. Lives at the far end of the strip because the
+    /// tab bar that used to carry a ✕ is gone on iOS, and ⌘W only exists with
+    /// a hardware keyboard — without this, sessions could never be closed by
+    /// touch. Deliberately last so it isn't mis-tapped next to ⌃.
+    var closeTab: () -> Void = {}
 
     private var control: Bool { armed.contains(.control) }
     private var option: Bool { armed.contains(.option) }
@@ -53,11 +58,15 @@ struct KeyboardAccessoryBar: View {
                 special("pgdn") { emit(.pageDown) }
                 divider
 
-                ForEach(Array("CDZLRAE"), id: \.self) { letter in
+                // B first: it's tmux's prefix, the most-reached-for combo for
+                // anyone running tmux over SSH.
+                ForEach(Array("BCDZLRAE"), id: \.self) { letter in
                     special("⌃\(letter)") {
                         send(KeyEncoder.bytes(for: letter, modifiers: .control)[...])
                     }
                 }
+                divider
+                special("✕ tab") { closeTab() }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)

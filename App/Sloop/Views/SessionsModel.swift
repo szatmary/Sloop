@@ -50,6 +50,26 @@ final class SessionsModel: ObservableObject {
     func selectNext() { open.selectNext() }
     func selectPrevious() { open.selectPrevious() }
 
+    /// Position of the selected session, for linear (non-wrapping) paging.
+    /// `selectNext`/`selectPrevious` cycle, which is right for ⌘⇧[ ] but wrong
+    /// for edge swipes: there the host list sits to the left of the first tab,
+    /// so paging past either end must stop rather than wrap around.
+    var selectedIndex: Int? {
+        guard let id = selectedID else { return nil }
+        return open.sessions.firstIndex { $0.id == id }
+    }
+
+    /// Select the session `offset` places away. Returns false — selecting
+    /// nothing — when that would run off either end.
+    @discardableResult
+    func selectRelative(_ offset: Int) -> Bool {
+        guard let index = selectedIndex else { return false }
+        let target = index + offset
+        guard open.sessions.indices.contains(target) else { return false }
+        select(open.sessions[target].id)
+        return true
+    }
+
     /// Close a tab: tear down its connection and drop its controller.
     func close(_ id: TerminalSession.ID) {
         controllers[id]?.close()
