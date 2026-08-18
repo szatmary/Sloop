@@ -29,8 +29,12 @@ struct HostEditView: View {
         ("Reattach to GNU screen, or start it", "screen -RD"),
     ]
     private let libraryKeys: [NamedKey]
+    /// Set when the key library couldn't be read at all. Distinct from an empty
+    /// library, and shown as such — an empty picker would tell someone whose
+    /// keys are safe in iCloud Keychain that they have none.
+    private let libraryError: String?
     private let onSaveKey: (NamedKey) throws -> Void
-    private let onSave: (SSHHost, Credential?) -> Void
+    private let onSave: (SSHHost, Credential?) throws -> Void
 
     private enum AuthKind: String, CaseIterable, Identifiable, Hashable {
         case password = "Password"
@@ -52,10 +56,12 @@ struct HostEditView: View {
 
     init(host: SSHHost,
          libraryKeys: [NamedKey] = [],
+         libraryError: String? = nil,
          onSaveKey: @escaping (NamedKey) throws -> Void = { _ in },
-         onSave: @escaping (SSHHost, Credential?) -> Void) {
+         onSave: @escaping (SSHHost, Credential?) throws -> Void) {
         _host = State(initialValue: host)
         self.libraryKeys = libraryKeys
+        self.libraryError = libraryError
         self.onSaveKey = onSaveKey
         self.onSave = onSave
         if case .publicKey(let name) = host.auth {
@@ -106,6 +112,11 @@ struct HostEditView: View {
                             .textContentType(.password)
                             #endif
                     case .privateKey:
+                        if let libraryError {
+                            Label(libraryError, systemImage: "exclamationmark.triangle")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                        }
                         Picker("Key", selection: $selectedKeyName) {
                             Text("Paste new key…").tag("")
                             ForEach(libraryKeys) { key in
@@ -192,7 +203,7 @@ struct HostEditView: View {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .alert("Couldn't Save Key", isPresented: Binding(
+            .alert("Couldn't Save", isPresented: Binding(
                 get: { saveError != nil },
                 set: { if !$0 { saveError = nil } })
             ) {
@@ -250,13 +261,12 @@ struct HostEditView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        switch authKind {
-                        case .password:
-                            host.auth = .password
-                            onSave(host, password.isEmpty ? nil : Credential(password: password))
-                            dismiss()
-                        case .privateKey:
-                            do {
+                        do {
+                            switch authKind {
+                            case .password:
+                                host.auth = .password
+                                try onSave(host, password.isEmpty ? nil : Credential(password: password))
+                            case .privateKey:
                                 var name = selectedKeyName
                                 if name.isEmpty {
                                     name = trimmedPastedName
@@ -269,11 +279,14 @@ struct HostEditView: View {
                                         passphrase: pastedPassphrase.isEmpty ? nil : pastedPassphrase))
                                 }
                                 host.auth = .publicKey(name: name)
-                                onSave(host, nil)
-                                dismiss()
-                            } catch {
-                                saveError = error.localizedDescription
+                                try onSave(host, nil)
                             }
+                            dismiss()
+                        } catch {
+                            // Stay open on failure. Dismissing here is what let
+                            // a password go unstored while the sheet closed as
+                            // though it had been saved.
+                            saveError = error.localizedDescription
                         }
                     }
                     .disabled(host.hostname.isEmpty || host.username.isEmpty

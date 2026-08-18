@@ -17,15 +17,17 @@ final class KeychainCredentialStore: CredentialStore {
         self.service = service
     }
 
-    func credential(for hostID: UUID) -> Credential? {
+    func credential(for hostID: UUID) throws -> Credential? {
         var query = baseQuery(for: hostID)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { return nil }
-        return try? JSONDecoder().decode(Credential.self, from: data)
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else { throw keychainError(status) }
+        guard let data = item as? Data else { throw keychainError(errSecInternalError) }
+        return try JSONDecoder().decode(Credential.self, from: data)
     }
 
     func setCredential(_ credential: Credential, for hostID: UUID) throws {
@@ -33,6 +35,9 @@ final class KeychainCredentialStore: CredentialStore {
         let query = baseQuery(for: hostID)
 
         let status = SecItemCopyMatching(query as CFDictionary, nil)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw keychainError(status)
+        }
         if status == errSecSuccess {
             let attributes: [String: Any] = [kSecValueData as String: data]
             let update = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
@@ -62,8 +67,9 @@ final class KeychainCredentialStore: CredentialStore {
     }
 
     private func keychainError(_ status: OSStatus) -> NSError {
-        NSError(domain: NSOSStatusErrorDomain, code: Int(status),
-                userInfo: [NSLocalizedDescriptionKey: "keychain error \(status)"])
+        let message = SecCopyErrorMessageString(status, nil) as String? ?? "OSStatus \(status)"
+        return NSError(domain: NSOSStatusErrorDomain, code: Int(status),
+                       userInfo: [NSLocalizedDescriptionKey: "Keychain error: \(message)"])
     }
 }
 #endif

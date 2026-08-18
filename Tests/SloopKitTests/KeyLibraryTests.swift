@@ -12,7 +12,7 @@ final class KeyLibraryTests: XCTestCase {
     func testResolvesLibraryKeyByName() throws {
         let keys = InMemoryKeyStore()
         try keys.setKey(NamedKey(name: "id_ed25519", privateKeyPEM: "pem", passphrase: "pp"))
-        let credential = KeyLibrary.credential(for: host(auth: .publicKey(name: "id_ed25519")),
+        let credential = try KeyLibrary.credential(for: host(auth: .publicKey(name: "id_ed25519")),
                                                keys: keys,
                                                credentials: InMemoryCredentialStore())
         XCTAssertEqual(credential, Credential(privateKeyPEM: "pem", passphrase: "pp"))
@@ -22,7 +22,7 @@ final class KeyLibraryTests: XCTestCase {
         let credentials = InMemoryCredentialStore()
         let h = host(auth: .publicKey(name: "web"))
         try credentials.setCredential(Credential(privateKeyPEM: "legacy-pem"), for: h.id)
-        let credential = KeyLibrary.credential(for: h,
+        let credential = try KeyLibrary.credential(for: h,
                                                keys: InMemoryKeyStore(),
                                                credentials: credentials)
         XCTAssertEqual(credential, Credential(privateKeyPEM: "legacy-pem"))
@@ -39,7 +39,7 @@ final class KeyLibraryTests: XCTestCase {
         let credentials = InMemoryCredentialStore()
         let h = host(auth: .publicKey(name: "web"))
         try credentials.setCredential(Credential(password: "stale-password"), for: h.id)
-        let credential = KeyLibrary.credential(for: h,
+        let credential = try KeyLibrary.credential(for: h,
                                                keys: InMemoryKeyStore(),
                                                credentials: credentials)
         XCTAssertNil(credential)
@@ -51,7 +51,7 @@ final class KeyLibraryTests: XCTestCase {
         let credentials = InMemoryCredentialStore()
         let h = host(auth: .publicKey(name: "web"))
         try credentials.setCredential(Credential(privateKeyPEM: "legacy-pem"), for: h.id)
-        XCTAssertEqual(KeyLibrary.credential(for: h, keys: keys, credentials: credentials)?.privateKeyPEM,
+        XCTAssertEqual(try KeyLibrary.credential(for: h, keys: keys, credentials: credentials)?.privateKeyPEM,
                        "library-pem")
     }
 
@@ -59,7 +59,7 @@ final class KeyLibraryTests: XCTestCase {
         let credentials = InMemoryCredentialStore()
         let h = host(auth: .password)
         try credentials.setCredential(Credential(password: "hunter2"), for: h.id)
-        XCTAssertEqual(KeyLibrary.credential(for: h, keys: InMemoryKeyStore(), credentials: credentials),
+        XCTAssertEqual(try KeyLibrary.credential(for: h, keys: InMemoryKeyStore(), credentials: credentials),
                        Credential(password: "hunter2"))
     }
 
@@ -69,7 +69,7 @@ final class KeyLibraryTests: XCTestCase {
         let h = host(auth: .publicKey(name: "web"))
         try credentials.setCredential(Credential(privateKeyPEM: "pem", passphrase: "pp"), for: h.id)
 
-        KeyLibrary.migrate(hosts: [h], credentials: credentials, keys: keys)
+        try KeyLibrary.migrate(hosts: [h], credentials: credentials, keys: keys)
         XCTAssertEqual(keys.key(named: "web"),
                        NamedKey(name: "web", privateKeyPEM: "pem", passphrase: "pp"))
     }
@@ -81,7 +81,7 @@ final class KeyLibraryTests: XCTestCase {
         let h = host(auth: .publicKey(name: "web"))
         try credentials.setCredential(Credential(privateKeyPEM: "old-pem"), for: h.id)
 
-        KeyLibrary.migrate(hosts: [h], credentials: credentials, keys: keys)
+        try KeyLibrary.migrate(hosts: [h], credentials: credentials, keys: keys)
         XCTAssertEqual(keys.key(named: "web")?.privateKeyPEM, "newer-pem")
     }
 
@@ -92,8 +92,44 @@ final class KeyLibraryTests: XCTestCase {
         try credentials.setCredential(Credential(password: "hunter2"), for: pw.id)
         let keyless = host(auth: .publicKey(name: "bare"))
 
-        KeyLibrary.migrate(hosts: [pw, keyless], credentials: credentials, keys: keys)
+        try KeyLibrary.migrate(hosts: [pw, keyless], credentials: credentials, keys: keys)
         XCTAssertTrue(keys.keys().isEmpty)
+    }
+
+    /// A key store that can't be read — what the keychain does when the build
+    /// lacks the access-group entitlement, or is signed by another team.
+    private final class UnreadableKeyStore: KeyStore {
+        struct Failure: Error {}
+        func keys() throws -> [NamedKey] { throw Failure() }
+        func key(named name: String) throws -> NamedKey? { throw Failure() }
+        func setKey(_ key: NamedKey) throws { throw Failure() }
+        func removeKey(named name: String) throws { throw Failure() }
+    }
+
+    /// An unreadable library is not an empty one. Treating it as empty sent the
+    /// host its stale legacy credential — and when the key store failed for
+    /// want of an entitlement, reported a signing problem as an auth failure.
+    func testUnreadableLibraryFailsInsteadOfFallingBackToLegacy() throws {
+        let credentials = InMemoryCredentialStore()
+        let h = host(auth: .publicKey(name: "web"))
+        try credentials.setCredential(Credential(privateKeyPEM: "legacy-pem"), for: h.id)
+
+        XCTAssertThrowsError(try KeyLibrary.credential(for: h,
+                                                       keys: UnreadableKeyStore(),
+                                                       credentials: credentials))
+    }
+
+    /// A migration that can't write must not report success: the caller marks
+    /// the device migrated on return, and a false mark means the legacy keys
+    /// are never lifted and the library stays empty for good.
+    func testMigrationFailurePropagates() throws {
+        let credentials = InMemoryCredentialStore()
+        let h = host(auth: .publicKey(name: "web"))
+        try credentials.setCredential(Credential(privateKeyPEM: "pem"), for: h.id)
+
+        XCTAssertThrowsError(try KeyLibrary.migrate(hosts: [h],
+                                                    credentials: credentials,
+                                                    keys: UnreadableKeyStore()))
     }
 
     /// The public key must reach the transport: libssh2's mbedTLS backend
@@ -105,7 +141,7 @@ final class KeyLibraryTests: XCTestCase {
                                  privateKeyPEM: "pem",
                                  publicKey: "ssh-rsa AAAAB3Nz…",
                                  passphrase: nil))
-        let credential = KeyLibrary.credential(for: host(auth: .publicKey(name: "id_rsa")),
+        let credential = try KeyLibrary.credential(for: host(auth: .publicKey(name: "id_rsa")),
                                                keys: keys,
                                                credentials: InMemoryCredentialStore())
         XCTAssertEqual(credential?.publicKey, "ssh-rsa AAAAB3Nz…")

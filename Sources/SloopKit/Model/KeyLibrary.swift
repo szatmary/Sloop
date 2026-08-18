@@ -17,20 +17,25 @@ public enum KeyLibrary {
     /// password auth from the credential's contents, so returning a stale
     /// password would silently re-send it to a host the user migrated to key
     /// auth. Password hosts always use the per-host credential.
+    /// Throws if either store can't be read. The fallback below is for a key
+    /// the library doesn't *have*; applying it to a library we merely failed to
+    /// read would send a stale legacy credential to the host — and, when the
+    /// read failed for want of an entitlement, would report a signing problem
+    /// as an authentication failure.
     public static func credential(for host: SSHHost,
                                   keys: KeyStore,
-                                  credentials: CredentialStore) -> Credential? {
+                                  credentials: CredentialStore) throws -> Credential? {
         if case .publicKey(let name) = host.auth {
-            if let key = keys.key(named: name) {
+            if let key = try keys.key(named: name) {
                 return Credential(privateKeyPEM: key.privateKeyPEM,
                                   publicKey: key.publicKey,
                                   passphrase: key.passphrase)
             }
-            guard let legacy = credentials.credential(for: host.id),
+            guard let legacy = try credentials.credential(for: host.id),
                   legacy.privateKeyPEM != nil else { return nil }
             return legacy
         }
-        return credentials.credential(for: host.id)
+        return try credentials.credential(for: host.id)
     }
 
     /// Lift legacy per-host PEMs into the library, named by each host's
@@ -49,17 +54,22 @@ public enum KeyLibrary {
     /// `HostListModel` for the app-layer marker. SloopKit itself stays
     /// Foundation-only and has no place to durably store that marker, so it
     /// isn't kept here.
+    ///
+    /// Throws on the first store failure rather than skipping that host: a
+    /// migration that silently lifted some keys and not others leaves the user
+    /// with a library that looks complete and hosts that can't authenticate.
+    /// Callers set their "already migrated" marker only if this returns.
     public static func migrate(hosts: [SSHHost],
                                credentials: CredentialStore,
-                               keys: KeyStore) {
+                               keys: KeyStore) throws {
         for host in hosts {
             guard case .publicKey(let name) = host.auth,
-                  keys.key(named: name) == nil,
-                  let credential = credentials.credential(for: host.id),
+                  try keys.key(named: name) == nil,
+                  let credential = try credentials.credential(for: host.id),
                   let pem = credential.privateKeyPEM else { continue }
-            try? keys.setKey(NamedKey(name: name,
-                                      privateKeyPEM: pem,
-                                      passphrase: credential.passphrase))
+            try keys.setKey(NamedKey(name: name,
+                                     privateKeyPEM: pem,
+                                     passphrase: credential.passphrase))
         }
     }
 }

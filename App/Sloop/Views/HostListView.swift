@@ -21,6 +21,10 @@ struct HostListView: View {
     @State private var showingImport = false
     @State private var showingExport = false
     @State private var importResult: String?
+    /// A store operation that failed — saving, deleting, or resolving the
+    /// credential for a connect. Surfaced rather than dropped: each of these
+    /// used to fail silently and reappear later as an unexplained auth failure.
+    @State private var actionError: String?
 
     var body: some View {
         NavigationStack {
@@ -69,7 +73,7 @@ struct HostListView: View {
                     }
                     ForEach(model.hosts) { host in
                         HStack {
-                            Button { open(model.connect(host)) } label: {
+                            Button { connect(host) } label: {
                                 HostRow(host: host, isUnderway: isUnderway(host))
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .contentShape(Rectangle())
@@ -86,12 +90,14 @@ struct HostListView: View {
                             Button { editing = host } label: {
                                 Label("Edit…", systemImage: "pencil")
                             }
-                            Button(role: .destructive) { model.delete(host) } label: {
+                            Button(role: .destructive) { delete(host) } label: {
                                 Label("Delete", systemImage: "trash")
                             }
                         }
                     }
-                    .onDelete(perform: model.delete)
+                    .onDelete { offsets in
+                        run { try model.delete(at: offsets) }
+                    }
                 }
             }
             .navigationTitle("Sloop")
@@ -132,10 +138,10 @@ struct HostListView: View {
             }
             .sheet(item: $editing) { host in
                 HostEditView(host: host,
-                             libraryKeys: model.libraryKeys(),
-                             onSaveKey: { try model.saveLibraryKey($0) }) {
-                    model.save($0, credential: $1)
-                }
+                             libraryKeys: model.libraryKeys,
+                             libraryError: model.libraryError,
+                             onSaveKey: { try model.saveLibraryKey($0) },
+                             onSave: { try model.save($0, credential: $1) })
             }
             .sheet(isPresented: $showingSupport) {
                 SupportView()
@@ -166,6 +172,14 @@ struct HostListView: View {
             } message: {
                 Text(importResult ?? "")
             }
+            .alert("Keychain Error", isPresented: Binding(
+                get: { actionError != nil },
+                set: { if !$0 { actionError = nil } })
+            ) {
+                Button("OK", role: .cancel) { actionError = nil }
+            } message: {
+                Text(actionError ?? "")
+            }
             .navigationDestination(isPresented: $showingTerminal) {
                 TerminalTabsView(model: sessions)
             }
@@ -175,6 +189,26 @@ struct HostListView: View {
                 if new > old { showingTerminal = true }
                 else if new == 0 { showingTerminal = false }
             }
+        }
+    }
+
+    /// Resolve the host's credential and open a session. A credential that
+    /// can't be read stops the connect: attempting it anyway produces an
+    /// authentication failure that says nothing about the real cause.
+    private func connect(_ host: SSHHost) {
+        run { open(try model.connect(host)) }
+    }
+
+    private func delete(_ host: SSHHost) {
+        run { try model.delete(host) }
+    }
+
+    /// Run a store operation, showing why it failed rather than dropping it.
+    private func run(_ operation: () throws -> Void) {
+        do {
+            try operation()
+        } catch {
+            actionError = error.localizedDescription
         }
     }
 

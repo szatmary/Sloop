@@ -80,7 +80,7 @@ enum KeyCLI {
                 // overwrite here would silently replace the key on every
                 // device. Require an explicit --force to overwrite.
                 let keyName = name ?? ((path as NSString).lastPathComponent)
-                if !force, store.key(named: keyName) != nil {
+                if !force, try store.key(named: keyName) != nil {
                     throw KeyExistsError(name: keyName)
                 }
                 // Best-effort: the OpenSSL backend derives the public key
@@ -94,7 +94,7 @@ enum KeyCLI {
                                           passphrase: passphrase))
                 print("Imported '\(keyName)'. It will appear in Sloop on all your devices (iCloud Keychain).")
             case .listKeys:
-                let keys = store.keys()
+                let keys = try store.keys()
                 if keys.isEmpty { print("No keys in the library.") }
                 for key in keys {
                     print("\(key.name)\(key.passphrase != nil ? " (passphrase stored)" : "")")

@@ -7,7 +7,10 @@ import Foundation
 /// tests use `InMemoryCredentialStore`. Kept as a protocol in SloopKit so the
 /// SSH plumbing can depend on it without pulling in the Security framework.
 public protocol CredentialStore: AnyObject {
-    func credential(for hostID: UUID) -> Credential?
+    /// The host's stored secret, or nil if it genuinely has none. Throws when
+    /// the store cannot be read — see `KeyStore` for why that is not the same
+    /// answer as nil.
+    func credential(for hostID: UUID) throws -> Credential?
     func setCredential(_ credential: Credential, for hostID: UUID) throws
     func removeCredential(for hostID: UUID) throws
 }

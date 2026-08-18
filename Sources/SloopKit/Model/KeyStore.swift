@@ -33,10 +33,17 @@ public struct NamedKey: Codable, Equatable, Identifiable {
 /// Where library keys live. The app ships a keychain-backed implementation
 /// (synchronizable via iCloud Keychain); tests use `InMemoryKeyStore`. A
 /// protocol in SloopKit so resolution/migration logic stays Foundation-only.
+/// Reads throw rather than reporting failure as absence. An empty library and
+/// an unreadable one look identical to a caller that gets `[]` for both, and
+/// they are not the same answer: the keychain refuses reads outright when a
+/// build lacks the access-group entitlement, which then presents as "you have
+/// no keys" — sending the user to re-import keys that were there all along,
+/// and turning a signing problem into an auth failure at connect time.
 public protocol KeyStore: AnyObject {
-    /// All keys, sorted by name.
-    func keys() -> [NamedKey]
-    func key(named name: String) -> NamedKey?
+    /// All keys, sorted by name. Empty means the library is empty.
+    func keys() throws -> [NamedKey]
+    /// The named key, or nil if the library genuinely has no such key.
+    func key(named name: String) throws -> NamedKey?
     /// Insert or replace the key with the same name.
     func setKey(_ key: NamedKey) throws
     /// Removing an absent name is not an error.

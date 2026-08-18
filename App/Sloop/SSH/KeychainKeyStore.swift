@@ -34,35 +34,53 @@ final class KeychainKeyStore: KeyStore {
         self.accessGroup = accessGroup
     }
 
-    func keys() -> [NamedKey] {
+    func keys() throws -> [NamedKey] {
         var query = baseQuery()
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitAll
 
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let items = result as? [Data] else { return [] }
-        return items
-            .compactMap { try? JSONDecoder().decode(NamedKey.self, from: $0) }
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return [] }
+        guard status == errSecSuccess else {
+            throw keychainError(status, "reading the key library")
+        }
+        guard let items = result as? [Data] else {
+            throw keychainError(errSecInternalError, "reading the key library")
+        }
+        // A stored key that won't decode is a real fault, not an absent key.
+        // Dropping it silently is how a key appears to vanish from the library.
+        return try items
+            .map { try JSONDecoder().decode(NamedKey.self, from: $0) }
             .sorted { $0.name < $1.name }
     }
 
-    func key(named name: String) -> NamedKey? {
+    func key(named name: String) throws -> NamedKey? {
         var query = baseQuery(account: name)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { return nil }
-        return try? JSONDecoder().decode(NamedKey.self, from: data)
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else {
+            throw keychainError(status, "reading key '\(name)'")
+        }
+        guard let data = item as? Data else {
+            throw keychainError(errSecInternalError, "reading key '\(name)'")
+        }
+        return try JSONDecoder().decode(NamedKey.self, from: data)
     }
 
     func setKey(_ key: NamedKey) throws {
         let data = try JSONEncoder().encode(key)
         let query = baseQuery(account: key.name)
 
-        if SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess {
+        let existing = SecItemCopyMatching(query as CFDictionary, nil)
+        guard existing == errSecSuccess || existing == errSecItemNotFound else {
+            throw keychainError(existing, "checking for an existing key '\(key.name)'")
+        }
+        if existing == errSecSuccess {
             let update = SecItemUpdate(query as CFDictionary,
                                        [kSecValueData as String: data] as CFDictionary)
             guard update == errSecSuccess else { throw keychainError(update, "updating key '\(key.name)'") }
