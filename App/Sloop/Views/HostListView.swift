@@ -120,6 +120,8 @@ struct HostListView: View {
                     } catch {
                         importResult = "Couldn't store the Access token: \(error.localizedDescription)"
                     }
+                } onFailure: { message in
+                    importResult = message
                 }
             }
             .sheet(isPresented: $showingSupport) {
@@ -231,7 +233,11 @@ private struct HostRow: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Text(host.alias).font(.headline)
-                if host.useMosh {
+                // Gated on .direct, not just useMosh: a host decoded with both
+                // useMosh and a tunneled connectionMethod set (e.g. from
+                // JSON predating the editor's reset-on-change) actually
+                // connects over SSH, so showing "mosh" would misrepresent it.
+                if host.useMosh && host.connectionMethod == .direct {
                     Text("mosh")
                         .font(.caption2)
                         .padding(.horizontal, 5).padding(.vertical, 1)

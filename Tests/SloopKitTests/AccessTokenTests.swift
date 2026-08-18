@@ -68,4 +68,20 @@ final class AccessTokenTests: XCTestCase {
         try store.removeToken(for: "ssh.example.com")
         XCTAssertNil(store.validToken(for: "ssh.example.com"))
     }
+
+    /// Hostnames are case-insensitive but reach the store in whatever case
+    /// the user typed or an imported SSH config used, so the store must
+    /// normalize the key: setting under one case and reading under another
+    /// must resolve to the same entry.
+    func testStoreKeyIsCaseInsensitive() throws {
+        let store = InMemoryAccessTokenStore()
+        let good = jwt(["exp": Date().addingTimeInterval(3600).timeIntervalSince1970])
+
+        try store.setRawToken(good, for: "SSH.Example.com")
+        XCTAssertEqual(store.validToken(for: "ssh.example.com")?.raw, good)
+        XCTAssertEqual(store.validToken(for: "SSH.EXAMPLE.COM")?.raw, good)
+
+        try store.removeToken(for: "ssh.EXAMPLE.com")
+        XCTAssertNil(store.validToken(for: "SSH.Example.com"))
+    }
 }

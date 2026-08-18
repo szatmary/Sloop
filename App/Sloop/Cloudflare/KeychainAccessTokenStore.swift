@@ -55,7 +55,10 @@ final class KeychainAccessTokenStore: AccessTokenStore {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: hostname,
+            // Normalized so the same host always maps to the same keychain
+            // item regardless of how its hostname was typed or imported —
+            // see `normalizedAccessHostname`.
+            kSecAttrAccount as String: normalizedAccessHostname(hostname),
         ]
     }
 
