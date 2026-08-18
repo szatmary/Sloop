@@ -143,19 +143,24 @@ final class KeyEncoderTests: XCTestCase {
     }
 }
 
-/// fn + digit is how a keyboard with no F-row reaches F1–F12, so the mapping is
-/// pinned here rather than left to whichever view happens to implement it.
+/// fn + the top letter row is how this keyboard reaches F1–F12: those keys sit
+/// in the same columns the F-keys occupy on a full keyboard.
 final class FunctionLayerTests: XCTestCase {
-    func testDigitsMapToTheFunctionKeysInOrder() {
-        XCTAssertEqual(functionKeyNumber(forCharacter: "1"), 1)
-        XCTAssertEqual(functionKeyNumber(forCharacter: "9"), 9)
-        XCTAssertEqual(functionKeyNumber(forCharacter: "0"), 10)
-        XCTAssertEqual(functionKeyNumber(forCharacter: "-"), 11)
-        XCTAssertEqual(functionKeyNumber(forCharacter: "="), 12)
+    func testTopRowMapsToTheFunctionKeysInColumnOrder() {
+        XCTAssertEqual(functionKeyNumber(forCharacter: "q"), 1)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "p"), 10)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "["), 11)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "]"), 12)
     }
 
-    func testAnythingElseHasNoFunctionKey() {
-        for character in "abz[];'`,./*" {
+    /// Shift is armed often; fn+Q must still be F1 rather than nothing.
+    func testUpperCaseMapsToo() {
+        XCTAssertEqual(functionKeyNumber(forCharacter: "Q"), 1)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "P"), 10)
+    }
+
+    func testKeysOutsideThatRowHaveNoFunctionKey() {
+        for character in "asdfghjklzxcvbnm0123456789-=;'`,./" {
             XCTAssertNil(functionKeyNumber(forCharacter: character), "\(character)")
         }
     }
@@ -163,7 +168,7 @@ final class FunctionLayerTests: XCTestCase {
     /// Every number the mapping can produce must actually encode — an F13 that
     /// silently sent nothing would look like a dead key.
     func testEveryMappedFunctionKeyEncodes() {
-        for character in "1234567890-=" {
+        for character in "qwertyuiop[]" {
             let number = functionKeyNumber(forCharacter: character)!
             let bytes = KeyEncoder.bytes(for: .function(number), modifiers: [],
                                          applicationCursor: false)

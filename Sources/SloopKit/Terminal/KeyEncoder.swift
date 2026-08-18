@@ -15,21 +15,21 @@ public struct KeyModifiers: OptionSet, Hashable, Sendable {
     public static let shift = KeyModifiers(rawValue: 1 << 2)
 }
 
-/// Which function key a character stands for while the fn layer is held, in
-/// the arrangement every keyboard without an F-row uses: the digits give F1–F10
-/// in order, and the two keys past them give F11 and F12.
+/// Which function key a character stands for while the fn layer is armed.
+///
+/// The top letter row, because that is where the F-row is: on a full keyboard
+/// F1 sits directly above `1`, which sits directly above `q` — so `q` through
+/// `p` give F1 through F10, and `[` and `]` give F11 and F12, each in the same
+/// column as the key it stands for. The digits were the first attempt and are
+/// wrong for this keyboard: they live on the number pad, nowhere near the row
+/// anyone looks at when they press fn.
 ///
 /// Here rather than in the keyboard view so the mapping is testable without a
-/// device, and so there is one answer to "what is fn+8" rather than one per
-/// caller.
+/// device, and so there is one answer to "what is fn+i".
 public func functionKeyNumber(forCharacter character: Character) -> Int? {
-    switch character {
-    case "1"..."9": return character.wholeNumberValue
-    case "0":       return 10
-    case "-":       return 11
-    case "=":       return 12
-    default:        return nil
-    }
+    let topRow = Array("qwertyuiop[]")
+    guard let index = topRow.firstIndex(of: Character(character.lowercased())) else { return nil }
+    return index + 1
 }
 
 /// A non-character key on a terminal keyboard.
