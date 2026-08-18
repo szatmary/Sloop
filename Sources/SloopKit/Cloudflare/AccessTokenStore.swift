@@ -15,12 +15,13 @@ public protocol AccessTokenStore: AnyObject {
 
 public extension AccessTokenStore {
     /// The stored token, parsed, iff it exists and isn't (about to be)
-    /// expired. `nil` always means "a browser login is needed".
+    /// expired. `nil` always means "a browser login is needed". Delegates the
+    /// parse-and-expiry check to `AccessToken.usable(raw:)` so this and the
+    /// cookie-capture path in `AccessLoginView` can never disagree about what
+    /// counts as a usable token.
     func validToken(for hostname: String) -> AccessToken? {
-        guard let raw = rawToken(for: hostname),
-              let token = AccessToken(raw: raw),
-              !token.isExpired else { return nil }
-        return token
+        guard let raw = rawToken(for: hostname) else { return nil }
+        return AccessToken.usable(raw: raw)
     }
 }
 

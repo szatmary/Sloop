@@ -31,6 +31,19 @@ public struct AccessToken: Equatable {
         Date() >= expiresAt.addingTimeInterval(-Self.expirySkew)
     }
 
+    /// The one predicate every consumer of a raw `CF_Authorization` value must
+    /// agree on before treating it as usable: it has to parse as a JWT *and*
+    /// not be (about to be) expired. `AccessTokenStore.validToken(for:)` uses
+    /// this to decide whether a stored token still needs a browser login, and
+    /// `AccessLoginView`'s cookie capture uses the same rule to decide whether
+    /// a captured cookie is worth committing — otherwise the two can disagree
+    /// (capture accepts a token the store then immediately rejects) and the
+    /// app blames the user for a token it captured itself.
+    public static func usable(raw: String) -> AccessToken? {
+        guard let token = AccessToken(raw: raw), !token.isExpired else { return nil }
+        return token
+    }
+
     private struct Payload: Decodable {
         let exp: Double
         let aud: Audience?

@@ -105,13 +105,24 @@ private struct AccessWebView {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             // After every completed navigation (IdP redirects included), look
-            // for the Access cookie scoped to our hostname.
+            // for the Access cookie scoped to our hostname. Matching also
+            // requires the cookie's value to be a currently-usable token
+            // (`AccessToken.usable(raw:)` — the same rule `AccessTokenStore`
+            // applies at connect time): the browser can still be holding a
+            // `CF_Authorization` cookie in its last ~60 s before expiry, and
+            // committing that would just hand `TransportFactory` a token it's
+            // guaranteed to refuse. Skipping it here leaves the sheet waiting
+            // for a better one instead of capturing a token doomed to fail —
+            // Cancel and the load-failure delegate methods below still fire
+            // independently, so this can't turn into a silent, un-escapable
+            // hang.
             webView.configuration.websiteDataStore.httpCookieStore
                 .getAllCookies { [weak self] cookies in
                     guard let self, !self.delivered else { return }
                     let match = cookies.first { cookie in
                         cookie.name == "CF_Authorization"
                             && accessCookieDomainMatches(cookieDomain: cookie.domain, hostname: self.hostname)
+                            && AccessToken.usable(raw: cookie.value) != nil
                     }
                     if let match {
                         self.delivered = true
