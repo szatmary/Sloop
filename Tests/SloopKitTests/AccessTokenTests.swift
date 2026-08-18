@@ -142,6 +142,52 @@ final class AccessTokenTests: XCTestCase {
         XCTAssertEqual(store.validToken(for: "after.example.com")?.raw, good)
     }
 
+    // MARK: shared tokens
+
+    /// Two saved hosts behind one Access application share a token, because
+    /// the token *is* that application's session. Deleting one of them used
+    /// to remove it anyway, silently signing the user out of the other — an
+    /// invisible side effect of deleting something unrelated.
+    func testTokenIsStillNeededByAnotherHostOnTheSameAccessHostname() {
+        let remaining = [
+            SSHHost(alias: "staging", hostname: "ssh.example.com", username: "matt",
+                    connectionMethod: .cloudflareAccess),
+        ]
+        XCTAssertTrue(accessTokenIsStillNeeded(for: "ssh.example.com", by: remaining))
+    }
+
+    /// Hostnames reach here in whatever case the user typed, so the check
+    /// normalizes the same way the storage key does — otherwise "SSH.Example"
+    /// and "ssh.example" look like different applications and the token is
+    /// deleted out from under one of them.
+    func testTokenNeedIsCaseInsensitive() {
+        let remaining = [
+            SSHHost(alias: "staging", hostname: "SSH.Example.COM", username: "matt",
+                    connectionMethod: .cloudflareAccess),
+        ]
+        XCTAssertTrue(accessTokenIsStillNeeded(for: "ssh.example.com", by: remaining))
+    }
+
+    /// Nothing left that would use it: the token must go, since a bearer
+    /// credential has no business outliving every host it was captured for.
+    func testTokenIsNotNeededWhenNoAccessHostRemains() {
+        XCTAssertFalse(accessTokenIsStillNeeded(for: "ssh.example.com", by: []))
+        let unrelated = [
+            SSHHost(alias: "other", hostname: "other.example.com", username: "matt",
+                    connectionMethod: .cloudflareAccess),
+        ]
+        XCTAssertFalse(accessTokenIsStillNeeded(for: "ssh.example.com", by: unrelated))
+    }
+
+    /// A host that happens to share the hostname but doesn't go through
+    /// Access has no use for the token and must not keep it alive.
+    func testDirectHostOnTheSameHostnameDoesNotKeepTheToken() {
+        let remaining = [
+            SSHHost(alias: "direct", hostname: "ssh.example.com", username: "matt"),
+        ]
+        XCTAssertFalse(accessTokenIsStillNeeded(for: "ssh.example.com", by: remaining))
+    }
+
     /// Hostnames are case-insensitive but reach the store in whatever case
     /// the user typed or an imported SSH config used, so the store must
     /// normalize the key: setting under one case and reading under another

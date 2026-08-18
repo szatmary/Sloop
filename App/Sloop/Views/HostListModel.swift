@@ -96,15 +96,19 @@ final class HostListModel: ObservableObject {
 
     func delete(_ host: SSHHost) {
         try? credentials.removeCredential(for: host.id)
-        // A bearer credential outliving the user's decision to delete the
-        // host is wrong on its own, independent of anything else: the token
-        // is a live means of connecting as this host and must not survive
-        // the host it was captured for.
-        if host.connectionMethod == .cloudflareAccess {
-            try? accessTokens.removeToken(for: host.hostname)
-        }
         store.remove(host)
         hosts = store.hosts
+        // A bearer credential outliving the user's decision to delete the
+        // host is wrong on its own: the token is a live means of connecting
+        // as this host and must not survive it. But the token is keyed by
+        // hostname, so it may belong to hosts that are still here — deleting
+        // one entry for a shared Access bastion silently signed the user out
+        // of the others. Checked after the store update, so `hosts` is what
+        // actually remains.
+        if host.connectionMethod == .cloudflareAccess,
+           !accessTokenIsStillNeeded(for: host.hostname, by: hosts) {
+            try? accessTokens.removeToken(for: host.hostname)
+        }
     }
 
     /// True when connecting to this host must be preceded by a Cloudflare
@@ -125,6 +129,11 @@ final class HostListModel: ObservableObject {
     /// `TokenClearingDialer` in `TransportFactory`, which does the same
     /// thing automatically on a rejected dial) — a way out without waiting
     /// for the JWT's own `exp` to pass.
+    ///
+    /// Hostname-wide, unlike `delete(_:)`: the token is one Access
+    /// application's session, and a user asking to sign out of it means all
+    /// of it, including any other saved host sitting behind the same Access
+    /// hostname.
     ///
     /// Clearing the stored token is enough to make this a real sign-out:
     /// `AccessLoginView` runs on a non-persistent website data store, so the

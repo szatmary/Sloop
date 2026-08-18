@@ -44,6 +44,28 @@ public func normalizedAccessHostname(_ hostname: String) -> String {
     hostname.lowercased()
 }
 
+/// Whether any of `hosts` still reaches `hostname` through Cloudflare Access,
+/// and so still needs the token stored for it.
+///
+/// Tokens are keyed by hostname, not by host id — deliberately, because that
+/// is what they are: one Access application's session, which several saved
+/// hosts may legitimately sit behind (a bastion with two aliases, prod and
+/// staging entries pointing at one Access app). Signing in once for all of
+/// them is the right behaviour, and so is signing *out* of all of them at once
+/// when the user asks.
+///
+/// Deleting one of those hosts is the case that has to be careful. It used to
+/// remove the shared token unconditionally, which logged the user out of every
+/// other host on the same Access hostname — an invisible side effect of
+/// deleting something unrelated. Call this with the hosts that remain: the
+/// token goes only when nothing is left that would use it.
+public func accessTokenIsStillNeeded(for hostname: String, by hosts: [SSHHost]) -> Bool {
+    let key = normalizedAccessHostname(hostname)
+    return hosts.contains {
+        $0.connectionMethod == .cloudflareAccess && normalizedAccessHostname($0.hostname) == key
+    }
+}
+
 /// A non-persistent token store for tests and previews.
 ///
 /// `@unchecked Sendable` is earned by the lock, not assumed: every access to

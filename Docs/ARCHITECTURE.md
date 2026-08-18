@@ -108,6 +108,11 @@ Tokens live behind the `AccessTokenStore` protocol
 ([`Sources/SloopKit/Cloudflare/AccessTokenStore.swift`](../Sources/SloopKit/Cloudflare/AccessTokenStore.swift)),
 keyed by lowercased hostname — a Keychain-backed implementation in the app
 (one generic-password item per hostname), `InMemoryAccessTokenStore` in tests.
+The key is the hostname rather than the host id because the token *is* one
+Access application's session: several saved hosts may sit behind one Access
+app and share it. So signing out is hostname-wide on purpose, while deleting a
+host only drops the token when no remaining host still reaches that hostname
+through Access (`accessTokenIsStillNeeded(for:by:)`).
 `AccessToken` parses only the JWT payload's `exp`/`aud` client-side (no
 signature check: the app is the bearer, not the verifier) to decide if a
 stored token is still worth trying before dialing. A WebSocket upgrade that
