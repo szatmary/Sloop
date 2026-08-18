@@ -295,6 +295,104 @@ final class CloudflareAccessDialerTests: XCTestCase {
                       "token header value must be sent verbatim (case-sensitive); got:\n\(server.request)")
     }
 
+    /// A server that answers the upgrade with an ordinary HTTP response — a
+    /// captive portal, a proxy's own page, an Access app that isn't a tunnel —
+    /// must fail the dial at once, naming what came back.
+    func testPlainHTTPAnswerToAnUpgradeFailsImmediately() throws {
+        let server = try CannedHTTPServer(
+            response: "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+        server.start()
+        defer { server.listener.cancel() }
+
+        let dialer = CloudflareAccessDialer(
+            url: URL(string: "ws://127.0.0.1:\(server.port)")!,
+            hostname: "ssh.example.com", token: "test-token",
+            openTimeout: 20)
+
+        let started = Date()
+        XCTAssertThrowsError(try dialer.dial()) { error in
+            guard case SSHError.connectionFailed(let why) = error else {
+                return XCTFail("expected connectionFailed, got \(error)")
+            }
+            XCTAssertTrue(why.contains("200"), "should name what the server answered: \(why)")
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5,
+                          "must fail on the completion, not wait out the handshake timeout")
+    }
+
+    /// `dial()`'s liveness must not rest on an undocumented URLSession
+    /// guarantee. The delegate contract allows a task to complete with a nil
+    /// error, and a WebSocket task can complete without ever having opened;
+    /// nothing promises those two can't coincide. When
+    /// `didCompleteWithError` returned early on a nil error, that
+    /// combination left `dial()` parked in `opened.wait()` for the whole
+    /// handshake timeout and then reported a timeout that described nothing
+    /// that had happened.
+    ///
+    /// No server behaviour has been found that produces it — 200, 204, a
+    /// bogus 101, an immediate close and outright garbage all arrive with an
+    /// error attached on macOS 26.5 — so the completion is delivered here
+    /// directly, against a real dial that is genuinely blocked mid-handshake
+    /// (the server accepts and never answers). The delegate ignores its
+    /// `session`/`task` arguments, reading the dialer's own task for the
+    /// response, so a throwaway task stands in for URLSession's.
+    func testCompletionWithoutAnErrorOrAnUpgradeStillFailsTheDial() throws {
+        let silent = try NWListener(using: .tcp, on: .any)
+        let ready = DispatchSemaphore(value: 0)
+        silent.stateUpdateHandler = { if case .ready = $0 { ready.signal() } }
+        // Accept, then never answer: the handshake hangs until something else
+        // ends it.
+        silent.newConnectionHandler = { $0.start(queue: .global()) }
+        silent.start(queue: .global())
+        ready.wait()
+        defer { silent.cancel() }
+
+        let dialer = CloudflareAccessDialer(
+            url: URL(string: "ws://127.0.0.1:\(silent.port!.rawValue)")!,
+            hostname: "ssh.example.com", token: "test-token",
+            openTimeout: 60)
+
+        final class Outcome: @unchecked Sendable {
+            private let lock = NSLock()
+            private var storage: (error: Error?, elapsed: TimeInterval)?
+            func record(_ error: Error?, _ elapsed: TimeInterval) {
+                lock.lock(); storage = (error, elapsed); lock.unlock()
+            }
+            var value: (error: Error?, elapsed: TimeInterval)? {
+                lock.lock(); defer { lock.unlock() }; return storage
+            }
+        }
+        let outcome = Outcome()
+        let dialReturned = expectation(description: "dial() returned")
+        Thread.detachNewThread {
+            let started = Date()
+            do {
+                let fd = try dialer.dial()
+                close(fd)
+                outcome.record(nil, Date().timeIntervalSince(started))
+            } catch {
+                outcome.record(error, Date().timeIntervalSince(started))
+            }
+            dialReturned.fulfill()
+        }
+
+        Thread.sleep(forTimeInterval: 0.3)   // let dial() reach its wait
+        let throwaway = URLSession.shared.dataTask(
+            with: URL(string: "https://example.invalid")!)
+        dialer.urlSession(.shared, task: throwaway, didCompleteWithError: nil)
+
+        wait(for: [dialReturned], timeout: 10)
+        let result = try XCTUnwrap(outcome.value)
+        XCTAssertLessThan(result.elapsed, 10,
+                          "a task that completed without opening must fail the dial there and "
+                        + "then, not leave it waiting out the handshake timeout")
+        guard case SSHError.connectionFailed(let why)? = result.error else {
+            return XCTFail("expected connectionFailed, got \(String(describing: result.error))")
+        }
+        XCTAssertTrue(why.contains("before the WebSocket upgrade"),
+                      "the error must describe what happened: \(why)")
+    }
+
     func testMapsRedirectToAccessLoginRequired() throws {
         // Stand-in for the IdP the Access redirect would send a *following*
         // client to. Asserting this listener is never contacted is what

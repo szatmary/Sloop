@@ -138,10 +138,16 @@ public final class CloudflareAccessDialer: NSObject, Dialer {
             tearDown()
             throw SSHError.connectionFailed("timed out connecting to \(hostname)")
         }
+        // `didOpen`, not "was there an error": the WebSocket either upgraded
+        // or it didn't, and it can fail to upgrade without anything reporting
+        // an error at all — a server that answers the upgrade with an
+        // ordinary HTTP response completes the task successfully and simply
+        // never opens a WebSocket.
         handshakeLock.lock()
+        let handshakeSucceeded = didOpen
         let handshakeFailure = openError
         handshakeLock.unlock()
-        if let handshakeFailure {
+        guard handshakeSucceeded else {
             defer { tearDown() }
             throw mapOpenFailure(handshakeFailure)
         }
@@ -282,21 +288,27 @@ public final class CloudflareAccessDialer: NSObject, Dialer {
         }
     }
 
-    /// Read the HTTP status behind a failed upgrade and name the real problem.
-    private func mapOpenFailure(_ error: Error) -> Error {
-        guard let http = task?.response as? HTTPURLResponse else {
-            return SSHError.connectionFailed(
-                "\(hostname): \(error.localizedDescription)")
+    /// Read the HTTP status behind a failed upgrade and name the real
+    /// problem. `error` is optional because an upgrade can fail without one:
+    /// a plain HTTP answer where a 101 was expected is a *successfully*
+    /// completed task that happens not to be a WebSocket.
+    private func mapOpenFailure(_ error: Error?) -> Error {
+        if let http = task?.response as? HTTPURLResponse {
+            switch http.statusCode {
+            case 300...399, 401:                       // Access bounce to the IdP
+                return SSHError.accessLoginRequired(host: hostname)
+            case 403:
+                return SSHError.accessDenied(host: hostname)
+            default:
+                return SSHError.connectionFailed(
+                    "\(hostname): HTTP \(http.statusCode) during WebSocket upgrade")
+            }
         }
-        switch http.statusCode {
-        case 300...399, 401:                       // Access bounce to the IdP
-            return SSHError.accessLoginRequired(host: hostname)
-        case 403:
-            return SSHError.accessDenied(host: hostname)
-        default:
-            return SSHError.connectionFailed(
-                "\(hostname): HTTP \(http.statusCode) during WebSocket upgrade")
+        if let error {
+            return SSHError.connectionFailed("\(hostname): \(error.localizedDescription)")
         }
+        return SSHError.connectionFailed(
+            "\(hostname): the connection closed before the WebSocket upgrade completed")
     }
 
     /// Idempotent, and callable from any of the threads that can discover the
@@ -326,9 +338,16 @@ extension CloudflareAccessDialer: URLSessionWebSocketDelegate, URLSessionTaskDel
         opened.signal()
     }
 
+    /// Note the missing `guard let error`. A task that ends without ever
+    /// opening a WebSocket has to unblock `dial()` whether or not anything
+    /// called it an error — a server answering the upgrade with an ordinary
+    /// HTTP response (a 200, a captive portal, a proxy's own page) completes
+    /// the task *successfully*, and treating that as nothing to report left
+    /// `dial()` parked in `opened.wait()` for the full 20 s timeout before it
+    /// gave up with a message about timing out that described nothing that
+    /// happened.
     public func urlSession(_ session: URLSession, task: URLSessionTask,
                            didCompleteWithError error: Error?) {
-        guard let error else { return }
         handshakeLock.lock()
         let isPreOpenFailure = !didOpen
         if isPreOpenFailure { openError = error }
