@@ -37,8 +37,9 @@ Implementations:
 
 - **`LibSSH2Transport`** — libssh2 shell channel. Lives in `App/Sloop/SSH/`
   (not SloopKit), and takes a `Dialer` — see "Dialers" below.
-- **`MoshTransport`** — Mosh SSP over UDP. Not started; `MoshBootstrap` parses
-  the handshake it will need.
+- **`MoshTransport`** — Mosh SSP over UDP, via the C++ bridge in
+  `App/Sloop/SSH/`. Built in the Mosh variant only (`project.mosh.yml`);
+  elsewhere `MoshOrSSHTransport` probes and falls back to SSH.
 
 `SwiftTermView.Coordinator` is the only place the two worlds meet: it implements
 `TerminalViewDelegate` (SwiftTerm → us) and pumps `onData` back into the view.

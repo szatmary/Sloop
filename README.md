@@ -4,8 +4,9 @@ A free, native terminal for Apple platforms — iPhone, iPad, Mac, and tvOS.
 SSH and Mosh, a real terminal emulator, and proper keyboard support — a
 first-class mobile shell, native and given away.
 
-> **Status: early scaffold.** The core library and app skeleton are in place;
-> SSH (libssh2) and Mosh both work end-to-end. See
+> **Status: early scaffold.** The core library and app are in place; SSH
+> (libssh2), Mosh, and Cloudflare Access tunnels are implemented and unit
+> tested, but none has been validated against real hardware yet. See
 > [`Docs/ROADMAP.md`](Docs/ROADMAP.md) for what's left before it ships.
 
 ## Architecture
