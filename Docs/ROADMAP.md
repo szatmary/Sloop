@@ -9,8 +9,9 @@ top of a working SSH terminal rather than first.
 - SloopKit core: `Transport`, `TerminalSession`, `Host`, `HostStore`,
   `Credential`, `LibSSH2Transport` skeleton, `MoshBootstrap`.
 - SwiftUI multiplatform app wrapping SwiftTerm; host list + editor.
-- A local echo terminal ran here as the first thing on screen; it was removed
-  once SSH and Mosh both worked, since it only ever demonstrated the seam.
+- ~~**Local terminal** (echo) runs on device/simulator~~ — removed once SSH and
+  Mosh both worked: a fake shell that echoed keystrokes and connected to
+  nothing was a dead end, not a feature (`Drop the local echo terminal`).
 - Unit tests for Mosh handshake parsing and host persistence.
 
 ## M1 — SSH terminal ✅
@@ -62,6 +63,23 @@ top of a working SSH terminal rather than first.
 - [ ] Background-connection handling and reconnect polish (Mosh roaming exists;
       exercise it on-device).
 
+## Tunnels — Cloudflare Access ✅, Tailscale next
+
+- [x] `Dialer` seam (`TCPDialer` wraps the existing direct-connect path, no
+      behavior change) + `SSHHost.connectionMethod`. See
+      [`Docs/ARCHITECTURE.md`](ARCHITECTURE.md).
+- [x] Cloudflare Access: native WebSocket carrier (`CloudflareAccessDialer`),
+      browser SSO (`AccessLoginView`), Keychain-backed token store. SSH-only —
+      Mosh needs UDP, which the tunnel can't carry. Unit-tested; **not yet
+      run against a real Cloudflare Tunnel** — see the checklist in
+      [`Docs/HANDOFF.md`](HANDOFF.md).
+- [ ] Tailscale via embedded TailscaleKit — separate plan, gated on a
+      real-device smoke test of the vendored framework before any integration
+      work starts (a past iOS sandbox failure in the same code path,
+      tailscale/tailscale#15410, is closed but unverified against the current
+      release). See
+      [`Docs/superpowers/specs/2026-08-12-tunnel-integrations-design.md`](superpowers/specs/2026-08-12-tunnel-integrations-design.md).
+
 ## Deferred
 
 - **tvOS app** — blocked on SwiftTerm: its UIKit terminal views don't compile
@@ -87,9 +105,12 @@ top of a working SSH terminal rather than first.
   to diagnose and cannot be recovered from automatically. It wants its own
   piece of work: it changes `ConnectionState`, which both the terminal UI and
   the tunnel work build on. (Found by the Cloudflare Access session, 2026-08.)
-- ~~On-connect command~~ → DONE: a per-host command typed into the PTY on every
-  connect and reconnect, with `tmux attach || tmux new` offered as a suggestion
-  above the keyboard. Visible in the terminal, so Ctrl-C leaves the plain shell.
+- ~~On-connect command~~ → DONE: a per-host command (`SSHHost.onConnectCommand`,
+  set in the host editor) typed into the PTY as ordinary input once it opens,
+  and again on every reconnect — the motivating case is `tmux attach || tmux
+  new`, so a dropped connection lands back in the same session instead of a
+  bare prompt. Offered as a suggestion above the keyboard, and visible in the
+  terminal, so Ctrl-C leaves the plain shell.
 - **Custom compact keyboard** — replace the system keyboard with a
   terminal-shaped one via SwiftTerm's settable `inputView`, folding today's
   smart-keys bar into the keyboard instead of stacking a row above it. The

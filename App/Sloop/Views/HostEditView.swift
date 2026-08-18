@@ -94,7 +94,37 @@ struct HostEditView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         #endif
-                    Stepper("Port: \(host.port)", value: $host.port, in: 1...65535)
+                    // Driven by the enum, not by a hand-written pair: a host
+                    // saved as .tailscale used to open this editor with no
+                    // matching option at all, so the picker showed nothing
+                    // selected and saving silently reinterpreted the host.
+                    Picker("Connect via", selection: $host.connectionMethod) {
+                        ForEach(ConnectionMethod.allCases, id: \.self) { method in
+                            Text(method.displayName).tag(method)
+                        }
+                    }
+
+                    // A switch rather than an if/else, so a new connection
+                    // method has to answer "and what does its port mean?"
+                    // here rather than inheriting whatever the else branch
+                    // happens to do.
+                    switch host.connectionMethod {
+                    case .direct:
+                        Stepper("Port: \(host.port)", value: $host.port, in: 1...65535)
+                    case .cloudflareAccess:
+                        // No port: wss/443 outside the tunnel, sshd inside it.
+                        Text("The hostname above is the Access application's public hostname. A browser sign-in runs on first connect.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    case .tailscale:
+                        // The port is a real port here — the hostname is a
+                        // MagicDNS name or tailnet address and sshd listens
+                        // on it as usual.
+                        Stepper("Port: \(host.port)", value: $host.port, in: 1...65535)
+                        Text("Tailscale isn't built into this app yet, so a host set to it can't connect — see Docs/ROADMAP.md.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Authentication") {
@@ -189,6 +219,7 @@ struct HostEditView: View {
                 Section("Options") {
                     HStack {
                         Toggle("Use Mosh", isOn: $host.useMosh)
+                            .disabled(host.connectionMethod != .direct)
                         Button {
                             showingMoshHelp = true
                         } label: {
@@ -197,7 +228,15 @@ struct HostEditView: View {
                         .buttonStyle(.borderless)
                         .accessibilityLabel("What is Mosh?")
                     }
+                    if host.connectionMethod != .direct {
+                        Text("Mosh needs UDP, which can't pass through this tunnel — SSH is used instead.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+            }
+            .onChange(of: host.connectionMethod) { _, method in
+                if method != .direct { host.useMosh = false }
             }
             .navigationTitle(host.hostname.isEmpty ? "New Host" : host.alias)
             #if os(iOS)

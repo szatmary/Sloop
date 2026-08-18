@@ -29,6 +29,7 @@ final class LibSSH2Transport: Transport {
     private let credential: Credential
     private let knownHosts: KnownHostsStore
     private let hostKeyVerifier: HostKeyVerifier
+    private let dialer: Dialer
 
     private let lock = NSLock()
     private var outbound: [UInt8] = []
@@ -37,10 +38,12 @@ final class LibSSH2Transport: Transport {
 
     init(host: SSHHost,
          credential: Credential,
+         dialer: Dialer,
          knownHosts: KnownHostsStore,
          hostKeyVerifier: HostKeyVerifier = AutoAcceptHostKeyVerifier()) {
         self.host = host
         self.credential = credential
+        self.dialer = dialer
         self.knownHosts = knownHosts
         self.hostKeyVerifier = hostKeyVerifier
     }
@@ -78,7 +81,7 @@ final class LibSSH2Transport: Transport {
 
         let sock: Int32
         do {
-            sock = try openSocket(host: host.hostname, port: host.port)
+            sock = try dialer.dial()
         } catch {
             return finish(error)
         }
@@ -359,32 +362,6 @@ final class LibSSH2Transport: Transport {
         case LIBSSH2_HOSTKEY_TYPE_ED25519: return "ssh-ed25519"
         default: return "unknown"
         }
-    }
-
-    /// Resolve `host:port` and return a connected blocking TCP socket.
-    private func openSocket(host: String, port: Int) throws -> Int32 {
-        var hints = addrinfo(ai_flags: 0, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM,
-                             ai_protocol: IPPROTO_TCP, ai_addrlen: 0,
-                             ai_canonname: nil, ai_addr: nil, ai_next: nil)
-        var result: UnsafeMutablePointer<addrinfo>?
-        let status = getaddrinfo(host, String(port), &hints, &result)
-        guard status == 0, let addrs = result else {
-            throw SSHError.connectionFailed("cannot resolve \(host)")
-        }
-        defer { freeaddrinfo(addrs) }
-
-        var info: UnsafeMutablePointer<addrinfo>? = addrs
-        while let candidate = info {
-            let fd = socket(candidate.pointee.ai_family, candidate.pointee.ai_socktype, candidate.pointee.ai_protocol)
-            if fd >= 0 {
-                if connect(fd, candidate.pointee.ai_addr, candidate.pointee.ai_addrlen) == 0 {
-                    return fd
-                }
-                Darwin.close(fd)
-            }
-            info = candidate.pointee.ai_next
-        }
-        throw SSHError.connectionFailed("cannot connect to \(host):\(port)")
     }
 }
 #endif

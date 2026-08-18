@@ -15,6 +15,7 @@ struct HostListView: View {
     @ObservedObject private var hostKeyPrompter = HostKeyPrompter.shared
     @ObservedObject private var appearance = AppearanceStore.shared
     @State private var editing: SSHHost?
+    @State private var accessLogin: SSHHost?
     @State private var showingSupport = false
     @State private var showingSettings = false
     @State private var showingTerminal = false
@@ -90,6 +91,14 @@ struct HostListView: View {
                             Button { editing = host } label: {
                                 Label("Edit…", systemImage: "pencil")
                             }
+                            if host.connectionMethod == .cloudflareAccess {
+                                Button {
+                                    run { try model.signOutOfCloudflareAccess(host) }
+                                } label: {
+                                    Label("Sign Out of Cloudflare Access",
+                                          systemImage: "person.crop.circle.badge.xmark")
+                                }
+                            }
                             Button(role: .destructive) { delete(host) } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -143,6 +152,26 @@ struct HostListView: View {
                              onSaveKey: { try model.saveLibraryKey($0) },
                              onSave: { try model.save($0, credential: $1) })
             }
+            .sheet(item: $accessLogin) { host in
+                AccessLoginView(hostname: host.hostname) { outcome in
+                    switch outcome {
+                    case .token(let token):
+                        do {
+                            try model.storeAccessToken(token, for: host)
+                            open(try model.connect(host))
+                        } catch {
+                            importResult = "Couldn't store the Access token: \(error.localizedDescription)"
+                        }
+                    case .cancelled:
+                        // The user closed the sheet. They know; telling them
+                        // so in an alert is the app arguing with a button
+                        // they pressed on purpose.
+                        break
+                    case .failed(let message):
+                        importResult = message
+                    }
+                }
+            }
             .sheet(isPresented: $showingSupport) {
                 SupportView()
             }
@@ -164,7 +193,7 @@ struct HostListView: View {
                     importResult = error.localizedDescription
                 }
             }
-            .alert("Import SSH Config", isPresented: Binding(
+            .alert("Sloop", isPresented: Binding(
                 get: { importResult != nil },
                 set: { if !$0 { importResult = nil } })
             ) {
@@ -192,12 +221,6 @@ struct HostListView: View {
         }
     }
 
-    /// Resolve the host's credential and open a session. A credential that
-    /// can't be read stops the connect: attempting it anyway produces an
-    /// authentication failure that says nothing about the real cause.
-    private func connect(_ host: SSHHost) {
-        run { open(try model.connect(host)) }
-    }
 
     private func delete(_ host: SSHHost) {
         run { try model.delete(host) }
@@ -216,6 +239,24 @@ struct HostListView: View {
     private func open(_ session: TerminalSession) {
         sessions.openSession(session)
         showingTerminal = true
+    }
+
+    /// Connect, first running the Cloudflare Access browser login when the host
+    /// needs a (fresh) token.
+    ///
+    /// Anything that can't be read stops the connect and says why. Going ahead
+    /// without a credential produces an authentication failure on the far side
+    /// that says nothing about the actual cause, and going ahead without being
+    /// able to check for a token sends the user to a browser login that cannot
+    /// fix a keychain.
+    private func connect(_ host: SSHHost) {
+        run {
+            if try model.needsAccessLogin(host) {
+                accessLogin = host
+            } else {
+                open(try model.connect(host))
+            }
+        }
     }
 
     /// Whether a live session is already open for this host. Sessions are
@@ -344,11 +385,22 @@ private struct HostRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(host.alias).font(.headline)
-                    if host.useMosh {
+                    // Gated on .direct, not just useMosh: a host decoded with
+                    // both useMosh and a tunneled connectionMethod set (e.g.
+                    // from JSON predating the editor's reset-on-change)
+                    // actually connects over SSH, so showing "mosh" would
+                    // misrepresent it.
+                    if host.useMosh && host.connectionMethod == .direct {
                         Text("mosh")
                             .font(.caption2)
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(.tint.opacity(0.2), in: Capsule())
+                    }
+                    if host.connectionMethod == .cloudflareAccess {
+                        Text("cloudflare")
+                            .font(.caption2)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(.orange.opacity(0.2), in: Capsule())
                     }
                     if isUnderway {
                         // Underway: this host already has a live session.

@@ -34,6 +34,7 @@ final class HostListModel: ObservableObject {
     private let store = HostStore()
     private let knownHosts = KnownHostsStore()
     private let credentials: CredentialStore
+    private let accessTokens: AccessTokenStore
     private let keys: KeyStore
     private let defaults: UserDefaults
 
@@ -41,9 +42,11 @@ final class HostListModel: ObservableObject {
         self.defaults = defaults
         #if canImport(Security)
         credentials = KeychainCredentialStore()
+        accessTokens = KeychainAccessTokenStore()
         keys = KeychainKeyStore()
         #else
         credentials = InMemoryCredentialStore()
+        accessTokens = InMemoryAccessTokenStore()
         keys = InMemoryKeyStore()
         #endif
         hosts = store.hosts
@@ -132,6 +135,51 @@ final class HostListModel: ObservableObject {
         store.remove(host)
         hosts = store.hosts
         try credentials.removeCredential(for: host.id)
+        // A bearer credential outliving the user's decision to delete the
+        // host is wrong on its own: the token is a live means of connecting
+        // as this host and must not survive it. But the token is keyed by
+        // hostname, so it may belong to hosts that are still here — deleting
+        // one entry for a shared Access bastion silently signed the user out
+        // of the others. Checked after the store update, so `hosts` is what
+        // actually remains.
+        if host.connectionMethod == .cloudflareAccess,
+           !accessTokenIsStillNeeded(for: host.hostname, by: hosts) {
+            try accessTokens.removeToken(for: host.hostname)
+        }
+    }
+
+    /// True when connecting to this host must be preceded by a Cloudflare
+    /// Access browser login (no stored token, or it expired).
+    func needsAccessLogin(_ host: SSHHost) throws -> Bool {
+        try host.connectionMethod == .cloudflareAccess
+            && accessTokens.validToken(for: host.hostname) == nil
+    }
+
+    /// Persist a freshly captured Access token for the host's hostname.
+    func storeAccessToken(_ raw: String, for host: SSHHost) throws {
+        try accessTokens.setRawToken(raw, for: host.hostname)
+    }
+
+    /// Clear the stored Cloudflare Access token for this host, so the next
+    /// connection attempt opens a fresh browser login. This is the user's
+    /// manual escape from a token the edge keeps rejecting (see
+    /// `TokenClearingDialer` in `TransportFactory`, which does the same
+    /// thing automatically on a rejected dial) — a way out without waiting
+    /// for the JWT's own `exp` to pass.
+    ///
+    /// Hostname-wide, unlike `delete(_:)`: the token is one Access
+    /// application's session, and a user asking to sign out of it means all
+    /// of it, including any other saved host sitting behind the same Access
+    /// hostname.
+    ///
+    /// Clearing the stored token is enough to make this a real sign-out:
+    /// `AccessLoginView` runs on a non-persistent website data store, so the
+    /// web view keeps no `CF_Authorization` cookie of its own between
+    /// presentations and the next sheet has to go through Access and the IdP
+    /// again. (When it kept a persistent store, the sheet re-captured the very
+    /// token this method had just removed, which made signing out a no-op.)
+    func signOutOfCloudflareAccess(_ host: SSHHost) throws {
+        try accessTokens.removeToken(for: host.hostname)
     }
 
     /// Build a session for a host, pulling its credential from the store. The
@@ -151,17 +199,23 @@ final class HostListModel: ObservableObject {
         let credential = try KeyLibrary.credential(for: host, keys: keys, credentials: credentials)
             ?? Credential()
         let knownHosts = self.knownHosts
+        let accessTokens = self.accessTokens
 
+        // Resolves the Access token at call time, so a reconnect after a fresh
+        // login picks up the new token.
         let makeSSH: () -> Transport = {
             TransportFactory.ssh(host: host,
                                  credential: credential,
                                  knownHosts: knownHosts,
-                                 hostKeyVerifier: HostKeyPrompter.shared)
+                                 hostKeyVerifier: HostKeyPrompter.shared,
+                                 accessTokens: accessTokens)
         }
 
         return TerminalSession(title: host.alias,
                                onConnectCommand: host.trimmedOnConnectCommand) {
-            guard host.useMosh else { return makeSSH() }
+            // Mosh needs UDP, which no tunnel method carries — tunneled hosts
+            // are SSH-only regardless of the saved toggle.
+            guard host.useMosh, host.connectionMethod == .direct else { return makeSSH() }
             // The real Mosh UDP/SSP transport is only built into the Mosh variant
             // (project.mosh.yml, which defines SLOOP_MOSH); elsewhere
             // `makeMoshTransport` stays nil and the composite transport falls back

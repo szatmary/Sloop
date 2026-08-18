@@ -6,8 +6,9 @@ first-class mobile shell, native and given away.
 
 > **Status: working, unreleased.** SSH (libssh2 + OpenSSL 3) and Mosh both
 > connect on device, with a shared key library synced through iCloud Keychain
-> and host-key pinning. Not yet signed for distribution or tested across the
-> full range of key types. See [`Docs/ROADMAP.md`](Docs/ROADMAP.md).
+> and host-key pinning. Cloudflare Access tunnels are implemented and unit
+> tested but not yet exercised against a live Access application. Not signed
+> for distribution. See [`Docs/ROADMAP.md`](Docs/ROADMAP.md).
 
 ## Architecture
 
@@ -36,9 +37,10 @@ open Sloop.xcodeproj
 ```
 
 Pick the `Sloop_iOS` or `Sloop_macOS` scheme and run, then add a host and
-connect. The plain `project.yml` builds without SSH: link the libssh2
-xcframework (`Docs/SSH.md`) for real connections, and generate from
-`project.mosh.yml` to include Mosh (`Docs/MOSH.md`). tvOS is deferred — see
+connect. The plain `project.yml` builds without SSH, and each host shows build
+instructions instead of connecting: link the libssh2 xcframework
+(`Docs/SSH.md`) for real connections, and generate from `project.mosh.yml` to
+include Mosh (`Docs/MOSH.md`). tvOS is deferred — see
 `Docs/ROADMAP.md`.
 
 On a Mac, `Scripts/sloop import-key ~/.ssh/id_ed25519` puts a key into the

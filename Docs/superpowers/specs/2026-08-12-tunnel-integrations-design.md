@@ -3,6 +3,24 @@
 _Approved 2026-08-12. Feature: reach SSH hosts behind Cloudflare Tunnel or on a
 Tailscale tailnet from inside the app, on iOS and macOS alike._
 
+## Note 2026-08-17 — libssh2's crypto backend moves to OpenSSL 3
+
+No impact on this design. OpenSSL is libssh2's crypto backend, below the
+libssh2 C API this spec builds on: the session, handshake, host-key, and
+channel calls are unchanged, so the `Dialer` seam, the Cloudflare carrier, and
+the Tailscale plan are all unaffected. What it does touch:
+
+- the `Vendor/libssh2.xcframework` build scripts (see `Docs/SSH.md`);
+- `THIRD-PARTY-NOTICES.md` — OpenSSL 3 is Apache-2.0, which is GPL-3.0
+  compatible (unlike the pre-3.0 OpenSSL license), so it is a licensing
+  improvement rather than a new constraint.
+
+(A brief consideration of switching the SSH library itself to swift-nio-ssh
+was withdrawn. Had it happened, the socketpair bridge would have been replaced
+by a WebSocket `ChannelHandler` in the same pipeline as `NIOSSHHandler`; that
+remains the obvious simplification if the library is ever revisited, since the
+bridge exists only to satisfy libssh2's need for a blocking file descriptor.)
+
 ## Problem
 
 Sloop can only SSH to hosts that are directly reachable: `LibSSH2Transport`
