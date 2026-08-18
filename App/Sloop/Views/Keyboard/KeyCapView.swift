@@ -79,6 +79,7 @@ final class KeyCapView: UIControl {
 
         if functionLayerActive, let number = functionKeyNumber(forCharacter: character) {
             primaryLabel.text = "F\(number)"
+            primaryLabel.font = Self.font(forLabel: primaryLabel.text ?? "")
             secondaryLabel.text = nil
             return
         }
@@ -93,6 +94,7 @@ final class KeyCapView: UIControl {
             return
         }
         primaryLabel.text = String(shiftActive ? shifted : character)
+        primaryLabel.font = Self.font(forLabel: primaryLabel.text ?? "")
         secondaryLabel.text = String(shiftActive ? character : shifted)
     }
 
@@ -146,7 +148,7 @@ final class KeyCapView: UIControl {
         // key, and one key has one label. The wider half below carries it,
         // which is where a keyboard prints it.
         primaryLabel.text = cap.join == .below ? "" : Self.label(for: cap.primary)
-        primaryLabel.font = .monospacedSystemFont(ofSize: 17, weight: .regular)
+        primaryLabel.font = Self.font(forLabel: primaryLabel.text ?? "")
         primaryLabel.textAlignment = .center
         primaryLabel.textColor = .label
         primaryLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -186,6 +188,17 @@ final class KeyCapView: UIControl {
         ])
     }
 
+    /// Key faces are sized to what they carry: a letter gets the full 17pt, a
+    /// word like "home" or a chord like "⌃B" is set smaller so it fits inside
+    /// the cap instead of being clipped by it.
+    private static func font(forLabel label: String) -> UIFont {
+        switch label.count {
+        case 0...2: return .monospacedSystemFont(ofSize: 17, weight: .regular)
+        case 3:     return .monospacedSystemFont(ofSize: 13, weight: .regular)
+        default:    return .monospacedSystemFont(ofSize: 11, weight: .regular)
+        }
+    }
+
     /// The SF Symbol a key draws instead of text, if it has one.
     private static func symbolName(for value: KeyCap.Value) -> String? {
         guard case .command(let command) = value else { return nil }
@@ -223,13 +236,14 @@ final class KeyCapView: UIControl {
         case .down:        return "↓"
         case .left:        return "←"
         case .right:       return "→"
-        // The glyphs a Mac keyboard prints on these keys. Words in a 47pt cap
-        // set at 17pt monospace get squeezed or clipped; the symbols read at a
-        // glance and match what the hardware next to the iPad says.
-        case .home:        return "↖"
-        case .end:         return "↘"
-        case .pageUp:      return "⇞"
-        case .pageDown:    return "⇟"
+        // Words, not the ↖ ⇞ glyphs a Mac prints on these keys. Those are
+        // conventional rather than meaningful — nothing about ↖ says "start of
+        // line" — and a key nobody can read is a key nobody presses. They're
+        // set smaller so they fit; see `font(forLabel:)`.
+        case .home:        return "home"
+        case .end:         return "end"
+        case .pageUp:      return "pg↑"
+        case .pageDown:    return "pg↓"
         case .function(let n): return "F\(n)"
         }
     }
