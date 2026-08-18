@@ -160,10 +160,36 @@ top of a working SSH terminal rather than first.
   isn't one. Either implement it or delete the case. Forwarding specifically is
   what lets `git pull` on the remote use the key held on the phone, which is
   one of the most common reasons to SSH from a phone at all.
-- **SFTP / file transfer** — and the version that actually matters is a
-  `FileProvider` extension, so a remote host appears in Files.app and any app
-  can open and save to it. Secure ShellFish built its whole identity on that;
-  a transfer sheet inside the app is a much smaller feature.
+- ~~**SFTP / file transfer**~~ → BUILT, not yet run on a device. A host with
+  "Show in Files" on is published as an `NSFileProviderDomain`, so it appears in
+  Files.app and Finder and any app can open and save to it. Built as the
+  extension rather than an in-app transfer sheet for the reason that made it
+  worth doing at all: a sheet can only move files into Sloop's own container.
+  Spec: `Docs/superpowers/specs/2026-08-18-sftp-file-provider-design.md`.
+
+  What it cost elsewhere, because it is load-bearing for the rest of the app:
+  the libssh2 layer moved out of the app target into a `SloopSSH` framework the
+  extension can link; `LibSSH2Connection` was extracted from the duplicated
+  dial/handshake/host-key/auth paths in the transport and the command runner;
+  the host list, known-hosts database and per-host secrets moved into an App
+  Group and a shared keychain group.
+
+  Remaining before it can be claimed as working:
+  - [ ] **On-device validation** — {direct, Cloudflare Access, Tailscale} ×
+        {browse, download, upload, rename, delete}, a multi-gigabyte file, and
+        access with the device locked (the `AfterFirstUnlock` assumption).
+  - [ ] **The memory spike.** The extension runs its own tsnet node, which puts
+        a ~23 MB Go runtime inside a memory-capped extension process. Whether
+        that survives jetsam during a large transfer is unmeasured. If it does
+        not, drop the libtailscale targets from `project.tailscale.yml` and
+        tailnet hosts fall back to a clear "can't join a tailnet" error —
+        nothing else in the design changes.
+  - [ ] **macOS.** The extension builds for macOS and the replicated API is
+        identical, but Finder integration needs the app properly signed and in
+        `/Applications`, which waits on M4's signing work. Unverified, so
+        unclaimed.
+  - [ ] Server-side changes appear on refresh, not instantly — SFTP has no
+        change feed. Worth a line in the user-facing docs when there are any.
 - **Port forwarding** — local forwarding especially: reaching a remote dev
   server from mobile Safari.
 - **`ssh://` URL scheme** — no `CFBundleURLTypes` in `project.yml`, so tapping

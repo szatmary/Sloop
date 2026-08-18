@@ -122,8 +122,24 @@ final class HostListModel: ObservableObject {
         } catch {
             libraryError = error.localizedDescription
         }
+    }
 
-        reconcileFilesDomains()
+    /// Brings Files.app's locations in line with the host list.
+    ///
+    /// Called from the host list's `.task`, deliberately not from `init`.
+    /// `NSFileProviderManager` is a system service, and asking it anything
+    /// while the app is still constructing its model puts an XPC round trip on
+    /// the launch path — which in an unsigned or ad-hoc build does not merely
+    /// fail, it hangs the process before it draws anything. A model's
+    /// initializer should not be able to prevent the app from starting.
+    func syncFilesDomains() async {
+        let hosts = self.hosts
+        do {
+            try await FilesDomainRegistrar.reconcile(hosts: hosts)
+            filesError = nil
+        } catch {
+            filesError = error.localizedDescription
+        }
     }
 
     /// The host store, or the reason there isn't one.
@@ -176,22 +192,14 @@ final class HostListModel: ObservableObject {
         reconcileFilesDomains()
     }
 
-    /// Brings Files.app's locations in line with the host list.
+    /// Kicks off a domain reconcile after the host list changed.
     ///
     /// Deliberately not part of `save`'s throwing contract: a host must save
     /// even if the system refuses the domain, and reporting a File Provider
     /// failure as "couldn't save the host" would send the user looking in the
     /// wrong place entirely.
     private func reconcileFilesDomains() {
-        let hosts = self.hosts
-        Task {
-            do {
-                try await FilesDomainRegistrar.reconcile(hosts: hosts)
-                await MainActor.run { self.filesError = nil }
-            } catch {
-                await MainActor.run { self.filesError = error.localizedDescription }
-            }
-        }
+        Task { await syncFilesDomains() }
     }
 
     /// Import hosts from OpenSSH config text, skipping aliases that already

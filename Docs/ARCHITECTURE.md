@@ -3,20 +3,34 @@
 ## Layers
 
 ```
-┌────────────────────────────────────────────┐
-│ App/Sloop  (SwiftUI, per-platform thin UI)  │
-│  SloopApp → HostListView → TerminalScreen   │
-│  SwiftTermView  ⇄  SwiftTerm.TerminalView   │
-│  LibSSH2Transport                           │
-└──────────────────────┬─────────────────────┘
-                       │  Transport protocol
-┌──────────────────────┴─────────────────────┐
-│ SloopKit  (Foundation only, testable)       │
-│  Transport  TerminalSession  OpenSessions   │
-│  MoshBootstrap  MoshOrSSHTransport  Dialer  │
-│  Host  HostStore  Credential  SSHError      │
-└─────────────────────────────────────────────┘
+┌───────────────────────────┐  ┌──────────────────────────────┐
+│ App/Sloop  (SwiftUI)      │  │ App/SloopFiles (extension)   │
+│  SloopApp → HostListView  │  │  FileProviderExtension       │
+│  SwiftTermView ⇄ SwiftTerm│  │  FileProviderEnumerator      │
+│  HostKeyPrompter (UI)     │  │  SFTPDomainService           │
+└─────────────┬─────────────┘  └──────────────┬───────────────┘
+              │        both embed             │
+┌─────────────┴───────────────────────────────┴───────────────┐
+│ App/SloopSSH  (framework — needs libssh2/tsnet)             │
+│  LibSSH2Connection  LibSSH2Transport  LibSSH2SFTPClient     │
+│  TransportFactory  SFTPClientFactory  TailscaleNode         │
+│  Keychain stores (credentials, keys, Access tokens)         │
+└──────────────────────┬──────────────────────────────────────┘
+                       │  Transport / Dialer / SFTPClient protocols
+┌──────────────────────┴──────────────────────────────────────┐
+│ SloopKit  (Foundation only, testable on Linux)              │
+│  Transport  TerminalSession  OpenSessions  Dialer           │
+│  MoshBootstrap  MoshOrSSHTransport  SFTPClient  SFTPEntry   │
+│  SFTPItemIndex  RemotePath  Host  HostStore  SloopStorage   │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+**Why three layers and not two.** SloopKit stays Foundation-only so `swift test`
+runs on Linux CI — libssh2 in it would end that. But `App/Sloop` is the *app
+target's* source list, which an app extension cannot link. The File Provider
+extension needs the transports, dialers, keychain stores and SFTP client, so
+they live in a framework both targets embed. Anything with a view in it stays
+in the app.
 
 ## The Transport seam
 
@@ -149,6 +163,46 @@ authenticated identity produces `SSHError.accessDenied`.
   cookie was already scoped that broadly by whatever server set it — and
   Cloudflare's edge still rejects a token whose `aud` claim doesn't match the
   application being dialed. Worth knowing, not a bug.
+
+## Files.app: the SFTP seam
+
+`SFTPClient` ([`Sources/SloopKit/SFTP/SFTPClient.swift`](../Sources/SloopKit/SFTP/SFTPClient.swift))
+is the `Transport` trick one subsystem over — a protocol with the libssh2
+implementation behind it, so the whole File Provider extension is written
+against it and tested against `InMemorySFTPClient` on Linux CI. Only
+`LibSSH2SFTPClient` needs a server.
+
+A published host becomes one `NSFileProviderDomain`, its identifier the host's
+UUID. Three things about it are worth knowing before changing anything:
+
+- **Identifiers are not paths.** `NSFileProviderItemIdentifier` must survive a
+  rename; an SFTP path does not. `SFTPItemIndex` mints a stable UUID per path
+  and rewrites the path underneath it, carrying a whole subtree when a directory
+  moves. Using the path as the identifier is the obvious shortcut and corrupts
+  the replica on the first rename — as a wrong answer at runtime, not a build
+  error.
+- **There is no change feed.** SFTP cannot push, so `enumerateChanges` re-lists
+  and diffs against the attributes the index recorded last time. Consequence,
+  by design: a file changed by someone else over SSH appears when Files.app next
+  asks, not the moment it happens. Sloop's own changes are signalled immediately.
+- **The extension cannot ask a question.** It runs while the app does not and has
+  no UI. So it uses `StrictHostKeyVerifier` — never trust-on-first-use — and
+  turns an unknown host key, an expired Access token, a missing credential, or an
+  unauthorized tailnet device into `NSFileProviderError.notAuthenticated` with
+  the sentence that fixes it. That error code is what makes Files.app offer a
+  way forward instead of spinning; `signalErrorResolved` clears it once the app
+  has done the thing.
+
+Shared state lives in the App Group (`SloopStorage`): the host list, known
+hosts, each domain's item index, and tsnet state. Per-host credentials and
+Access tokens live in a keychain access group shared with the extension —
+deliberately *not* the iCloud-synced key-library group, since those items are
+device-only on purpose.
+
+The extension runs **its own tsnet node**, a second device on the tailnet. Two
+processes cannot share one node key: the control plane would see a single device
+flapping between endpoints. Whether a ~23 MB Go runtime fits inside a File
+Provider extension's memory cap is still unmeasured — see `Docs/ROADMAP.md`.
 
 ## Why the split
 

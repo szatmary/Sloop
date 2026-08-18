@@ -127,6 +127,11 @@ struct HostListView: View {
                 }
             }
             .navigationTitle("Sloop")
+            // Off the launch path on purpose — see HostListModel.syncFilesDomains.
+            // Also the repair for domains that drifted while Sloop wasn't
+            // running: a host deleted on another device, or a domain the system
+            // dropped.
+            .task { await model.syncFilesDomains() }
             .toolbar {
                 ToolbarItem {
                     Button { showingSettings = true } label: {
