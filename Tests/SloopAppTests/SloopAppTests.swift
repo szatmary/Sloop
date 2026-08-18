@@ -95,7 +95,8 @@ final class SloopAppTests: XCTestCase {
         let transport = TransportFactory.ssh(host: host,
                                              credential: Credential(),
                                              knownHosts: KnownHostsStore(fileURL: tmp),
-                                             hostKeyVerifier: AutoAcceptHostKeyVerifier())
+                                             hostKeyVerifier: AutoAcceptHostKeyVerifier(),
+                                             accessTokens: InMemoryAccessTokenStore())
         XCTAssertNotNil(transport as AnyObject)
 
         #if !canImport(CSSH)
