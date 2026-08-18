@@ -63,7 +63,8 @@ struct TerminalSettingsView: View {
                     learnt from the commands you run on a host, and from that \
                     host's own shell history, which it reads once when you \
                     connect. Each host decides for itself, in its own settings \
-                    beside Use Mosh.
+                    beside Use Mosh — turn it off for any host you'd rather \
+                    Sloop didn't learn from.
                     """)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -73,8 +74,7 @@ struct TerminalSettingsView: View {
                     iCloud, it isn't shared with your other devices, and it is \
                     never sent to a server or to anyone else. There's no account \
                     and nothing to opt out of, because there is nowhere for it \
-                    to go. A host with suggestions switched off is not recorded \
-                    at all.
+                    to go.
                     """, systemImage: "lock")
                         .font(.footnote)
                         .foregroundStyle(.secondary)

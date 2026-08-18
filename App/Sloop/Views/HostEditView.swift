@@ -308,9 +308,9 @@ struct HostEditView: View {
                 a server or to anyone else. There's no account and nothing to \
                 opt out of, because there is nowhere for it to go.
 
-                Switch this off and Sloop keeps no record of what you type here. \
-                You can delete everything it has learned at any time, in \
-                Terminal settings.
+                Turn it off for any host you'd rather Sloop didn't learn from, \
+                and clear what it already knows whenever you like, in Terminal \
+                settings.
                 """)
             }
             .alert("What is Mosh?", isPresented: $showingMoshHelp) {
