@@ -1,6 +1,7 @@
 // Sloop — Copyright (C) 2026 Matthew Szatmary
 // GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
 
+import Combine
 import XCTest
 // The macOS app target is named Sloop_macOS, so its module is Sloop_macOS.
 @testable import Sloop_macOS
@@ -91,5 +92,75 @@ final class AgentSignPrompterTests: XCTestCase {
         } else {
             XCTFail("elapsed time was not recorded")
         }
+    }
+
+    /// Sloop allows several terminal sessions at once (`SessionsModel`), so
+    /// more than one SSH thread can call `shouldSign` on the *same* shared
+    /// `AgentSignPrompter` around the same moment — two hosts both asking to
+    /// sign. `prompt` is a single slot: without a queue, a second request
+    /// that arrives before the first has been answered overwrites it, and
+    /// the first request's SSH thread then hangs forever, because nothing
+    /// still holds a reference to its `respond` closure once the sheet has
+    /// moved on to the second request.
+    ///
+    /// This deliberately does NOT use `present:` injection. An injected
+    /// closure receives its own request straight from `shouldSign` and never
+    /// touches the shared `prompt` slot at all — every existing test in this
+    /// file relies on exactly that isolation, which is also exactly why none
+    /// of them can see this bug. To reproduce it, this test plays the role
+    /// of the sheet itself, against the real default presenter
+    /// (`present: nil`): it observes `$prompt`, and — after a short,
+    /// realistic delay, so the *other* concurrent request has time to land
+    /// first if nothing is stopping it — answers whatever is actually
+    /// showing at that moment, exactly as `AgentSignPromptView` would. If the
+    /// slot has moved on to a different request in the meantime, this
+    /// answers that one and leaves the original unanswered, exactly as the
+    /// real UI would.
+    func testConcurrentRequestsAreQueuedNotDroppedOrCrossed() {
+        let prompter = AgentSignPrompter()
+
+        var seen: [(String, String)] = []
+        let seenLock = NSLock()
+        let bothShown = expectation(description: "both requests reached the sheet")
+        bothShown.expectedFulfillmentCount = 2
+
+        let cancellable = prompter.$prompt.compactMap { $0 }.sink { shown in
+            seenLock.lock()
+            seen.append((shown.keyName, shown.endpoint))
+            seenLock.unlock()
+            bothShown.fulfill()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                // Answer whatever is actually on screen right now — not
+                // necessarily `shown` — exactly what looking at the sheet
+                // and tapping a button would do, and exactly how the bug
+                // loses a request: by the time this fires, `prompter.prompt`
+                // may already have moved on.
+                guard let current = prompter.prompt, current.id == shown.id else { return }
+                current.respond(shown.keyName == "id_ed25519")
+            }
+        }
+        defer { cancellable.cancel() }
+
+        let firstAnswered = expectation(description: "id_ed25519 shouldSign returned")
+        let secondAnswered = expectation(description: "id_rsa shouldSign returned")
+        var firstResult: Bool?
+        var secondResult: Bool?
+
+        DispatchQueue.global().async {
+            firstResult = prompter.shouldSign(keyName: "id_ed25519", endpoint: "a.example:22")
+            firstAnswered.fulfill()
+        }
+        DispatchQueue.global().async {
+            secondResult = prompter.shouldSign(keyName: "id_rsa", endpoint: "b.example:22")
+            secondAnswered.fulfill()
+        }
+
+        wait(for: [bothShown, firstAnswered, secondAnswered], timeout: 2)
+
+        XCTAssertEqual(seen.count, 2,
+                        "the second request must actually reach the sheet, not be silently dropped by the first overwriting it")
+        XCTAssertEqual(firstResult, true, "the id_ed25519 request should get its own answer")
+        XCTAssertEqual(secondResult, false, "the id_rsa request should get its own answer, not the other request's")
     }
 }
