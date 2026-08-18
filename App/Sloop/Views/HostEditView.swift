@@ -18,6 +18,7 @@ struct HostEditView: View {
     @State private var pastedName: String = ""
     @State private var pastedPassphrase: String = ""
     @State private var saveError: String?
+    @State private var showingMoshHelp = false
     private let libraryKeys: [NamedKey]
     private let onSaveKey: (NamedKey) throws -> Void
     private let onSave: (SSHHost, Credential?) -> Void
@@ -121,7 +122,16 @@ struct HostEditView: View {
                 }
 
                 Section("Options") {
-                    Toggle("Use Mosh", isOn: $host.useMosh)
+                    HStack {
+                        Toggle("Use Mosh", isOn: $host.useMosh)
+                        Button {
+                            showingMoshHelp = true
+                        } label: {
+                            Image(systemName: "questionmark.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("What is Mosh?")
+                    }
                 }
             }
             .navigationTitle(host.hostname.isEmpty ? "New Host" : host.alias)
@@ -135,6 +145,23 @@ struct HostEditView: View {
                 Button("OK", role: .cancel) { saveError = nil }
             } message: {
                 Text(saveError ?? "")
+            }
+            .alert("What is Mosh?", isPresented: $showingMoshHelp) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("""
+                Mosh keeps a shell alive when the network doesn't. It runs over \
+                UDP and survives changing Wi-Fi, moving to cellular, and \
+                sleeping the device — the session resumes instead of dying, so \
+                you don't lose your work reconnecting.
+
+                It also echoes your typing locally, so the terminal stays \
+                responsive on a slow link instead of waiting for the round trip.
+
+                It needs mosh-server installed on the host. Sloop starts it \
+                over SSH; if it isn't there, the connection quietly falls back \
+                to plain SSH.
+                """)
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
