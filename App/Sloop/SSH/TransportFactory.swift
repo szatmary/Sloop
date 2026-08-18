@@ -87,26 +87,25 @@ enum TransportFactory {
                                               accessTokens: accessTokens))
 
         case .tailscale:
-            // The same ordinary TCP connect as .direct, and that is the whole
-            // implementation: Tailscale on iOS and macOS is a system VPN, so
-            // when it is connected the OS already routes 100.64.0.0/10 and
-            // resolves MagicDNS names for every app on the device. Sloop has
-            // nothing to add to that — a tailnet host is simply reachable.
+            // Sloop's own tailnet node isn't built yet — that is the embedded
+            // libtailscale work (a Go toolchain, its own xcframework and login
+            // flow; see the Tailscale section of
+            // Docs/superpowers/specs/2026-08-12-tunnel-integrations-design.md).
             //
-            // It stays a distinct connection method rather than collapsing into
-            // .direct because the two fail differently and the user needs to be
-            // told which one they are in: a direct host that won't connect is a
-            // network or firewall problem, while a tailnet host that won't
-            // connect is nearly always Tailscale being disconnected on this
-            // device — advice no .direct host should ever be given.
-            //
-            // What this is not: Sloop does not join the tailnet itself. That
-            // wants libtailscale/TailscaleKit (a Go toolchain, its own
-            // xcframework and login flow — see the Tailscale section of
-            // Docs/superpowers/specs/2026-08-12-tunnel-integrations-design.md),
-            // and buys only the case where the user won't run the Tailscale app
-            // — on iOS, where one VPN excludes another, that case is real but
-            // secondary.
+            // Until it lands, a tailnet host is reachable only through the
+            // Tailscale app's system VPN, and when that is up the OS routes
+            // 100.64.0.0/10 and resolves MagicDNS for every app on the device —
+            // so an ordinary dial works and this method does nothing Direct
+            // wouldn't. When it is *not* up, saying so is the whole value here:
+            // the alternative is a name that doesn't resolve or a connect that
+            // times out, neither of which mentions Tailscale at all.
+            guard TailnetPresence.isConnected else {
+                return .unavailable(
+                    "Sloop can't join your tailnet on its own yet, and this device " +
+                    "isn't on one, so \(host.hostname) can't be reached.\r\n" +
+                    "Install the Tailscale app and connect it, then set this host to " +
+                    "Direct with its MagicDNS name.\r\n")
+            }
             return .ready(TCPDialer(host: host.hostname, port: host.port))
         }
     }

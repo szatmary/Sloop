@@ -121,7 +121,7 @@ struct HostEditView: View {
                         // MagicDNS name or tailnet address and sshd listens
                         // on it as usual.
                         Stepper("Port: \(host.port)", value: $host.port, in: 1...65535)
-                        Text("Reached over your tailnet, so the Tailscale app has to be installed and connected on this device. The hostname is the MagicDNS name or the 100.x address.")
+                        Text("For devices without Tailscale installed — Sloop joins the tailnet itself. If you already run the Tailscale app here, choose Direct instead and use the MagicDNS name: the system VPN already routes it, and that path is in use today.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
