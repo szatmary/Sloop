@@ -164,14 +164,33 @@ public struct KeyboardLayout: Equatable, Sendable {
         return smallest ?? content
     }
 
-    /// The width a row's main block has to itself, once the number pad beside
-    /// it has taken its share.
-    private func regionForMainBlock(row: [KeyCap], columns: Int, content: Double,
-                                    spacing: Double, keypadUnit: Double) -> Double {
-        guard columns > 0, keypadUnit > 0 else { return content }
-        let pad = Array(row.suffix(columns))
-        let keypadWidth = keypadUnit * fixedSlots(in: pad) + spacing * Double(pad.count - 1)
-        return content - keypadWidth - spacing
+    /// A number-pad key's width: its own columns, plus the gaps between the
+    /// columns it spans. The double-wide enter stands where two keys and the
+    /// gap between them would be, and without that gap the pad's bottom row is
+    /// narrower than the rows above and the whole block slides sideways.
+    private func keypadWidthOf(_ cap: KeyCap, unit: Double, spacing: Double) -> Double {
+        let slots = fixedSlots(in: [cap])
+        return unit * slots + spacing * (slots - 1).rounded(.down)
+    }
+
+    /// The width every row's main block has to itself, once the cluster and pad
+    /// beside them have taken theirs.
+    ///
+    /// The *widest* trailing block sets it, for every row alike. Rows whose
+    /// trailing block has fewer keys — the pad's bottom row, where a
+    /// double-wide enter replaces two keys — would otherwise get those keys'
+    /// gaps back and end a few points further right than the rows above, which
+    /// is precisely the misalignment that breaks the reverse-L return key.
+    private func regionForMainBlock(content: Double, spacing: Double, keypadUnit: Double) -> Double {
+        var widest = 0.0
+        for (row, columns) in zip(rows, keypadColumns) where columns > 0 {
+            let pad = Array(row.suffix(columns))
+            let width = pad.reduce(0.0) { $0 + keypadWidthOf($1, unit: keypadUnit, spacing: spacing) }
+                + spacing * Double(pad.count - 1)
+            widest = max(widest, width)
+        }
+        guard widest > 0, keypadUnit > 0 else { return content }
+        return content - widest - spacing
     }
 
     /// The number pad is drawn at the letter unit, so its keys match the
@@ -224,9 +243,10 @@ public struct KeyboardLayout: Equatable, Sendable {
 
             let keypadWidth = pad.isEmpty
                 ? 0
-                : keypad * fixedSlots(in: pad) + spacing * Double(pad.count - 1)
-            let region = regionForMainBlock(row: row, columns: columns, content: content,
-                                            spacing: spacing, keypadUnit: keypad)
+                : pad.reduce(0.0) { $0 + keypadWidthOf($1, unit: keypad, spacing: spacing) }
+                    + spacing * Double(pad.count - 1)
+            let region = regionForMainBlock(content: content, spacing: spacing,
+                                            keypadUnit: keypad)
 
             // The letter unit everywhere it fits; a row too crowded for it —
             // the iPad's symbol row — falls back to the largest unit that does.
@@ -241,7 +261,18 @@ public struct KeyboardLayout: Equatable, Sendable {
                 : 0
 
             let used = fixed + flexibleWidth * flexibleCount + gaps
-            var x = padding + max(0, (region - used) / 2)
+            // Right-aligned against the cluster where there is one. Rows come
+            // to the same slot total but not the same key *count*, and every
+            // key costs a 3pt gap — so centring leaves their right edges a few
+            // points apart, which is exactly enough to break the reverse-L
+            // return key into two offset rectangles. The stagger it leaves on
+            // the left is a few points, and reads as the stagger a keyboard has
+            // anyway. With no cluster to align to — the phone — centring is
+            // still right, since there is nothing for an edge to line up with.
+            let hasTrailingBlock = keypadColumns.contains { $0 > 0 }
+            var x = padding + (hasTrailingBlock
+                               ? max(0, region - used)
+                               : max(0, (region - used) / 2))
             for cap in main {
                 let capWidth: Double
                 switch cap.width {
@@ -260,7 +291,7 @@ public struct KeyboardLayout: Equatable, Sendable {
             // the main block beside them is doing.
             x = padding + content - keypadWidth
             for cap in pad {
-                let capWidth = keypad * fixedSlots(in: [cap])
+                let capWidth = keypadWidthOf(cap, unit: keypad, spacing: spacing)
                 result.append(KeyFrame(x: x, y: y, width: capWidth, height: rowHeight - spacing))
                 x += capWidth + spacing
             }
@@ -282,48 +313,49 @@ public struct KeyboardLayout: Equatable, Sendable {
         // shift-`8`. That is what removed the twenty-key symbol bar along the
         // top and a whole row of height with it: those keys were spelling out
         // by hand what the shift key already means.
+        // Every row is the same total width — 15.5 units — which is the
+        // property that makes a keyboard look like one. ANSI does the same
+        // thing: its rows all come to 15u, and the left-hand keys (tab, caps,
+        // shift) are whatever width makes that true. Rows of unequal total get
+        // centred against each other, and then the two halves of the return key
+        // don't line up and it reads as a tetromino rather than a key.
         let mainRows: [[KeyCap]] = [
-            // ANSI rows, in their ANSI order. Tab left of Q, `[ ] \` after P,
-            // `; '` after L, `, . /` after M, shift at both ends of that row,
-            // control in the caps-lock position — which is where anyone who
-            // uses a terminal puts it anyway.
+            // 1 + 1 + 10 + 2 + 1 + 1.5 = 16.5, and every row below matches it.
             [.key(.escape), .key(.tab)]
                 + "qwertyuiop".map { KeyCap.character($0) }
-                + [.character("["), .character("]"),
-                   .key(.backspace, width: .wide(1.5), repeats: true),
-                   // Upper half of the reverse-L return key. Narrower than the
-                   // half below it, and flush to the same right edge, which is
-                   // what makes the L.
+                + [.character("["), .character("]"), .character("="),
+                   // Upper half of the reverse-L return: narrower than the half
+                   // below, flush to the same right edge, which is what makes
+                   // the L. Backspace moved into the navigation cluster to
+                   // clear this corner for it.
                    .key(.return, width: .wide(1.5), join: .below)],
+            // 1.75 + 9 + 3 + 2.75
             [.modifier(.control, width: .wide(1.75))]
                 + "asdfghjkl".map { KeyCap.character($0) }
                 + [.character(";"), .character("'"), .character("\\"),
-                   .key(.return, width: .wide(1.75), join: .above)],
-            [.modifier(.shift, width: .wide(2.25))]
+                   .key(.return, width: .wide(2.75), join: .above)],
+            // 3.25 + 7 + 3 + 3.25
+            [.modifier(.shift, width: .wide(3.25))]
                 + "zxcvbnm".map { KeyCap.character($0) }
                 + [.character(","), .character("."), .character("/"),
-                   .modifier(.shift, width: .wide(2.25))],
-            // One control, at caps lock. ANSI puts control down here and caps
-            // lock up there, but caps lock is dead weight in a terminal while
-            // control is the most-typed key on the board — so it takes the
-            // easiest position to reach, and a second copy two rows below would
-            // just be a key that could have been something else.
+                   .modifier(.shift, width: .wide(3.25))],
+            // 1 + 1 + 1 + 1 + 5.5 + 1 + 5 + 1
             //
-            // `` ` `` sits beside space because the row it belongs to is the one
-            // this keyboard trades for the number pad; the rest of that row —
-            // the digits, and `- =` — is on the pad.
-            // The chords a shell needs constantly, in the room the bottom row
-            // has going spare: interrupt, end-of-file, suspend, clear. They
-            // were on the smart-keys bar this keyboard replaced, and typing
-            // them by arming control and reaching for a letter is two presses
-            // for something people hit a hundred times a session.
-            [.modifier(.option), .character("`"),
-             .character(" ", width: .wide(6)),
+            // The chords a shell needs constantly, in the room this row has
+            // spare: interrupt, end-of-file, suspend, clear. They were on the
+            // smart-keys bar this keyboard replaced, and arming control then
+            // reaching for a letter is two presses for something people hit a
+            // hundred times a session.
+            [.command(.dismissKeyboard),
+             .functionLayer, .modifier(.option), .character("`"),
+             .character(" ", width: .wide(5.5)),
              .modifier(.option),
-             .chord(.control, "c"), .chord(.control, "d"),
-             .chord(.control, "z"), .chord(.control, "l"),
-             .key(.delete, repeats: true),
-             .command(.dismissKeyboard)],
+             // ⌃B first: it is tmux's prefix, so on this keyboard it is the
+             // most-pressed of the five by some distance.
+             .chord(.control, "b"), .chord(.control, "c"),
+             .chord(.control, "d"), .chord(.control, "z"),
+             .chord(.control, "l"),
+             .key(.delete, repeats: true)],
         ]
 
         // Navigation and arrows, three columns, as on a full keyboard: paging
@@ -331,10 +363,10 @@ public struct KeyboardLayout: Equatable, Sendable {
         // with ← and → either side. The blanks are what make that shape
         // possible — a T needs its holes as much as its keys.
         let navigationRows: [[KeyCap]] = [
-            // Forward delete lives on the bottom row, not up here: it is a
-            // typing key, reached mid-word without leaving the letters, and the
-            // cluster is for the keys you look away to press.
-            [.blank, .key(.home), .key(.pageUp)],
+            // Backspace sits at the top of the cluster, immediately right of
+            // the return key's upper half — roughly where it is on a full
+            // keyboard, and out of the corner the L needs.
+            [.key(.backspace, repeats: true), .key(.home), .key(.pageUp)],
             [.blank, .key(.end), .key(.pageDown)],
             [.blank, .key(.up, repeats: true), .blank],
             [.key(.left, repeats: true), .key(.down, repeats: true),
@@ -347,7 +379,9 @@ public struct KeyboardLayout: Equatable, Sendable {
             [.character("7"), .character("8"), .character("9"), .character("/")],
             [.character("4"), .character("5"), .character("6"), .character("*")],
             [.character("1"), .character("2"), .character("3"), .character("-")],
-            [.character("0"), .character("."), .character("="), .blank],
+            // A double-wide enter in the corner, as every number pad has —
+            // the key you hit with the edge of your hand after typing a number.
+            [.character("0"), .character("."), .key(.return, width: .wide(2))],
         ]
 
         let trailing = zip(navigationRows, keypadRows).map { $0 + $1 }

@@ -142,3 +142,32 @@ final class KeyEncoderTests: XCTestCase {
         XCTAssertNil(KeyEncoder.bytes(for: .command(.dismissKeyboard), armedModifiers: [], applicationCursor: false))
     }
 }
+
+/// fn + digit is how a keyboard with no F-row reaches F1–F12, so the mapping is
+/// pinned here rather than left to whichever view happens to implement it.
+final class FunctionLayerTests: XCTestCase {
+    func testDigitsMapToTheFunctionKeysInOrder() {
+        XCTAssertEqual(functionKeyNumber(forCharacter: "1"), 1)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "9"), 9)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "0"), 10)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "-"), 11)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "="), 12)
+    }
+
+    func testAnythingElseHasNoFunctionKey() {
+        for character in "abz[];'`,./*" {
+            XCTAssertNil(functionKeyNumber(forCharacter: character), "\(character)")
+        }
+    }
+
+    /// Every number the mapping can produce must actually encode — an F13 that
+    /// silently sent nothing would look like a dead key.
+    func testEveryMappedFunctionKeyEncodes() {
+        for character in "1234567890-=" {
+            let number = functionKeyNumber(forCharacter: character)!
+            let bytes = KeyEncoder.bytes(for: .function(number), modifiers: [],
+                                         applicationCursor: false)
+            XCTAssertFalse(bytes.isEmpty, "F\(number) encodes to nothing")
+        }
+    }
+}

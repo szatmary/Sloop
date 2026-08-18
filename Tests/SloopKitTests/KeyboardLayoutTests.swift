@@ -329,60 +329,73 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    /// A row that doesn't fill its region is centred rather than left-hung —
-    /// the home row sitting flush left with a gap on the right is the tell that
-    /// keys were stretched to fit instead of shared.
+    /// Rows line up on the right, against the navigation cluster — and with
+    /// each other, which is what lets the reverse-L return key be two caps that
+    /// read as one.
     ///
-    /// "Region" rather than "width" because of the number pad: where one is
-    /// present it takes the right-hand end of the row, and the main block is
-    /// centred in what's left of the screen, not in the whole of it.
-    func testShortRowsAreCentredInTheirRegion() {
+    /// Rows come to the same slot total but not the same key count, and each
+    /// key costs a gap, so "same width" is not automatic. Where there's no
+    /// cluster to align against, as on the phone, rows are centred instead.
+    func testRowsLineUpOnTheRight() {
         for (context, width) in zip(allContexts, allWidths) {
             let layout = KeyboardLayout.resolve(for: context)
             let frames = layout.frames(width: width, padding: framePadding, spacing: frameSpacing)
+            let hasCluster = layout.keypadColumns.contains { $0 > 0 }
             var index = 0
-            for (rowIndex, (row, keypadColumns)) in zip(layout.rows, layout.keypadColumns).enumerated() {
+            var mainRightEdges: [Double] = []
+            for (row, keypadColumns) in zip(layout.rows, layout.keypadColumns) {
                 let mainCount = row.count - keypadColumns
                 let first = frames[index]
-                let lastMain = frames[index + mainCount - 1]
-                let leading = first.x - framePadding
-                let trailing: Double
-                if keypadColumns > 0 {
-                    // Up to the pad's leading edge, less the gap between blocks.
-                    let padStart = frames[index + mainCount].x
-                    trailing = padStart - frameSpacing - (lastMain.x + lastMain.width)
-                } else {
-                    trailing = (width - framePadding) - (lastMain.x + lastMain.width)
+                let last = frames[index + mainCount - 1]
+                mainRightEdges.append(last.x + last.width)
+                if !hasCluster {
+                    let leading = first.x - framePadding
+                    let trailing = (width - framePadding) - (last.x + last.width)
+                    XCTAssertEqual(leading, trailing, accuracy: 0.001,
+                                   "\(context) should centre when there's no cluster")
                 }
-                XCTAssertEqual(leading, trailing, accuracy: 0.001,
-                               "row \(rowIndex) of \(context) is lopsided")
                 index += row.count
+            }
+            if hasCluster {
+                for edge in mainRightEdges.dropFirst() {
+                    XCTAssertEqual(edge, mainRightEdges[0], accuracy: 0.001,
+                                   "\(context): rows don't share a right edge")
+                }
             }
         }
     }
 
-    /// The pad hangs off the right edge, and its columns line up down the
-    /// keyboard the way a physical one's do.
-    func testKeypadIsFlushRightAndAligned() {
+    /// The pad hangs off the right edge, and its keys sit on one column grid
+    /// down the keyboard.
+    ///
+    /// Compared as a subset rather than an equal list: the pad's bottom row has
+    /// a double-wide enter where the rows above have two keys, so it lands on
+    /// fewer columns — but every column it does land on has to be one of theirs,
+    /// or the pad is drawn crooked.
+    func testKeypadIsFlushRightAndOnOneColumnGrid() {
         for (context, width) in zip(allContexts, allWidths) {
             let layout = KeyboardLayout.resolve(for: context)
             guard layout.keypadColumns.contains(where: { $0 > 0 }) else { continue }
             let frames = layout.frames(width: width, padding: framePadding, spacing: frameSpacing)
             var index = 0
-            var columnXs: [[Double]] = []
+            var columnGrid: Set<Int> = []
+            var rowsSeen = 0
             for (row, keypadColumns) in zip(layout.rows, layout.keypadColumns) {
                 if keypadColumns > 0 {
                     let pad = Array(frames[(index + row.count - keypadColumns)..<(index + row.count)])
                     let last = pad[pad.count - 1]
                     XCTAssertEqual(last.x + last.width, width - framePadding, accuracy: 0.001,
                                    "\(context): pad isn't flush right")
-                    columnXs.append(pad.map(\.x))
+                    let columns = Set(pad.map { Int(($0.x * 100).rounded()) })
+                    if rowsSeen == 0 {
+                        columnGrid = columns
+                    } else {
+                        XCTAssertTrue(columns.isSubset(of: columnGrid),
+                                      "\(context): pad row \(rowsSeen) is off the column grid")
+                    }
+                    rowsSeen += 1
                 }
                 index += row.count
-            }
-            for column in columnXs.dropFirst() {
-                XCTAssertEqual(column, columnXs[0].map { $0 },
-                               "\(context): pad columns don't line up")
             }
         }
     }
@@ -483,22 +496,19 @@ final class KeyboardLayoutTests: XCTestCase {
             frames[flat.firstIndex(where: predicate)!]
         }
 
-        // One unit, 46.5417, shared by the letters, the navigation cluster and
-        // the number pad — the keyboard has one key size, not three. It is
+        // One unit, 47.5319, shared by the letters, the navigation cluster and
+        // the number pad — one key size on the keyboard, not three. It is
         // solved for directly: the busiest letter row has to fit all three
         // blocks plus the gap between them, and that equation sets it.
-        XCTAssertEqual(frame { $0.primary == .character("q") }.width, 46.5417, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 46.5417, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 46.5417, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.up) }.width, 46.5417, accuracy: 0.001)
-        // ANSI widths, as multiples of that unit: 1.75 for control at caps
-        // lock, 2.25 for shift, 1.5 for backspace.
-        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 81.4479, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 104.7188, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 69.8125, accuracy: 0.001)
-        // Six units of space bar, not the 690pt runway `.flexible` gave it.
-        // The unit shrank a touch from 47.5319 when the ⌃-chord keys joined the
-        // bottom row — four more slots on a row that had them going spare.
-        XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 279.25, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character("q") }.width, 47.5319, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 47.5319, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.up) }.width, 47.5319, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 47.5319, accuracy: 0.001)
+        // ANSI widths as multiples of it: control 1.75 at caps lock, shift 3.25
+        // (this keyboard's rows are 16.5 units, so its shifts are wider than a
+        // 15-unit board's 2.25), space 5.5.
+        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 83.1809, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 154.4787, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 261.4255, accuracy: 0.001)
     }
 }

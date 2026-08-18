@@ -84,6 +84,23 @@ final class KeyCapView: UIControl {
         }
         isMultipleTouchEnabled = false
 
+        // Keys that are an icon rather than a word get one. "⌨︎↓" was two
+        // characters pretending to be a symbol, and rendered like it.
+        if let symbol = Self.symbolName(for: cap.primary) {
+            let image = UIImageView(image: UIImage(systemName: symbol))
+            image.tintColor = .label
+            image.contentMode = .scaleAspectFit
+            image.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(image)
+            NSLayoutConstraint.activate([
+                image.centerXAnchor.constraint(equalTo: centerXAnchor),
+                image.centerYAnchor.constraint(equalTo: centerYAnchor),
+                image.widthAnchor.constraint(equalTo: widthAnchor, multiplier: 0.5),
+                image.heightAnchor.constraint(equalTo: heightAnchor, multiplier: 0.5),
+            ])
+            return
+        }
+
         primaryLabel.text = Self.label(for: cap.primary)
         primaryLabel.font = .monospacedSystemFont(ofSize: 17, weight: .regular)
         primaryLabel.textAlignment = .center
@@ -96,10 +113,23 @@ final class KeyCapView: UIControl {
             primaryLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
 
-        guard let secondary = cap.secondary else { return }
-        // Shown small and high: it advertises the drag target, so a symbol
-        // behind a gesture is still discoverable rather than folklore.
-        secondaryLabel.text = Self.label(for: secondary)
+        // The small legend above the character, exactly as a physical keycap
+        // prints it: the drag target where a layout has one, otherwise what
+        // shift produces. Without it this keyboard looks like it has no `_`,
+        // `+`, `{` or `}` at all — they are on `-`, `=`, `[` and `]`, and a key
+        // that doesn't say so is a key nobody will find.
+        let legend: String?
+        if let secondary = cap.secondary {
+            legend = Self.label(for: secondary)
+        } else if case .character(let character) = cap.primary,
+                  case let shifted = KeyboardLayout.shifted(character),
+                  shifted != character {
+            legend = String(shifted)
+        } else {
+            legend = nil
+        }
+        guard let legend else { return }
+        secondaryLabel.text = legend
         secondaryLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         secondaryLabel.textColor = .secondaryLabel
         secondaryLabel.textAlignment = .center
@@ -112,6 +142,14 @@ final class KeyCapView: UIControl {
         ])
     }
 
+    /// The SF Symbol a key draws instead of text, if it has one.
+    private static func symbolName(for value: KeyCap.Value) -> String? {
+        guard case .command(let command) = value else { return nil }
+        switch command {
+        case .dismissKeyboard: return "keyboard.chevron.compact.down"
+        }
+    }
+
     private static func label(for value: KeyCap.Value) -> String {
         switch value {
         case .character(let c):        return c == " " ? "space" : String(c)
@@ -119,6 +157,8 @@ final class KeyCapView: UIControl {
         case .modifier(let modifiers): return label(for: modifiers)
         case .chord(let modifiers, let character):
             return label(for: modifiers) + String(character).uppercased()
+        case .functionLayer:
+            return "fn"
         case .command(let command):
             switch command {
             case .dismissKeyboard: return "⌨︎↓"
@@ -186,6 +226,8 @@ final class KeyCapView: UIControl {
         case .modifier(let modifiers): return accessibilityLabel(for: modifiers)
         case .chord(let modifiers, let character):
             return accessibilityLabel(for: modifiers) + " " + String(character)
+        case .functionLayer:
+            return "function layer"
         case .command(let command):
             switch command {
             case .dismissKeyboard: return "dismiss keyboard"

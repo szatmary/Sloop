@@ -26,6 +26,11 @@ public struct KeyCap: Equatable, Sendable {
         /// and then tapping a letter: that is two presses and leaves the
         /// modifier armed if the second never comes.
         case chord(KeyModifiers, Character)
+        /// Arms the function layer for the next key, turning the digits into
+        /// F1–F12. Keyboard-only, like `.modifier`: it emits nothing itself,
+        /// and it is not a `KeyModifiers` value because nothing downstream —
+        /// no escape sequence, no `key & 0x1F` — has any notion of "fn".
+        case functionLayer
         /// A hole in the grid: draws nothing, does nothing, occupies a slot.
         /// The arrow cluster's inverted T is three columns wide and only has
         /// keys in two of its rows; without a way to say "nothing here", the
@@ -112,6 +117,8 @@ public struct KeyCap: Equatable, Sendable {
 
     /// An empty slot, for holding a shape.
     public static let blank = Self(primary: .blank)
+
+    public static let functionLayer = Self(primary: .functionLayer)
 
     public static func chord(_ modifiers: KeyModifiers, _ character: Character) -> Self {
         Self(primary: .chord(modifiers, character))

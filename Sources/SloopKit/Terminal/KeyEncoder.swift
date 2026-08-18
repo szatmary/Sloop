@@ -15,6 +15,23 @@ public struct KeyModifiers: OptionSet, Hashable, Sendable {
     public static let shift = KeyModifiers(rawValue: 1 << 2)
 }
 
+/// Which function key a character stands for while the fn layer is held, in
+/// the arrangement every keyboard without an F-row uses: the digits give F1–F10
+/// in order, and the two keys past them give F11 and F12.
+///
+/// Here rather than in the keyboard view so the mapping is testable without a
+/// device, and so there is one answer to "what is fn+8" rather than one per
+/// caller.
+public func functionKeyNumber(forCharacter character: Character) -> Int? {
+    switch character {
+    case "1"..."9": return character.wholeNumberValue
+    case "0":       return 10
+    case "-":       return 11
+    case "=":       return 12
+    default:        return nil
+    }
+}
+
 /// A non-character key on a terminal keyboard.
 public enum TerminalKey: Equatable, Sendable {
     case escape, tab, `return`, backspace, delete
@@ -116,7 +133,7 @@ public enum KeyEncoder {
             // The chord's own modifiers, plus anything armed — ⌃C with shift
             // armed is still a legitimate thing to type.
             return bytes(for: character, modifiers: modifiers.union(armedModifiers))
-        case .modifier, .command, .blank:
+        case .modifier, .command, .blank, .functionLayer:
             return nil
         }
     }

@@ -161,6 +161,12 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
                 controller.armedModifiers.insert(modifiers)
             }
 
+        case .functionLayer:
+            // Sticky like the modifiers beside it: tap to arm, tap again to
+            // disarm, and it clears itself after the key it applies to.
+            functionLayerArmed.toggle()
+            view.setArmed(functionLayerArmed)
+
         case .command(let command):
             switch command {
             case .dismissKeyboard:
@@ -175,6 +181,21 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
         case .blank:
             break   // a hole in the grid; nothing to send, nothing to arm
 
+        case .character(let character) where functionLayerArmed:
+            // fn + a digit is F1–F12, in the arrangement every keyboard without
+            // an F-row uses. Cleared afterwards, like any other sticky key —
+            // and cleared even when the character has no function key, since
+            // holding a layer that did nothing would be its own puzzle.
+            defer { clearFunctionLayer() }
+            if let number = functionKeyNumber(forCharacter: character) {
+                if let bytes = KeyEncoder.bytes(for: .key(.function(number)),
+                                                armedModifiers: controller.armedModifiers,
+                                                applicationCursor: controller.applicationCursor) {
+                    controller.send(bytes[...])
+                }
+                clearArmedModifiers()
+            }
+
         case .character, .key, .chord:
             // The character/key/chord dispatch and the shift-before-encoding
             // rule all live in `KeyEncoder.bytes(for:armedModifiers:applicationCursor:)`
@@ -186,6 +207,20 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
                 controller.send(bytes[...])
             }
             clearArmedModifiers()
+        }
+    }
+
+    /// Whether the next key is a function key. Not a `KeyModifiers` bit: the
+    /// encoder has no notion of fn, and giving it one would mean every escape
+    /// sequence had to decide what to do with it.
+    private var functionLayerArmed = false
+
+    /// Drop the layer and unhighlight whichever key armed it.
+    private func clearFunctionLayer() {
+        guard functionLayerArmed else { return }
+        functionLayerArmed = false
+        for view in keyViews where view.cap.primary == .functionLayer {
+            view.setArmed(false)
         }
     }
 
