@@ -53,6 +53,50 @@ final class AccessTokenTests: XCTestCase {
         XCTAssertNil(AccessToken(raw: jwt(["aud": "x"])))   // no exp claim
     }
 
+    /// `exp` is documented (and everywhere else in this file) as a number.
+    /// A payload that instead carries it as a string must fail closed — not
+    /// coerce, not crash.
+    func testExpAsStringIsNil() {
+        let raw = jwt(["exp": "3000000000", "aud": "x"])
+        XCTAssertNil(AccessToken(raw: raw))
+    }
+
+    /// `aud` is either a JSON array or a bare string (RFC 7519) — never an
+    /// object. A malformed/attacker-adjacent payload carrying one must fail
+    /// closed rather than crash the decoder.
+    func testAudAsObjectIsNil() {
+        let raw = jwt(["exp": Date().addingTimeInterval(3600).timeIntervalSince1970,
+                       "aud": ["nested": "object"]])
+        XCTAssertNil(AccessToken(raw: raw))
+    }
+
+    /// `aud` explicitly present but `null` must decode safely to an empty
+    /// audience list, not crash or wedge the optional's decoding.
+    func testAudAsNullYieldsEmptyAudiences() throws {
+        let raw = jwt(["exp": Date().addingTimeInterval(3600).timeIntervalSince1970,
+                       "aud": NSNull()])
+        let token = try XCTUnwrap(AccessToken(raw: raw))
+        XCTAssertEqual(token.audiences, [])
+        XCTAssertFalse(token.isExpired)
+    }
+
+    /// An extreme negative `exp` (deep past, but still a finite JSON number —
+    /// the shape a corrupted or hostile payload might carry) must parse
+    /// without crashing and read as expired.
+    func testExtremeNegativeExpIsExpired() throws {
+        let raw = jwt(["exp": -1e15])
+        let token = try XCTUnwrap(AccessToken(raw: raw))
+        XCTAssertTrue(token.isExpired)
+    }
+
+    /// An extreme positive `exp` must likewise parse without crashing, and
+    /// read as not-expired.
+    func testExtremePositiveExpIsNotExpired() throws {
+        let raw = jwt(["exp": 1e15])
+        let token = try XCTUnwrap(AccessToken(raw: raw))
+        XCTAssertFalse(token.isExpired)
+    }
+
     func testStoreValidTokenFiltersExpiredAndGarbage() throws {
         let store = InMemoryAccessTokenStore()
         XCTAssertNil(store.validToken(for: "ssh.example.com"))
