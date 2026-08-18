@@ -223,10 +223,13 @@ final class KeyCapView: UIControl {
         case .down:        return "↓"
         case .left:        return "←"
         case .right:       return "→"
-        case .home:        return "home"
-        case .end:         return "end"
-        case .pageUp:      return "pgup"
-        case .pageDown:    return "pgdn"
+        // The glyphs a Mac keyboard prints on these keys. Words in a 47pt cap
+        // set at 17pt monospace get squeezed or clipped; the symbols read at a
+        // glance and match what the hardware next to the iPad says.
+        case .home:        return "↖"
+        case .end:         return "↘"
+        case .pageUp:      return "⇞"
+        case .pageDown:    return "⇟"
         case .function(let n): return "F\(n)"
         }
     }

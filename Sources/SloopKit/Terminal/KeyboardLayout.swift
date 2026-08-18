@@ -325,7 +325,13 @@ public struct KeyboardLayout: Equatable, Sendable {
             // whatever their contents.
             [.key(.escape), .key(.tab, width: .wide(1.5))]
                 + "qwertyuiop".map { KeyCap.character($0) }
-                + [.character("["), .character("]")],
+                + [.character("["), .character("]"),
+                   // Backspace at the end of the top row, two units wide, as
+                   // ANSI has it. It was a single unit in the navigation
+                   // cluster, which made it the same size as page-up — a key
+                   // you hit constantly, drawn like one you don't — and left
+                   // this row shorter than the ones below it.
+                   .key(.backspace, width: .wide(2), repeats: true)],
             // Control in the caps-lock position, which is where anyone who uses
             // a terminal puts it anyway.
             [.modifier(.control, width: .wide(1.75))]
@@ -361,10 +367,7 @@ public struct KeyboardLayout: Equatable, Sendable {
         // with ← and → either side. The blanks are what make that shape
         // possible — a T needs its holes as much as its keys.
         let navigationRows: [[KeyCap]] = [
-            // Backspace sits at the top of the cluster, immediately right of
-            // the return key's upper half — roughly where it is on a full
-            // keyboard, and out of the corner the L needs.
-            [.key(.backspace, repeats: true), .key(.home), .key(.pageUp)],
+            [.blank, .key(.home), .key(.pageUp)],
             [.blank, .key(.end), .key(.pageDown)],
             [.blank, .key(.up, repeats: true), .blank],
             [.key(.left, repeats: true), .key(.down, repeats: true),
