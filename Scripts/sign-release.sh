@@ -82,7 +82,29 @@ fi
 
 echo "==> Signature"
 codesign --verify --strict --verbose=2 "$APP"
-codesign -d --entitlements - "$APP" 2>/dev/null | grep -A3 keychain-access-groups || true
+
+# Assert, don't print. Building with a different TEAM_ID produces an app whose
+# entitlement expands to <OTHER>.org.szatmary.sloop.shared while
+# KeychainKeyStore.sharedAccessGroup is hardcoded to KR5WZAG3UE — every
+# key-library call then fails at runtime while the script reports success.
+for group in "$TEAM_ID.org.szatmary.sloop" "$TEAM_ID.org.szatmary.sloop.shared"; do
+  if ! codesign -d --entitlements - "$APP" 2>/dev/null | grep -q "$group"; then
+    echo "error: signed app is missing the '$group' keychain-access-group." >&2
+    echo "       The key library will fail at runtime. Check TEAM_ID and the" >&2
+    echo "       provisioning profile." >&2
+    exit 1
+  fi
+done
+
+# Notarization requires the hardened runtime, and without it any process
+# running as the same user can attach to Sloop and read private keys,
+# passphrases and live session plaintext out of its memory. It comes from the
+# ENABLE_HARDENED_RUNTIME build setting; verify it actually landed.
+if ! codesign -d --verbose=2 "$APP" 2>&1 | grep -q "flags=.*runtime"; then
+  echo "error: the exported app does not have the hardened runtime." >&2
+  echo "       Check ENABLE_HARDENED_RUNTIME in project.yml." >&2
+  exit 1
+fi
 
 if [ -n "${SKIP_NOTARIZE:-}" ]; then
   echo "==> Skipping notarization (SKIP_NOTARIZE set). App: $APP"
@@ -118,7 +140,7 @@ rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
 
 echo "==> Gatekeeper assessment"
-spctl --assess --type execute --verbose=2 "$APP" || true
+spctl --assess --type execute --verbose=2 "$APP"
 
 echo
 echo "Done:"

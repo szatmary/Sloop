@@ -54,6 +54,10 @@ targetTemplates:
         # Shared keychain group for the key library (iCloud-synced). Only
         # effective in signed builds; see SIGNING.md.
         CODE_SIGN_ENTITLEMENTS: App/Sloop/Sloop.entitlements
+        # Required for notarization, and it denies task_for_pid: without it any
+        # process running as the same user can attach to Sloop and read private
+        # keys, passphrases and live session plaintext out of its memory.
+        ENABLE_HARDENED_RUNTIME: YES
         # arm64 only — Sloop does not support x86. Keeps simulator builds arm64
         # (no x86_64 slice) and matches the arm64-only libssh2 xcframework.
         ARCHS: arm64

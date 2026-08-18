@@ -181,6 +181,17 @@ static void mosh_run_loop(MoshSession *s) {
       }
 
       int active = ::select(maxfd + 1, &rfds, nullptr, nullptr, &tv);
+
+      // Freeze again on the way out of the wait, which is the whole reason
+      // mosh wraps select at all (its own Select::select() does exactly this).
+      // We may have slept up to a second; everything below stamps arriving
+      // packets and feeds mosh's round-trip estimator, and doing that with a
+      // pre-wait clock makes every packet look like it arrived earlier than
+      // it did. Connection::new_packet also stops echoing the peer's
+      // timestamp once its recorded arrival looks more than a second old, so
+      // a stale clock quietly degrades the *server's* RTT estimate too.
+      freeze_timestamp();
+
       if (active < 0) {
         if (errno == EINTR) continue;
         close_reason = std::string("select: ") + strerror(errno);

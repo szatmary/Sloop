@@ -87,7 +87,7 @@ enum KeyCLI {
                 // itself, so a key without one still authenticates. Storing it
                 // when available keeps the library usable by backends that
                 // can't derive (mbedTLS couldn't) and costs nothing.
-                let publicKey = try? publicKey(forPrivateKeyAt: path)
+                let publicKey = publicKey(forPrivateKeyAt: path)
                 try store.setKey(NamedKey(name: keyName,
                                           privateKeyPEM: pem,
                                           publicKey: publicKey,
@@ -126,15 +126,20 @@ enum KeyCLI {
         return text.contains("bcrypt")
     }
 
-    /// The public key to store with a private key, which key auth cannot work
-    /// without (libssh2's mbedTLS backend won't derive one — see
-    /// `Credential.publicKey`).
+    /// The public key to store alongside a private key, or nil if there isn't
+    /// one to be had.
     ///
-    /// Prefers the sibling `<path>.pub` that `ssh-keygen` writes by convention;
-    /// falls back to deriving it with `ssh-keygen -y`, which is why an
-    /// encrypted key without a `.pub` file would prompt for its passphrase
-    /// again. Throws rather than importing a key that is guaranteed to fail.
-    static func publicKey(forPrivateKeyAt path: String) throws -> String {
+    /// Genuinely optional: the OpenSSL backend derives the public key from the
+    /// private one, so a key stored without it still authenticates. It is kept
+    /// when available because a backend that *can't* derive (mbedTLS couldn't,
+    /// which is what motivated the field) then still works.
+    ///
+    /// Prefers the sibling `<path>.pub` that `ssh-keygen` writes by
+    /// convention, and otherwise derives it with `ssh-keygen -y`. Note that an
+    /// encrypted key with no `.pub` file makes `ssh-keygen` prompt for the
+    /// passphrase again on the terminal — it reads `/dev/tty` directly, so the
+    /// one already collected here cannot be handed to it.
+    static func publicKey(forPrivateKeyAt path: String) -> String? {
         let expanded = (path as NSString).expandingTildeInPath
         let sibling = expanded + ".pub"
         if let pub = try? String(contentsOfFile: sibling, encoding: .utf8),
@@ -146,15 +151,32 @@ enum KeyCLI {
         task.executableURL = URL(fileURLWithPath: "/usr/bin/ssh-keygen")
         task.arguments = ["-y", "-f", expanded]
         let out = Pipe()
+        let err = Pipe()
         task.standardOutput = out
-        task.standardError = FileHandle.nullDevice
-        try task.run()
+        task.standardError = err
+        do {
+            try task.run()
+        } catch {
+            let message = "warning: couldn't run ssh-keygen to derive a public key: "
+                + "\(error.localizedDescription)\n"
+            FileHandle.standardError.write(Data(message.utf8))
+            return nil
+        }
         let data = out.fileHandleForReading.readDataToEndOfFile()
+        let errorText = String(decoding: err.fileHandleForReading.readDataToEndOfFile(),
+                               as: UTF8.self)
         task.waitUntilExit()
         let derived = String(decoding: data, as: UTF8.self)
         guard task.terminationStatus == 0,
               !derived.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw MissingPublicKeyError(path: expanded)
+            // Report rather than swallow: the import still succeeds, but the
+            // user should know why no public key was stored.
+            let detail = errorText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let message = "warning: no public key stored for '\(expanded)' — no sibling "
+                + ".pub file and ssh-keygen -y failed"
+                + (detail.isEmpty ? "" : ": \(detail)") + "\n"
+            FileHandle.standardError.write(Data(message.utf8))
+            return nil
         }
         return derived
     }
@@ -180,14 +202,4 @@ private struct KeyExistsError: LocalizedError {
     }
 }
 
-/// Thrown when neither a sibling `.pub` nor `ssh-keygen -y` could produce the
-/// public key. Importing anyway would store a key that cannot authenticate.
-private struct MissingPublicKeyError: LocalizedError {
-    let path: String
-    var errorDescription: String? {
-        "couldn't find or derive the public key for '\(path)'. Key auth needs " +
-        "it stored alongside the private key. Put the matching '\(path).pub' " +
-        "next to it (ssh-keygen -y -f '\(path)' > '\(path).pub') and retry."
-    }
-}
 #endif

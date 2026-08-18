@@ -27,6 +27,10 @@ set -euo pipefail
 
 OPENSSL_TAG="openssl-3.5.1"
 LIBSSH2_TAG="libssh2-1.11.1"
+# Pinned: ios.toolchain.cmake is executed CMake code that picks the compiler,
+# sysroot and deployment flags for the crypto we ship. Tracking its default
+# branch would let an upstream commit silently change the shipped binary.
+IOS_CMAKE_TAG="4.6.0"
 IOS_TARGET="17.0"
 MACOS_TARGET="14.0"
 
@@ -41,7 +45,7 @@ mkdir -p "$WORK" "$OUT"
 cd "$WORK"
 
 echo "==> Fetching sources"
-git clone --depth 1 https://github.com/leetal/ios-cmake.git
+git clone --depth 1 --branch "$IOS_CMAKE_TAG" https://github.com/leetal/ios-cmake.git
 git clone --depth 1 --branch "$OPENSSL_TAG" https://github.com/openssl/openssl.git
 git clone --depth 1 --branch "$LIBSSH2_TAG" https://github.com/libssh2/libssh2.git
 
@@ -63,9 +67,18 @@ build_openssl () {
     cd "openssl-$name"
     CC="$cc" \
     CFLAGS="-arch arm64 -isysroot $sysroot $minflag" \
+    # --openssldir must NOT point into the build tree. OpenSSL bakes it into
+    # libcrypto as OPENSSLDIR and auto-loads $OPENSSLDIR/openssl.cnf on first
+    # use, so a build-tree path both leaks the builder's home directory into
+    # every shipped binary (recoverable with `strings`) and names a
+    # user-writable directory from which a planted config could load an
+    # arbitrary provider module. libssh2 needs none of that machinery, so it
+    # is disabled outright and the directory is pointed somewhere that cannot
+    # exist.
     ./Configure "$target" \
       no-shared no-tests no-docs no-legacy no-engine \
-      --prefix="$prefix" --openssldir="$prefix/ssl"
+      no-autoload-config no-module no-dso \
+      --prefix="$prefix" --openssldir=/nonexistent
     make -j"$(sysctl -n hw.ncpu)" build_libs
     make install_dev
   )

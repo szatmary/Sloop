@@ -69,9 +69,14 @@ final class KeychainKeyStore: KeyStore {
         } else {
             var insert = query
             insert[kSecValueData as String] = data
-            // AfterFirstUnlock, NOT ...ThisDeviceOnly: device-only items are
-            // excluded from iCloud Keychain sync.
-            insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            // WhenUnlocked, and NOT ...ThisDeviceOnly (device-only items are
+            // excluded from iCloud Keychain sync). AfterFirstUnlock would also
+            // sync, but it leaves the private key and its passphrase
+            // decryptable on a locked-but-booted device — the entire physical
+            // extraction window — to buy background access Sloop never needs:
+            // keys are read when a human taps Connect, which requires an
+            // unlocked device by definition.
+            insert[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
             insert[kSecAttrSynchronizable as String] = true
             let add = SecItemAdd(insert as CFDictionary, nil)
             guard add == errSecSuccess else { throw keychainError(add, "adding key '\(key.name)'") }
