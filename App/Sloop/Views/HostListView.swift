@@ -398,6 +398,25 @@ private struct SessionRow: View {
     }
 }
 
+/// A small capsule beside a host's name: how it connects, and whether it uses
+/// Mosh. Colour carries the meaning at a glance — the row is scanned, not read.
+private struct Flair: View {
+    private let text: String
+    private let tint: AnyShapeStyle
+
+    init(_ text: String, _ tint: some ShapeStyle) {
+        self.text = text
+        self.tint = AnyShapeStyle(tint)
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.caption2)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(tint.opacity(0.2), in: Capsule())
+    }
+}
+
 private struct HostRow: View {
     let host: SSHHost
     var isUnderway: Bool = false
@@ -416,22 +435,26 @@ private struct HostRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(host.alias).font(.headline)
-                    // Gated on .direct, not just useMosh: a host decoded with
-                    // both useMosh and a tunneled connectionMethod set (e.g.
-                    // from JSON predating the editor's reset-on-change)
-                    // actually connects over SSH, so showing "mosh" would
-                    // misrepresent it.
-                    if host.useMosh && host.connectionMethod == .direct {
-                        Text("mosh")
-                            .font(.caption2)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(.tint.opacity(0.2), in: Capsule())
+                    // Gated on the Access tunnel rather than on .direct: that
+                    // tunnel carries TCP over a WebSocket and cannot carry Mosh,
+                    // so a host decoded with both set (JSON predating the
+                    // editor's reset-on-change) really does connect over SSH and
+                    // "mosh" would misrepresent it. A tailnet carries UDP like
+                    // any other network, so there the badge is true.
+                    if host.useMosh && host.connectionMethod != .cloudflareAccess {
+                        Flair("mosh", .tint)
                     }
-                    if host.connectionMethod == .cloudflareAccess {
-                        Text("cloudflare")
-                            .font(.caption2)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(.orange.opacity(0.2), in: Capsule())
+                    // A switch, so a new connection method has to answer "and
+                    // what does the row say about it?" here. The hand-written
+                    // `if` this replaces covered exactly one case, and Tailscale
+                    // hosts were left showing nothing at all.
+                    switch host.connectionMethod {
+                    case .direct:
+                        EmptyView()
+                    case .cloudflareAccess:
+                        Flair("cloudflare", .orange)
+                    case .tailscale:
+                        Flair("tailnet", .purple)
                     }
                     if isUnderway {
                         // Underway: this host already has a live session.
