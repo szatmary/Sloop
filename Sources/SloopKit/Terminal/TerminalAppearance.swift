@@ -3,26 +3,29 @@
 
 import Foundation
 
-/// User-tunable look of the terminal: font size, color theme, and cursor shape.
+/// User-tunable look and input of the terminal: font size, color theme, cursor
+/// shape, and (iOS only) keyboard style.
 ///
 /// This is the platform-agnostic *model* — it holds no SwiftTerm/UIKit types, so
 /// it lives in SloopKit and is unit-tested on Linux. The app layer maps it onto
-/// the SwiftTerm `TerminalView` (font, palette, caret) and persists it.
+/// the SwiftTerm `TerminalView` (font, palette, caret, input view) and persists
+/// it.
 public struct TerminalAppearance: Codable, Equatable, Sendable {
     /// Point size of the monospaced terminal font. Kept in a sane range so the
     /// grid stays usable; see `fontSizeRange`.
     public var fontSize: Double
     public var theme: Theme
     public var cursor: CursorStyle
+    public var keyboard: KeyboardStyle
 
     private enum CodingKeys: String, CodingKey {
-        case fontSize, theme, cursor
+        case fontSize, theme, cursor, keyboard
     }
 
     /// Allowed font sizes, in points. Values are clamped into this range.
     public static let fontSizeRange: ClosedRange<Double> = 8...32
 
-    public static let `default` = TerminalAppearance(fontSize: 13, theme: .system, cursor: .block)
+    public static let `default` = TerminalAppearance(fontSize: 13, theme: .system, cursor: .block, keyboard: .standard)
 
     /// Which colors the terminal draws with.
     public enum Theme: String, Codable, CaseIterable, Sendable {
@@ -41,12 +44,28 @@ public struct TerminalAppearance: Codable, Equatable, Sendable {
         case bar
     }
 
+    /// Which software keyboard a session gets on iOS.
+    ///
+    /// This is input, not look, and this type documents itself as the terminal's
+    /// appearance — a deliberate trade. A parallel preferences model and store for
+    /// a single enum is more structure than the problem earns. If input settings
+    /// grow (repeat rate, Caps Lock remapping, hardware chords), split them out
+    /// then and widen this type's doc comment at that point.
+    public enum KeyboardStyle: String, Codable, CaseIterable, Sendable {
+        /// Apple's keyboard, with Sloop's smart-keys bar above it.
+        case standard
+        /// Sloop's compact keyboard, with the smart-keys bar folded into it.
+        case compact
+    }
+
     /// Creates an appearance, clamping `fontSize` into `fontSizeRange` so an
     /// out-of-range persisted or user value can never produce an unusable grid.
-    public init(fontSize: Double = 13, theme: Theme = .system, cursor: CursorStyle = .block) {
+    public init(fontSize: Double = 13, theme: Theme = .system, cursor: CursorStyle = .block,
+                keyboard: KeyboardStyle = .standard) {
         self.fontSize = TerminalAppearance.clampFontSize(fontSize)
         self.theme = theme
         self.cursor = cursor
+        self.keyboard = keyboard
     }
 
     /// Decoding goes through the same clamping, so a hand-edited or corrupt
@@ -57,6 +76,7 @@ public struct TerminalAppearance: Codable, Equatable, Sendable {
         self.fontSize = TerminalAppearance.clampFontSize(size)
         self.theme = try c.decodeIfPresent(Theme.self, forKey: .theme) ?? .system
         self.cursor = try c.decodeIfPresent(CursorStyle.self, forKey: .cursor) ?? .block
+        self.keyboard = try c.decodeIfPresent(KeyboardStyle.self, forKey: .keyboard) ?? .standard
     }
 
     /// Bump the font size by `delta` points, staying within range.

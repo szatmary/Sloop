@@ -30,7 +30,7 @@ struct TerminalPane: View {
         }
         #if os(iOS)
         .overlay(alignment: .bottomTrailing) {
-            if !showsFullBar {
+            if showsFloatingPill {
                 FloatingKeyPill(send: { controller.send($0) },
                                 applicationCursor: { controller.applicationCursor },
                                 restore: { _ = controller.terminalView.becomeFirstResponder() })
@@ -53,11 +53,26 @@ struct TerminalPane: View {
     }
 
     #if os(iOS)
-    /// The full bar earns its 44pt only while you are typing. A hardware keyboard
-    /// counts as typing: no software keyboard appears, so there is no height to
-    /// reclaim, and the bar is the only place those keys exist.
+    /// The full bar earns its 44pt only while you are typing on Apple's
+    /// keyboard. A hardware keyboard counts as typing: no software keyboard
+    /// appears, so there is no height to reclaim, and the bar is the only
+    /// place those keys exist. The compact keyboard is the third case: once
+    /// it's installed it folds the bar's keys — including ⌃ — into itself, so
+    /// showing the bar on top of it would both cost the 44pt compact mode
+    /// exists to reclaim and put two ⌃ buttons on screen at once.
     private var showsFullBar: Bool {
-        controller.keyboardVisible || controller.hardwareKeyboardAttached
+        controller.hardwareKeyboardAttached
+            || (controller.keyboardVisible && !controller.compactKeyboardActive)
+    }
+
+    /// The pill is how you get a dismissed keyboard back, so it only makes
+    /// sense while no keyboard — hardware, or software of either style — is
+    /// up. This is deliberately not `!showsFullBar`: when the compact
+    /// keyboard is visible, `showsFullBar` is false too, but the pill still
+    /// doesn't belong on screen, since the keyboard the pill would restore is
+    /// already there.
+    private var showsFloatingPill: Bool {
+        !controller.keyboardVisible && !controller.hardwareKeyboardAttached
     }
     #endif
 }

@@ -65,6 +65,21 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     /// stays false and must not be read as "there is room to reclaim".
     var hardwareKeyboardAttached: Bool { GCKeyboard.coalesced != nil }
 
+    /// Whether Sloop's compact keyboard — as opposed to Apple's — is the
+    /// current `inputView`. Set only from `setCompactKeyboard(_:)`, the single
+    /// place that installs or clears it, so this can never drift from what's
+    /// actually attached to `terminalView`.
+    ///
+    /// `TerminalPane` reads this (with `keyboardVisible` and
+    /// `hardwareKeyboardAttached`) to decide whether `KeyboardAccessoryBar`
+    /// belongs on screen: the compact keyboard folds the bar's keys into
+    /// itself, so showing both would waste the 44pt compact mode exists to
+    /// reclaim and put two ⌃ buttons on screen at once. Published, not a
+    /// computed read of `terminalView.inputView`, so a view observing this
+    /// controller re-renders the instant the setting changes rather than on
+    /// whatever unrelated redraw happens to come next.
+    @Published private(set) var compactKeyboardActive = false
+
     /// Tokens for the keyboard show/hide observers, removed in `close()` and
     /// `deinit` so closed/deallocated controllers don't leave dead closures
     /// registered with `NotificationCenter.default` for the life of the process.
@@ -123,8 +138,9 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         self.init(makeTransport: { transport })
     }
 
-    /// Apply the user's terminal appearance (font, colors, cursor) to the live
-    /// `TerminalView`. Safe to call repeatedly as settings change.
+    /// Apply the user's terminal appearance (font, colors, cursor and, on iOS,
+    /// keyboard style) to the live `TerminalView`. Safe to call repeatedly as
+    /// settings change.
     func apply(_ appearance: TerminalAppearance) {
         terminalView.font = PlatformFont.monospacedSystemFont(
             ofSize: CGFloat(appearance.fontSize), weight: .regular)
@@ -143,6 +159,12 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         case .bar: code = 6        // steady bar
         }
         terminalView.feed(text: "\u{1b}[\(code) q")
+
+        // Kept in its own branch so the keyboard concern stays separable
+        // from font and palette.
+        #if os(iOS)
+        setCompactKeyboard(appearance.keyboard == .compact)
+        #endif
     }
 
     private static func colors(
@@ -224,16 +246,18 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     /// the system keyboard. Reloading is required because UIKit caches the input
     /// view for as long as the responder stays first responder.
     ///
-    /// Idempotent by construction, not just convention: `apply(_:)` (Task 8)
-    /// calls this on every appearance change, not only when the
-    /// compact-keyboard setting itself changes. Rebuilding unconditionally
-    /// would tear down and recreate the live `CompactKeyboardView` — killing
-    /// any touch currently being tracked — every time the font size or theme
-    /// changes while it's on screen.
+    /// Idempotent by construction, not just convention: `apply(_:)` calls this
+    /// on every appearance change, not only when the compact-keyboard setting
+    /// itself changes. Rebuilding unconditionally would tear down and
+    /// recreate the live `CompactKeyboardView` — killing any touch currently
+    /// being tracked — every time the font size or theme changes while it's
+    /// on screen. `compactKeyboardActive` mirrors the outcome for
+    /// `TerminalPane` to read.
     func setCompactKeyboard(_ enabled: Bool) {
         let alreadyEnabled = terminalView.inputView is CompactKeyboardView
         guard enabled != alreadyEnabled else { return }
         terminalView.inputView = enabled ? CompactKeyboardView(controller: self) : nil
+        compactKeyboardActive = enabled
         if terminalView.isFirstResponder {
             terminalView.reloadInputViews()
         }

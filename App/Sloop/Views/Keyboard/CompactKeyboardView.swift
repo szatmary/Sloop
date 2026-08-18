@@ -15,10 +15,10 @@ import SloopKit
 /// entirely vertical, and vertical is the axis a terminal wants back.
 ///
 /// This view sizes itself from the resolved layout instead of accepting the
-/// system's height. It does not fold `KeyboardAccessoryBar` in — `TerminalPane`
-/// still shows that bar whenever the keyboard is visible, so today the two
-/// coexist on screen. Task 8 adds the setting `TerminalPane` needs to hide the
-/// bar once this keyboard is installed.
+/// system's height. It does not fold `KeyboardAccessoryBar` in as a subview —
+/// instead `TerminalPane` hides that bar once this keyboard is installed
+/// (`TerminalController.compactKeyboardActive`), so the two never coexist on
+/// screen.
 final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAudioFeedback {
     private weak var controller: TerminalController?
     private var layout: KeyboardLayout
@@ -41,15 +41,17 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
         rebuild()
 
         // The highlight is driven off the publisher, not pushed manually,
-        // because `armedModifiers` is mutated from three other places this
-        // view doesn't otherwise observe: `KeyboardAccessoryBar.toggle(_:)`
-        // and `.emit(_:)`, and `TerminalController.send(source:data:)` (which
-        // clears it on hardware-keyboard input). `TerminalPane` renders the
-        // accessory bar whenever the keyboard is visible, so both ⌃ buttons
-        // are on screen at once; without this subscription they could
-        // disagree — the bar clears the modifier, this view's ⌃ stays lit,
-        // and the next character is encoded with a modifier the user can no
-        // longer see is armed.
+        // because `armedModifiers` is mutated from other places this view
+        // doesn't otherwise observe: `KeyboardAccessoryBar.toggle(_:)` and
+        // `.emit(_:)` — armed there before the setting was switched to
+        // compact, so the value can already be non-empty by the time this
+        // view is built — and `TerminalController.send(source:data:)`, which
+        // clears it on hardware-keyboard input reaching SwiftTerm directly,
+        // bypassing this view entirely. Without this subscription this
+        // view's own ⌃ could go stale relative to either — staying lit after
+        // the modifier it represents was already cleared elsewhere, with the
+        // next character typed here then encoded with a modifier the user
+        // can no longer see is armed.
         armedModifiersCancellable = controller.$armedModifiers.sink { [weak self] armed in
             self?.applyArmed(armed)
         }
