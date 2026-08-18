@@ -77,8 +77,8 @@ struct TerminalSettingsView: View {
                     synced — not to iCloud, not to another device you own — and \
                     it is never sent to a server, to Sloop's author, or to \
                     anyone else, for any reason. There is no analytics, no \
-                    telemetry, and no account. Turning this off stops the \
-                    recording as well as the suggestions.
+                    telemetry, and no account. A host with suggestions switched \
+                    off is not recorded at all.
                     """, systemImage: "lock")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
