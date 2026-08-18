@@ -217,7 +217,9 @@ final class KeyCapView: UIControl {
         case .key(let key):            return label(for: key)
         case .modifier(let modifiers): return label(for: modifiers)
         case .chord(let modifiers, let character):
-            return label(for: modifiers) + String(character).uppercased()
+            // Lower case: "⌃C" reads as control-shift-c, which is a different
+            // key sequence and a different thing to send.
+            return label(for: modifiers) + String(character).lowercased()
         case .functionLayer:
             return "fn"
         case .command(let command):
