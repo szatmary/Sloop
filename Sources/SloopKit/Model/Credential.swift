@@ -11,10 +11,11 @@ import Foundation
 public struct Credential: Codable, Equatable {
     public var password: String?
     public var privateKeyPEM: String?
-    /// The matching public key (an OpenSSH `.pub` line). Required for key auth:
-    /// libssh2's mbedTLS backend cannot derive a public key from a private one
-    /// in memory, so without this every key authentication fails with
-    /// "Username/PublicKey combination invalid" no matter how valid the key is.
+    /// The matching public key (an OpenSSH `.pub` line). Passed to libssh2 when
+    /// present; the OpenSSL 3 backend derives it otherwise. It exists because
+    /// the mbedTLS backend this project used previously could not derive it, and
+    /// every key authentication failed with "Username/PublicKey combination
+    /// invalid" however valid the key was.
     public var publicKey: String?
     public var passphrase: String?
 

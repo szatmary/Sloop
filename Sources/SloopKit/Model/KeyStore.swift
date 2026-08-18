@@ -10,10 +10,11 @@ public struct NamedKey: Codable, Equatable, Identifiable {
     /// Unique within the library, e.g. "id_ed25519".
     public var name: String
     public var privateKeyPEM: String
-    /// The matching public key (an OpenSSH `.pub` line). Carried alongside the
-    /// private key because libssh2's mbedTLS backend cannot derive one from the
-    /// other in memory — see `Credential.publicKey`. Optional so keys imported
-    /// before this existed still decode; those fail auth with a specific error.
+    /// The matching public key (an OpenSSH `.pub` line). Optional: the OpenSSL 3
+    /// backend derives it from the private key, so a key without one still
+    /// authenticates. Stored when available because backends differ — libssh2's
+    /// mbedTLS backend could not derive it, which is why this field exists at
+    /// all (see `Docs/SSH.md`) — and because it costs a few hundred bytes.
     public var publicKey: String?
     public var passphrase: String?
 

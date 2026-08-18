@@ -1,6 +1,6 @@
 # Sloop — handoff & ship-readiness
 
-_Last updated: 2026-08-08._
+_Last updated: 2026-08-18._
 
 Sloop is a free, native terminal for Apple platforms (iPhone, iPad, Mac): an
 SSH terminal with an optional Mosh (UDP/SSP) transport, modeled on "blink shell
@@ -9,16 +9,20 @@ shipping — read it first.
 
 ## What's the honest status?
 
-**Feature-complete for a v1, and everything builds + unit-tests green in CI on
-iOS and macOS — but nothing has been run on real hardware yet.** CI proves the
-code compiles, links, and passes SloopKit's unit tests. It does **not** prove a
-live SSH or Mosh session actually works end-to-end. That runtime gap is the
-biggest open risk and needs a human at a Mac with Xcode.
+**Feature-complete for a v1. SSH and Mosh both connect from an iPad against a
+live host; what remains is coverage, not capability.** The first device tests
+paid for themselves immediately: every serious defect so far was invisible to
+the compiler, the unit tests and CI alike — a public key never passed to
+libssh2 (so *all* key auth failed), a frozen clock that let Mosh send exactly
+one packet per session, and a "C" locale that truncated every multi-byte
+character to its lead byte. Assume the same of what hasn't been run yet: the
+key types below, and Mosh roaming across a network change.
 
 ### Done and green in CI
 
-- **Local echo terminal**, **SSH** (libssh2: connect, host-key TOFU + mismatch
-  refusal, password & private-key auth, PTY shell, resize).
+- **SSH** (libssh2 over OpenSSL 3: connect, host-key TOFU + mismatch refusal,
+  password & private-key auth, PTY shell, resize). The local echo terminal that
+  came first has been removed — it only ever demonstrated the `Transport` seam.
 - **Mosh**: mosh 1.4.0's client core + protobuf cross-compiled to
   `mosh.xcframework`; an Objective-C++ bridge (`MoshBridge`) over
   `Network::Transport`; `MoshTransport` wired to per-host "Use Mosh" with
@@ -35,8 +39,9 @@ biggest open risk and needs a human at a Mac with Xcode.
 
 ### NOT done / not verifiable here
 
-- **Runtime validation** — no live SSH/Mosh session has been exercised. First
-  device test is step 1 below.
+- **Runtime validation** — SSH (RSA key) and Mosh both verified on an iPad.
+  Not yet exercised: Ed25519/ECDSA/passphrase-protected keys, Mosh roaming
+  across Wi-Fi→cellular, and the host-key mismatch path.
 - **Code signing / distribution** — the app is unsigned.
 - **Marketing assets** (App Store screenshots). The app icon itself is DONE:
   `App/Sloop/Assets.xcassets` generated from the SVG master by
@@ -51,7 +56,7 @@ biggest open risk and needs a human at a Mac with Xcode.
 brew install xcodegen
 # Pick a variant. libssh2/mosh xcframeworks come from Scripts/build-*.sh or the
 # CI artifacts of the latest run.
-xcodegen generate                       # base: local echo only, no SSH
+xcodegen generate                       # base: app only, no SSH transport
 xcodegen generate --spec project.ssh.yml   # + SSH  (needs Vendor/libssh2.xcframework)
 xcodegen generate --spec project.mosh.yml  # + SSH + Mosh (needs libssh2 + mosh xcframeworks)
 open Sloop.xcodeproj
@@ -121,14 +126,14 @@ problem — it goes away with Developer ID signing + notarization (a ship step).
 
 ## First-device-test checklist
 
-- [ ] App launches on iPhone, iPad, and Mac; host list renders.
-- [ ] **Local terminal** echoes input.
+- [x] App launches on iPad; host list renders.
 - [ ] **SSH password** login to a real host; shell is interactive; resize works.
 - [x] **SSH key** login — RSA verified on an iPad against a live host
       (2026-08-17).
 - [ ] **Host-key prompt** appears for an unknown host; mismatch is refused.
-- [ ] **Mosh**: on a host with `mosh-server`, "Use Mosh" connects over UDP and
-      renders; kill Wi-Fi→cellular and confirm it resumes (roaming).
+- [x] **Mosh**: connects over UDP and renders (2026-08-18, after the locale fix
+      — box drawing and accented characters were arriving as their lead byte).
+- [ ] **Mosh roaming**: kill Wi-Fi→cellular mid-session and confirm it resumes.
 - [ ] **Mosh fallback**: on a host without `mosh-server`, it falls back to SSH
       with the notice.
 - [ ] **Tabs**: open several; switch; background tabs stay connected; ⌘T/⌘W/

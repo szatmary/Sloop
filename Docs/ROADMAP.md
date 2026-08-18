@@ -6,11 +6,12 @@ top of a working SSH terminal rather than first.
 
 ## M0 — Scaffold ✅ (this commit)
 
-- SloopKit core: `Transport`, `EchoTransport`, `TerminalSession`, `Host`,
-  `HostStore`, `Credential`, `LibSSH2Transport` skeleton, `MoshBootstrap`.
+- SloopKit core: `Transport`, `TerminalSession`, `Host`, `HostStore`,
+  `Credential`, `LibSSH2Transport` skeleton, `MoshBootstrap`.
 - SwiftUI multiplatform app wrapping SwiftTerm; host list + editor.
-- **Local terminal** (echo) runs on device/simulator.
-- Unit tests for echo, Mosh handshake parsing, host persistence.
+- A local echo terminal ran here as the first thing on screen; it was removed
+  once SSH and Mosh both worked, since it only ever demonstrated the seam.
+- Unit tests for Mosh handshake parsing and host persistence.
 
 ## M1 — SSH terminal ✅
 
@@ -26,8 +27,9 @@ top of a working SSH terminal rather than first.
 
 - [x] External-keyboard shortcuts (arrows, Ctrl/Alt/Meta chords) via key commands.
 - [x] Sticky-modifier smart-keys bar (Ctrl/Alt held for the next key).
-- [ ] Font, color scheme, and cursor settings.
-- [ ] iPad multi-window tabs.
+- [x] Font, color scheme, and cursor settings (`TerminalSettingsView`).
+- [x] Tabs, and a home screen that lists open sessions so you can jump to one.
+- [ ] iPad multi-window tabs (separate windows, not the in-app tabs above).
 
 ## M3 — Mosh ✅
 
@@ -38,7 +40,9 @@ top of a working SSH terminal rather than first.
       roaming across network changes and app resume.
 - [x] Per-host "Use Mosh" honored end-to-end (`MoshOrSSHTransport`, with graceful
       SSH fallback when `mosh-server` is missing).
-- [ ] Runtime validation against a live `mosh-server` (CI proves it builds/links).
+- [x] Runtime validation against a live `mosh-server`. It found two bugs no test
+      could: a frozen clock that sent exactly one packet per session, and a "C"
+      locale that truncated every multi-byte character to its lead byte.
 
 ## M4 — Ship (the remaining finish line — see `Docs/HANDOFF.md`)
 
@@ -46,11 +50,14 @@ top of a working SSH terminal rather than first.
 - [x] Licensing files: `LICENSE` (GPL-3.0) + `THIRD-PARTY-NOTICES.md`. The
       GPL-3.0/App-Store posture is decided (`Docs/LICENSING.md`); only your
       sign-off on the residual risk remains.
-- [ ] **Runtime validation on real hardware** — first device test (biggest
-      open risk; nothing has run live yet). Checklist in `Docs/HANDOFF.md`.
+- [ ] **Runtime validation on real hardware** — SSH and Mosh both connect from
+      an iPad. Remaining: Ed25519/ECDSA/passphrase-protected keys, and Mosh
+      roaming across Wi-Fi→cellular. Checklist in `Docs/HANDOFF.md`.
 - [x] App icon: `AppIcon.appiconset` generated from the SVG master
       (`Scripts/generate-appicon.sh`); launch screen is system-generated.
-- [ ] Code signing + notarization (currently unsigned).
+- [ ] Code signing + notarization. Releases are ad-hoc signed today;
+      `Scripts/sign-release.sh` and `Docs/SIGNING.md` cover the Developer ID
+      path, which needs notarytool credentials stored once.
 - [ ] App Store Connect listing + submission.
 - [ ] Background-connection handling and reconnect polish (Mosh roaming exists;
       exercise it on-device).
@@ -80,13 +87,9 @@ top of a working SSH terminal rather than first.
   to diagnose and cannot be recovered from automatically. It wants its own
   piece of work: it changes `ConnectionState`, which both the terminal UI and
   the tunnel work build on. (Found by the Cloudflare Access session, 2026-08.)
-- **On-connect command** — a per-host command run automatically once the shell
-  is up, so a host can drop you straight into a session rather than a bare
-  prompt. The motivating case is `tmux attach || tmux new` (or `tmux a`):
-  reconnecting to the same multiplexed session is the normal workflow on a
-  phone or tablet, where the network drops constantly. Worth deciding whether
-  it runs in the PTY (visible, and the user can Ctrl-C out of it) or as an
-  exec channel, and whether a failed command should leave the plain shell.
+- ~~On-connect command~~ → DONE: a per-host command typed into the PTY on every
+  connect and reconnect, with `tmux attach || tmux new` offered as a suggestion
+  above the keyboard. Visible in the terminal, so Ctrl-C leaves the plain shell.
 - **Custom compact keyboard** — replace the system keyboard with a
   terminal-shaped one via SwiftTerm's settable `inputView`, folding today's
   smart-keys bar into the keyboard instead of stacking a row above it. The

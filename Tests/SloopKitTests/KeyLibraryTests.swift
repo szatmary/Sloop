@@ -132,9 +132,10 @@ final class KeyLibraryTests: XCTestCase {
                                                     keys: UnreadableKeyStore()))
     }
 
-    /// The public key must reach the transport: libssh2's mbedTLS backend
-    /// can't derive it from the private key, so dropping it here breaks every
-    /// key authentication — the bug that made SSH unusable on device.
+    /// The public key must reach the transport when the library has one. Under
+    /// the mbedTLS backend, which could not derive it from the private key,
+    /// dropping it here broke every key authentication — the bug that made SSH
+    /// unusable on device. OpenSSL 3 derives it, so this is now belt and braces.
     func testResolvedCredentialCarriesThePublicKey() throws {
         let keys = InMemoryKeyStore()
         try keys.setKey(NamedKey(name: "id_rsa",

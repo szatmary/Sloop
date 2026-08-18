@@ -11,8 +11,9 @@
                        │  Transport protocol
 ┌──────────────────────┴─────────────────────┐
 │ SloopKit  (Foundation only, testable)       │
-│  Transport  EchoTransport  TerminalSession  │
-│  LibSSH2Transport   MoshBootstrap           │
+│  Transport  TerminalSession  OpenSessions   │
+│  LibSSH2Transport  MoshTransport            │
+│  MoshBootstrap  MoshOrSSHTransport          │
 │  Host  HostStore  Credential  SSHError      │
 └─────────────────────────────────────────────┘
 ```
@@ -35,10 +36,16 @@ protocol Transport: AnyObject {
 
 Implementations:
 
-- **`EchoTransport`** — local, no network. Ships today.
-- **`LibSSH2Transport`** — libssh2 shell channel. Skeleton in place.
-- **`MoshTransport`** — Mosh SSP over UDP. Not started; `MoshBootstrap` parses
-  the handshake it will need.
+- **`LibSSH2Transport`** — a libssh2 shell channel over OpenSSL 3.
+- **`MoshTransport`** — Mosh SSP over UDP, via the `MoshBridge` Objective-C++
+  shim over mosh's C++ client core. `MoshBootstrap` parses the `MOSH CONNECT`
+  handshake that starts it.
+- **`MoshOrSSHTransport`** — composes the two: probes for `mosh-server` over an
+  SSH exec channel and activates whichever transport the host can support,
+  buffering input and geometry until that's decided.
+
+An `EchoTransport` came first — local, no network — and was removed once both
+real transports worked. It only ever demonstrated this seam.
 
 `SwiftTermView.Coordinator` is the only place the two worlds meet: it implements
 `TerminalViewDelegate` (SwiftTerm → us) and pumps `onData` back into the view.

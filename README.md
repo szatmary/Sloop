@@ -4,9 +4,10 @@ A free, native terminal for Apple platforms — iPhone, iPad, Mac, and tvOS.
 SSH and Mosh, a real terminal emulator, and proper keyboard support — a
 first-class mobile shell, native and given away.
 
-> **Status: early scaffold.** The core library and app skeleton are in place and
-> a local echo terminal runs today. SSH (libssh2) and Mosh are stubbed with a
-> clear integration path. See [`Docs/ROADMAP.md`](Docs/ROADMAP.md).
+> **Status: working, unreleased.** SSH (libssh2 + OpenSSL 3) and Mosh both
+> connect on device, with a shared key library synced through iCloud Keychain
+> and host-key pinning. Not yet signed for distribution or tested across the
+> full range of key types. See [`Docs/ROADMAP.md`](Docs/ROADMAP.md).
 
 ## Architecture
 
@@ -19,12 +20,11 @@ Sloop is split so the logic is testable without a Mac and the UI stays thin:
 
 The seam between them is the [`Transport`](Sources/SloopKit/Terminal/Transport.swift)
 protocol: bytes in via `onData`, keystrokes out via `send`. The UI never needs to
-know whether it's talking to a local echo loop, an SSH channel, or a Mosh
-session.
+know whether it's talking to an SSH channel or a Mosh session.
 
 - **Terminal renderer:** [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)
   (MIT), xterm-compatible, native.
-- **SSH:** libssh2, to be vendored as an `.xcframework` — see [`Docs/SSH.md`](Docs/SSH.md).
+- **SSH:** libssh2 over OpenSSL 3, vendored as an `.xcframework` — see [`Docs/SSH.md`](Docs/SSH.md).
 - **Mosh:** cross-compiled client — see [`Docs/MOSH.md`](Docs/MOSH.md).
 
 ## Getting started (macOS)
@@ -35,10 +35,14 @@ xcodegen generate
 open Sloop.xcodeproj
 ```
 
-Pick the `Sloop_iOS` or `Sloop_macOS` scheme and run. The **Local terminal** row
-works immediately; saved hosts show an SSH "not built yet" fallback until the
-libssh2 xcframework is linked (`Docs/SSH.md`). tvOS is deferred — see
+Pick the `Sloop_iOS` or `Sloop_macOS` scheme and run, then add a host and
+connect. The plain `project.yml` builds without SSH: link the libssh2
+xcframework (`Docs/SSH.md`) for real connections, and generate from
+`project.mosh.yml` to include Mosh (`Docs/MOSH.md`). tvOS is deferred — see
 `Docs/ROADMAP.md`.
+
+On a Mac, `Scripts/sloop import-key ~/.ssh/id_ed25519` puts a key into the
+shared library, where every device running Sloop will find it.
 
 ## Testing the core
 
