@@ -126,11 +126,12 @@ final class HostListModel: ObservableObject {
     /// thing automatically on a rejected dial) — a way out without waiting
     /// for the JWT's own `exp` to pass.
     ///
-    /// This only clears the app's own stored token. `AccessLoginView` uses
-    /// `WKWebView`'s persistent cookie store on purpose, so the identity
-    /// provider's session in the web view survives this — a real sign-out
-    /// would also need to clear that data store. A known, accepted
-    /// limitation, not an oversight.
+    /// Clearing the stored token is enough to make this a real sign-out:
+    /// `AccessLoginView` runs on a non-persistent website data store, so the
+    /// web view keeps no `CF_Authorization` cookie of its own between
+    /// presentations and the next sheet has to go through Access and the IdP
+    /// again. (When it kept a persistent store, the sheet re-captured the very
+    /// token this method had just removed, which made signing out a no-op.)
     func signOutOfCloudflareAccess(_ host: SSHHost) {
         try? accessTokens.removeToken(for: host.hostname)
     }

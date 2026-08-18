@@ -9,8 +9,8 @@ import SloopKit
 /// Browser SSO for a Cloudflare Access-protected hostname. Loads
 /// `https://<hostname>`, lets Access bounce through the IdP, and captures the
 /// resulting `CF_Authorization` cookie — which IS the Access JWT — from the
-/// web view's cookie store. The default (persistent) store is used on purpose:
-/// the IdP session survives, so token renewals need no password re-entry.
+/// web view's cookie store. That store is deliberately non-persistent; see
+/// `AccessWebView.makeWebView`.
 ///
 /// Every way the sheet can end without a token — the user cancels, swipes
 /// the sheet away, the hostname doesn't parse as a URL, or the navigation
@@ -71,8 +71,31 @@ private struct AccessWebView {
     let onToken: (String) -> Void
     let onFailure: (String) -> Void
 
+    /// Builds the web view the sheet runs in, on a **non-persistent** website
+    /// data store.
+    ///
+    /// This is the difference between a sign-in and a loop. With `WKWebView`'s
+    /// default, persistent store, the browser keeps the `CF_Authorization`
+    /// cookie across presentations — so the moment the sheet opened, the very
+    /// first `didFinish` re-captured the *same* JWT the app had just decided
+    /// was unusable (`TokenClearingDialer` clears a token the edge rejected;
+    /// "Sign Out of Cloudflare Access" clears one deliberately), committed it,
+    /// and closed the sheet before the user could touch anything. The dial
+    /// 403s, the sheet opens again, and around it goes until the JWT's own
+    /// `exp` finally passes — with "Sign Out" doing nothing observable in the
+    /// meantime.
+    ///
+    /// A store scoped to this one sheet has no cookie to re-capture, so
+    /// whatever comes back is the result of an actual round trip through
+    /// Cloudflare Access and the identity provider. The cost is the thing it
+    /// buys: the IdP session no longer outlives the sheet, so a renewal asks
+    /// the IdP again rather than completing silently. Most IdPs answer that
+    /// from their own session and it is a redirect, not a password prompt —
+    /// and a token the app cannot escape is a far worse trade.
     func makeWebView(coordinator: Coordinator) -> WKWebView {
-        let webView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = coordinator
         guard let url = URL(string: "https://\(hostname)") else {
             // Report asynchronously: this runs during the representable's

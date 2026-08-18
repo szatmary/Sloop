@@ -114,16 +114,17 @@ authenticated identity produces `SSHError.accessDenied`.
 
 ### Two things worth knowing
 
-- **No true "sign out."** `AccessLoginView` uses `WKWebView`'s default,
-  persistent `WKWebsiteDataStore` on purpose — it's what lets a token renewal
-  skip the IdP prompt on an otherwise-still-logged-in browser. The cost: the
-  IdP session outlives the stored token. The host list's "Sign Out of
-  Cloudflare Access" context-menu action, deleting a host, and
-  `TransportFactory` clearing a token the edge itself rejects
-  (`TokenClearingDialer`) all remove the local keychain token via
-  `AccessTokenStore.removeToken`, but none of them end that IdP session, so
-  the next login completes silently rather than asking for credentials
-  again. A real sign-out would need to clear the web view's data store too.
+- **The login sheet keeps nothing.** `AccessLoginView` runs on a
+  *non-persistent* `WKWebsiteDataStore`, so no `CF_Authorization` cookie
+  survives from one presentation to the next and every sheet is a real round
+  trip through Access and the IdP. That is what makes clearing the stored
+  token — "Sign Out of Cloudflare Access", deleting a host, or
+  `TokenClearingDialer` dropping a token the edge rejected — actually mean
+  something. With the default persistent store it did not: the sheet's first
+  `didFinish` re-captured the same cookie, committed it, and closed itself
+  before the user could act, so a rejected token reinstated itself until its
+  own `exp` passed. The cost is that a renewal asks the IdP again instead of
+  completing from a still-logged-in browser session.
 - **A parent-domain cookie is accepted.** `accessCookieDomainMatches`
   ([`Sources/SloopKit/Cloudflare/AccessCookie.swift`](../Sources/SloopKit/Cloudflare/AccessCookie.swift))
   treats a `CF_Authorization` cookie scoped to `.example.com` as valid for
