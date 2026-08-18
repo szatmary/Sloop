@@ -2,6 +2,7 @@
 // GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
 
 import SwiftUI
+import Combine
 import SloopKit
 
 /// The app-layer wrapper around `OpenSessions` (the pure tab model in SloopKit).
@@ -22,10 +23,30 @@ final class SessionsModel: ObservableObject {
 
     private var controllers: [TerminalSession.ID: TerminalController] = [:]
 
+    /// Keeps every open terminal restyled as `AppearanceStore.shared.appearance`
+    /// changes, independent of any particular SwiftUI view being on screen to
+    /// observe it. `TerminalTabsView` used to do this itself via `.onChange`,
+    /// but that view only exists while `HostListView`'s
+    /// `.navigationDestination(isPresented:)` is showing it — and on iOS the
+    /// only route to Terminal Settings is from the host list, reachable
+    /// exactly when that destination is typically NOT showing (you navigate
+    /// back to the host list to reach the settings gear). So changing a
+    /// setting there could restyle nothing until the terminal happened to be
+    /// reopened and the setting changed again from inside it. Subscribing
+    /// here instead ties the restyle to the model that owns the controllers,
+    /// not to view lifecycle.
+    private var appearanceCancellable: AnyCancellable?
+
     var sessions: [TerminalSession] { open.sessions }
     var selectedID: TerminalSession.ID? { open.selectedID }
     var isEmpty: Bool { open.isEmpty }
     var count: Int { open.count }
+
+    init() {
+        appearanceCancellable = AppearanceStore.shared.$appearance.sink { [weak self] appearance in
+            self?.applyAppearance(appearance)
+        }
+    }
 
     /// Open a session as a new tab, build its controller (which starts
     /// connecting immediately), and make it active.

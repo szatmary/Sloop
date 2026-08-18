@@ -12,7 +12,6 @@ import UIKit
 /// so background tabs keep their connections live and their output up to date.
 struct TerminalTabsView: View {
     @ObservedObject var model: SessionsModel
-    @ObservedObject private var appearance = AppearanceStore.shared
     @Environment(\.dismiss) private var dismiss
     /// The back chevron is shown briefly on arrival and then fades: it is there
     /// to teach the edge-swipe, not to sit permanently on top of output.
@@ -59,8 +58,10 @@ struct TerminalTabsView: View {
             }
         )
         #endif
-        // Restyle every open terminal when appearance settings change.
-        .onChange(of: appearance.appearance) { _, new in model.applyAppearance(new) }
+        // Restyling on appearance change is handled by `SessionsModel`
+        // itself (subscribed to `AppearanceStore.shared.$appearance`), not
+        // here — this view isn't reliably on screen when a setting changes;
+        // see the doc comment on `SessionsModel.appearanceCancellable`.
         .navigationTitle(model.selectedTitle)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
