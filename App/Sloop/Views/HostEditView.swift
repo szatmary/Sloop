@@ -20,6 +20,7 @@ struct HostEditView: View {
     @State private var saveError: String?
     @State private var showingMoshHelp = false
     @State private var showingSuggestionsHelp = false
+    @State private var showingConnectionHelp = false
     @FocusState private var commandFocused: Bool
 
     /// Ready-made on-connect commands. Reattaching to a multiplexer is why
@@ -99,10 +100,19 @@ struct HostEditView: View {
                     // saved as .tailscale used to open this editor with no
                     // matching option at all, so the picker showed nothing
                     // selected and saving silently reinterpreted the host.
-                    Picker("Connect via", selection: $host.connectionMethod) {
-                        ForEach(ConnectionMethod.allCases, id: \.self) { method in
-                            Text(method.displayName).tag(method)
+                    HStack {
+                        Picker("Connect via", selection: $host.connectionMethod) {
+                            ForEach(ConnectionMethod.allCases, id: \.self) { method in
+                                Text(method.displayName).tag(method)
+                            }
                         }
+                        Button {
+                            showingConnectionHelp = true
+                        } label: {
+                            Image(systemName: "info.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("About connection methods")
                     }
 
                     // A switch rather than an if/else, so a new connection
@@ -294,6 +304,23 @@ struct HostEditView: View {
                 }
             }
             #endif
+            .alert("Connecting to This Host", isPresented: $showingConnectionHelp) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("""
+                Direct — an ordinary SSH connection to the hostname and port \
+                below. Use this on a local network, over a VPN, or for anything \
+                reachable from where you are.
+
+                Cloudflare Access — for a host behind a Cloudflare tunnel. The \
+                hostname is the Access application's public name, there is no \
+                port, and the first connection opens a browser sign-in.
+
+                Tailscale — for a host on your tailnet. Sloop joins the tailnet \
+                itself, so the Tailscale app doesn't have to be running; the \
+                hostname is the machine's MagicDNS name or its 100.x address.
+                """)
+            }
             .alert("Command Suggestions", isPresented: $showingSuggestionsHelp) {
                 Button("OK", role: .cancel) {}
             } message: {
