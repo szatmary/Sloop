@@ -243,6 +243,7 @@ struct HostListView: View {
                 if new > old { showingTerminal = true }
                 else if new == 0 { showingTerminal = false }
             }
+            .onOpenURL { handle($0) }
         }
     }
 
@@ -295,6 +296,24 @@ struct HostListView: View {
             } else {
                 open(try model.connect(host))
             }
+        }
+    }
+
+    /// Open an `ssh://user@host` link.
+    ///
+    /// A link that names a host you already saved connects to it — it is a host
+    /// you have already trusted, with a credential you already stored. A link
+    /// that matches nothing opens the editor prefilled instead of connecting,
+    /// so adding a host stays a thing the user does rather than a thing a link
+    /// does to them. Anything that isn't a usable ssh:// URL is ignored: the
+    /// system only hands us the scheme we registered, so this is a malformed
+    /// link rather than a mistake worth interrupting anyone about.
+    private func handle(_ url: URL) {
+        guard let ssh = SSHURL(string: url.absoluteString) else { return }
+        if let existing = model.hosts.first(where: { ssh.matches($0) }) {
+            connect(existing)
+        } else {
+            editing = ssh.makeHost()
         }
     }
 
