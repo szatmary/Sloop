@@ -52,6 +52,14 @@ public struct SSHHost: Identifiable, Codable, Hashable {
     /// motivates it. Optional so host files written before this existed still
     /// decode; empty and whitespace-only values run nothing.
     public var onConnectCommand: String?
+    /// Names of library keys this host's forwarded agent may use. Empty means
+    /// no forwarding at all.
+    ///
+    /// One list rather than a `Bool` plus a list: those two can disagree, and
+    /// the disagreement that matters — forwarding "on" with nothing selected,
+    /// or "off" with keys still listed — is exactly the state that would make
+    /// the UI and the wire tell different stories.
+    public var forwardedKeys: [String]
 
     public init(id: UUID = UUID(),
                 alias: String,
@@ -61,7 +69,8 @@ public struct SSHHost: Identifiable, Codable, Hashable {
                 auth: AuthMethod = .password,
                 useMosh: Bool = false,
                 connectionMethod: ConnectionMethod = .direct,
-                onConnectCommand: String? = nil) {
+                onConnectCommand: String? = nil,
+                forwardedKeys: [String] = []) {
         self.id = id
         self.alias = alias
         self.hostname = hostname
@@ -71,11 +80,12 @@ public struct SSHHost: Identifiable, Codable, Hashable {
         self.useMosh = useMosh
         self.connectionMethod = connectionMethod
         self.onConnectCommand = onConnectCommand
+        self.forwardedKeys = forwardedKeys
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, alias, hostname, port, username, auth, useMosh, connectionMethod
-        case onConnectCommand
+        case onConnectCommand, forwardedKeys
     }
 
     public init(from decoder: Decoder) throws {
@@ -90,6 +100,9 @@ public struct SSHHost: Identifiable, Codable, Hashable {
         connectionMethod = try c.decodeIfPresent(ConnectionMethod.self,
                                                  forKey: .connectionMethod) ?? .direct
         onConnectCommand = try c.decodeIfPresent(String.self, forKey: .onConnectCommand)
+        // decodeIfPresent, like connectionMethod above: host files written
+        // before this field existed decode as "not forwarding".
+        forwardedKeys = try c.decodeIfPresent([String].self, forKey: .forwardedKeys) ?? []
     }
 
     /// The command to send on connect, or nil when there's nothing to run.
@@ -99,6 +112,10 @@ public struct SSHHost: Identifiable, Codable, Hashable {
               !command.isEmpty else { return nil }
         return command
     }
+
+    /// Whether this host forwards an agent at all. Derived, never stored, so
+    /// it cannot contradict the selection.
+    public var forwardsAgent: Bool { !forwardedKeys.isEmpty }
 
     /// A display string like `matt@example.com:22`.
     public var connectionSummary: String {
