@@ -100,9 +100,17 @@ public final class KnownHostsStore: @unchecked Sendable {
             // Only "there is no file" means a fresh install. Every other read
             // failure — a permissions problem, an I/O error, a half-migrated
             // container — means a file exists that we must not clobber.
+            //
+            // Which error that is depends on the platform: Darwin's Foundation
+            // reports a Cocoa error, while swift-corelibs-foundation passes the
+            // raw ENOENT through as NSPOSIXErrorDomain. Matching only the Cocoa
+            // codes made every fresh install on Linux look like a damaged file,
+            // which put the store into its quarantine path — and quarantining a
+            // file that isn't there fails, so no host key could ever be pinned.
             let ns = error as NSError
-            let missing = ns.domain == NSCocoaErrorDomain
-                && (ns.code == NSFileNoSuchFileError || ns.code == NSFileReadNoSuchFileError)
+            let missing = (ns.domain == NSCocoaErrorDomain
+                           && (ns.code == NSFileNoSuchFileError || ns.code == NSFileReadNoSuchFileError))
+                || (ns.domain == NSPOSIXErrorDomain && ns.code == Int(ENOENT))
             self.fileUnparseable = !missing
             return
         }

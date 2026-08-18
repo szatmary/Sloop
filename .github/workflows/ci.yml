@@ -22,6 +22,20 @@ jobs:
       - name: swift test
         run: swift test
 
+  # SloopKit depends on Foundation alone, and that claim shapes real design
+  # decisions (geometry types are hand-rolled to keep CoreGraphics out). Only a
+  # Linux run holds it to account: the first one found three failures caused by
+  # swift-corelibs-foundation reporting a missing file as POSIX ENOENT where
+  # Darwin reports a Cocoa error — a difference no macOS runner can see.
+  sloopkit-tests-linux:
+    name: SloopKit unit tests (Linux)
+    runs-on: ubuntu-latest
+    container: swift:5.9
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        run: swift test
+
   app-build:
     name: Build app (iOS) · Test app (macOS)
     runs-on: macos-15
