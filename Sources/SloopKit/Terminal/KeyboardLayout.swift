@@ -43,21 +43,25 @@ public struct KeyboardLayout: Equatable, Sendable {
     public let rowHeight: Double
 
     /// What a layout varies on.
+    ///
+    /// Deliberately just these two: `resolve(for:)` branches only on `idiom`
+    /// and `orientation`. A `width` was carried here too until it was
+    /// removed as dead — nothing ever read it, and the real width a screen
+    /// has to lay keys out in is passed separately, per call, to
+    /// `frames(width:padding:spacing:)`.
     public struct Context: Equatable, Sendable, CustomStringConvertible {
         public enum Idiom: Equatable, Sendable { case phone, pad }
         public enum Orientation: Equatable, Sendable { case portrait, landscape }
 
         public let idiom: Idiom
         public let orientation: Orientation
-        public let width: Double
 
-        public init(idiom: Idiom, orientation: Orientation, width: Double) {
+        public init(idiom: Idiom, orientation: Orientation) {
             self.idiom = idiom
             self.orientation = orientation
-            self.width = width
         }
 
-        public var description: String { "\(idiom)/\(orientation)@\(Int(width))" }
+        public var description: String { "\(idiom)/\(orientation)" }
     }
 
     /// The symbols a shell needs constantly and a prose keyboard buries.

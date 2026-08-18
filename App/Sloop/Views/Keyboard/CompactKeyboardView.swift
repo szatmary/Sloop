@@ -72,12 +72,14 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
     /// What a layout varies on, resolved from `bounds` — the caller decides
     /// whose: the hosting window's own bounds once this view is attached, or
     /// `UIScreen.main.bounds` as a starting guess before it has one (i.e.
-    /// during `init`, before `setCompactKeyboard` installs it).
+    /// during `init`, before `setCompactKeyboard` installs it). Only
+    /// `bounds`' aspect ratio is read (for orientation); the actual width
+    /// used to lay out keys comes from this view's own `bounds.width` in
+    /// `layoutSubviews`, not from here — see `Context`'s doc comment.
     private static func context(for bounds: CGRect) -> KeyboardLayout.Context {
         KeyboardLayout.Context(
             idiom: UIDevice.current.userInterfaceIdiom == .pad ? .pad : .phone,
-            orientation: bounds.width > bounds.height ? .landscape : .portrait,
-            width: Double(bounds.width))
+            orientation: bounds.width > bounds.height ? .landscape : .portrait)
     }
 
     private func rebuild() {
@@ -107,9 +109,15 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
         // `traitCollectionDidChange` override never fires there on rotation.
         // Resolving fresh from this view's own window on every layout pass —
         // rather than caching a trait-driven value — catches rotation on
-        // every idiom, and reflects the app's actual window size under iPad
-        // Split View or Stage Manager rather than the whole physical screen
-        // `UIScreen.main.bounds` would report.
+        // every idiom. NOTE: `window` here is this *input view's* window
+        // (UIKit gives a keyboard its own window, separate from the app's),
+        // not the app's own window — so this does NOT reflect the app's size
+        // under Split View or Stage Manager the way it might look like it
+        // does. What it does correctly track is orientation, which rotates
+        // in lockstep with the app window regardless of which window reports
+        // it, and orientation is the only thing read here: the actual width
+        // used for layout comes from this view's own `bounds.width` below,
+        // not from `Context` (see its doc comment).
         let fresh = KeyboardLayout.resolve(for: Self.context(for: window?.bounds ?? UIScreen.main.bounds))
         if fresh != layout {
             layout = fresh

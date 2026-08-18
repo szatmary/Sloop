@@ -6,14 +6,21 @@ import XCTest
 
 final class KeyboardLayoutTests: XCTestCase {
 
-    private let padLandscape = KeyboardLayout.Context(
-        idiom: .pad, orientation: .landscape, width: 1194)
-    private let padPortrait = KeyboardLayout.Context(
-        idiom: .pad, orientation: .portrait, width: 834)
-    private let phonePortrait = KeyboardLayout.Context(
-        idiom: .phone, orientation: .portrait, width: 393)
-    private let phoneLandscape = KeyboardLayout.Context(
-        idiom: .phone, orientation: .landscape, width: 852)
+    private let padLandscape = KeyboardLayout.Context(idiom: .pad, orientation: .landscape)
+    private let padPortrait = KeyboardLayout.Context(idiom: .pad, orientation: .portrait)
+    private let phonePortrait = KeyboardLayout.Context(idiom: .phone, orientation: .portrait)
+    private let phoneLandscape = KeyboardLayout.Context(idiom: .phone, orientation: .landscape)
+
+    // Reference screen widths for the four contexts above. `Context` itself
+    // no longer carries a width (removed as dead production API — nothing in
+    // `resolve` ever read it), so the "Frames" tests below, which exercise
+    // `frames(width:padding:spacing:)`, pass these explicitly — exactly as
+    // `CompactKeyboardView` passes its own `bounds.width` at the real call
+    // site, rather than pulling a width off `Context`.
+    private let padLandscapeWidth: Double = 1194
+    private let padPortraitWidth: Double = 834
+    private let phonePortraitWidth: Double = 393
+    private let phoneLandscapeWidth: Double = 852
 
     // MARK: Shape
 
@@ -219,24 +226,27 @@ final class KeyboardLayoutTests: XCTestCase {
     private var allContexts: [KeyboardLayout.Context] {
         [padLandscape, padPortrait, phonePortrait, phoneLandscape]
     }
+    private var allWidths: [Double] {
+        [padLandscapeWidth, padPortraitWidth, phonePortraitWidth, phoneLandscapeWidth]
+    }
 
     func testFrameCountMatchesCapCount() {
-        for context in allContexts {
+        for (context, width) in zip(allContexts, allWidths) {
             let layout = KeyboardLayout.resolve(for: context)
             let capCount = layout.rows.reduce(0) { $0 + $1.count }
-            let frames = layout.frames(width: context.width, padding: framePadding, spacing: frameSpacing)
+            let frames = layout.frames(width: width, padding: framePadding, spacing: frameSpacing)
             XCTAssertEqual(frames.count, capCount, "\(context)")
         }
     }
 
     func testEveryRowsRightEdgeLandsOnWidthMinusPadding() {
-        for context in allContexts {
+        for (context, width) in zip(allContexts, allWidths) {
             let layout = KeyboardLayout.resolve(for: context)
-            let frames = layout.frames(width: context.width, padding: framePadding, spacing: frameSpacing)
+            let frames = layout.frames(width: width, padding: framePadding, spacing: frameSpacing)
             var index = 0
             for (rowIndex, row) in layout.rows.enumerated() {
                 let last = frames[index + row.count - 1]
-                XCTAssertEqual(last.x + last.width, context.width - framePadding, accuracy: 0.001,
+                XCTAssertEqual(last.x + last.width, width - framePadding, accuracy: 0.001,
                                "row \(rowIndex) of \(context)")
                 index += row.count
             }
@@ -244,21 +254,21 @@ final class KeyboardLayoutTests: XCTestCase {
     }
 
     func testNoFrameExceedsBounds() {
-        for context in allContexts {
+        for (context, width) in zip(allContexts, allWidths) {
             let layout = KeyboardLayout.resolve(for: context)
-            let frames = layout.frames(width: context.width, padding: framePadding, spacing: frameSpacing)
+            let frames = layout.frames(width: width, padding: framePadding, spacing: frameSpacing)
             for frame in frames {
                 XCTAssertGreaterThanOrEqual(frame.x, 0, "\(context)")
                 XCTAssertGreaterThanOrEqual(frame.y, 0, "\(context)")
-                XCTAssertLessThanOrEqual(frame.x + frame.width, context.width, "\(context)")
+                XCTAssertLessThanOrEqual(frame.x + frame.width, width, "\(context)")
             }
         }
     }
 
     func testFlexibleKeyIsNeverNarrowerThanAUnitKey() {
-        for context in allContexts {
+        for (context, width) in zip(allContexts, allWidths) {
             let layout = KeyboardLayout.resolve(for: context)
-            let frames = layout.frames(width: context.width, padding: framePadding, spacing: frameSpacing)
+            let frames = layout.frames(width: width, padding: framePadding, spacing: frameSpacing)
             var index = 0
             for row in layout.rows {
                 let rowFrames = Array(frames[index..<(index + row.count)])
@@ -278,9 +288,9 @@ final class KeyboardLayoutTests: XCTestCase {
     /// height it reports must actually cover every frame `frames(...)`
     /// produces, or the bottom row would be clipped.
     func testResolvedRowHeightCoversEveryFrame() {
-        for context in allContexts {
+        for (context, width) in zip(allContexts, allWidths) {
             let layout = KeyboardLayout.resolve(for: context)
-            let frames = layout.frames(width: context.width, padding: framePadding, spacing: frameSpacing)
+            let frames = layout.frames(width: width, padding: framePadding, spacing: frameSpacing)
             let maxY = frames.map { $0.y + $0.height }.max() ?? 0
             let intrinsicHeight = layout.rowHeight * Double(layout.rows.count) + framePadding * 2
             XCTAssertGreaterThanOrEqual(intrinsicHeight, maxY + framePadding, "\(context)")
@@ -292,7 +302,7 @@ final class KeyboardLayoutTests: XCTestCase {
 
     func testPhonePortraitSlotWidthsMatchHandComputedValues() {
         let layout = KeyboardLayout.resolve(for: phonePortrait)
-        let frames = layout.frames(width: phonePortrait.width, padding: framePadding, spacing: frameSpacing)
+        let frames = layout.frames(width: phonePortraitWidth, padding: framePadding, spacing: frameSpacing)
         let flat = layout.rows.flatMap { $0 }
         func frame(where predicate: (KeyCap) -> Bool) -> KeyFrame {
             frames[flat.firstIndex(where: predicate)!]
@@ -311,7 +321,7 @@ final class KeyboardLayoutTests: XCTestCase {
 
     func testPadLandscapeSlotWidthsMatchHandComputedValues() {
         let layout = KeyboardLayout.resolve(for: padLandscape)
-        let frames = layout.frames(width: padLandscape.width, padding: framePadding, spacing: frameSpacing)
+        let frames = layout.frames(width: padLandscapeWidth, padding: framePadding, spacing: frameSpacing)
         let flat = layout.rows.flatMap { $0 }
         func frame(where predicate: (KeyCap) -> Bool) -> KeyFrame {
             frames[flat.firstIndex(where: predicate)!]
