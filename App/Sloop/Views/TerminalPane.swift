@@ -15,11 +15,21 @@ struct TerminalPane: View {
     @State private var confirmingClose = false
 
     var body: some View {
+        #if os(iOS)
+        // Computed once and reused at both use sites below, so there is
+        // exactly one place — `KeyboardChrome.resolve` — that decides
+        // standard vs. compact vs. hardware, rather than two independently
+        // derived conditions that could drift apart.
+        let chrome = KeyboardChrome.resolve(
+            keyboardVisible: controller.keyboardVisible,
+            hardwareKeyboardAttached: controller.hardwareKeyboardAttached,
+            compactKeyboardActive: controller.compactKeyboardActive)
+        #endif
         VStack(spacing: 0) {
             ConnectionStatusBar(state: controller.state) { controller.reconnect() }
             SwiftTermView(controller: controller)
             #if os(iOS)
-            if showsFullBar {
+            if chrome == .fullBar {
                 KeyboardAccessoryBar(send: { controller.send($0) },
                                      applicationCursor: { controller.applicationCursor },
                                      armed: $controller.armedModifiers,
@@ -30,7 +40,7 @@ struct TerminalPane: View {
         }
         #if os(iOS)
         .overlay(alignment: .bottomTrailing) {
-            if showsFloatingPill {
+            if chrome == .floatingPill {
                 FloatingKeyPill(send: { controller.send($0) },
                                 applicationCursor: { controller.applicationCursor },
                                 restore: { _ = controller.terminalView.becomeFirstResponder() })
@@ -51,30 +61,6 @@ struct TerminalPane: View {
             Text("The connection will be closed.")
         }
     }
-
-    #if os(iOS)
-    /// The full bar earns its 44pt only while you are typing on Apple's
-    /// keyboard. A hardware keyboard counts as typing: no software keyboard
-    /// appears, so there is no height to reclaim, and the bar is the only
-    /// place those keys exist. The compact keyboard is the third case: once
-    /// it's installed it folds the bar's keys — including ⌃ — into itself, so
-    /// showing the bar on top of it would both cost the 44pt compact mode
-    /// exists to reclaim and put two ⌃ buttons on screen at once.
-    private var showsFullBar: Bool {
-        controller.hardwareKeyboardAttached
-            || (controller.keyboardVisible && !controller.compactKeyboardActive)
-    }
-
-    /// The pill is how you get a dismissed keyboard back, so it only makes
-    /// sense while no keyboard — hardware, or software of either style — is
-    /// up. This is deliberately not `!showsFullBar`: when the compact
-    /// keyboard is visible, `showsFullBar` is false too, but the pill still
-    /// doesn't belong on screen, since the keyboard the pill would restore is
-    /// already there.
-    private var showsFloatingPill: Bool {
-        !controller.keyboardVisible && !controller.hardwareKeyboardAttached
-    }
-    #endif
 }
 
 /// A thin status bar above the terminal. Hidden while connected (to maximize the
