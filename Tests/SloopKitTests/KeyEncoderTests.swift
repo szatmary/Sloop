@@ -113,13 +113,16 @@ final class KeyEncoderTests: XCTestCase {
             [0x61])
     }
 
-    /// Shift is dropped from the modifier set once resolved into the
-    /// character — only the remaining modifiers (here, control) reach
-    /// `bytes(for:modifiers:)`.
-    func testKeyCapValueCharacterKeepsNonShiftModifiersAfterResolving() {
+    /// `.key` values pass `.shift` THROUGH to `bytes(for:modifiers:applicationCursor:)`
+    /// rather than resolving and dropping it the way `.character` does — a
+    /// terminal receiving `ESC [ Z` (rather than plain tab) is how xterm
+    /// signals shift-tab (`CBT`, "cursor backward tab"). This was the
+    /// untested half of the character/key shift asymmetry this method's own
+    /// doc comment describes.
+    func testKeyCapValueKeyPassesShiftThroughForShiftTab() {
         XCTAssertEqual(
-            KeyEncoder.bytes(for: .character("c"), armedModifiers: [.control, .shift], applicationCursor: false),
-            [0x03]) // Ctrl-C: shift upper-cases 'c' to 'C', which control-masks the same as 'c'
+            KeyEncoder.bytes(for: .key(.tab), armedModifiers: .shift, applicationCursor: false),
+            [0x1b, 0x5b, 0x5a]) // ESC [ Z
     }
 
     func testKeyCapValueKeyRespectsApplicationCursorMode() {
