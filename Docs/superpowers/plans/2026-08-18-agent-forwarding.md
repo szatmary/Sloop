@@ -574,9 +574,9 @@ git commit -m "SloopKit: SSH agent protocol framing, requests and responses"
 
 **Interfaces:**
 - Consumes: `NamedKey`, `KeyStore` (existing).
-- Produces: `SSHHost.forwardedKeys: [String]`, `SSHHost.forwardsAgent: Bool` (computed, `!forwardedKeys.isEmpty`), and `KeyLibrary.forwardedKeys(for:) throws -> [NamedKey]`.
+- Produces: `SSHHost.forwardedKeys: [String]`, `SSHHost.forwardsAgent: Bool` (computed, `!forwardedKeys.isEmpty`), and `KeyLibrary.forwardedKeys(for:keys:) throws -> [NamedKey]`.
 
-Read `Sources/SloopKit/Model/KeyLibrary.swift` before starting — it already resolves `AuthMethod.publicKey(name:)` against the store and is the pattern to follow.
+Read `Sources/SloopKit/Model/KeyLibrary.swift` before starting. Note its shape: it is an `enum` used as a namespace of **static** functions taking their stores as parameters (`credential(for:keys:credentials:)`), **not** a class holding a store. The new function follows that pattern exactly — static, with `keys: KeyStore` passed in. There is no `KeyLibrary` instance to create.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -626,11 +626,22 @@ final class ForwardedKeysTests: XCTestCase {
         let store = InMemoryKeyStore()
         try store.setKey(NamedKey(name: "a", privateKeyPEM: "PEM-A"))
         try store.setKey(NamedKey(name: "b", privateKeyPEM: "PEM-B"))
-        let library = KeyLibrary(store: store)
 
-        let resolved = try library.forwardedKeys(for: host(forwarding: ["b"]))
+        let resolved = try KeyLibrary.forwardedKeys(for: host(forwarding: ["b"]), keys: store)
         XCTAssertEqual(resolved.map(\.name), ["b"])
         XCTAssertEqual(resolved.first?.privateKeyPEM, "PEM-B")
+    }
+
+    /// Selection order is the user's, and the identity list a remote sees
+    /// should follow it rather than the store's alphabetical order.
+    func testResolvedKeysFollowSelectionOrderNotStoreOrder() throws {
+        let store = InMemoryKeyStore()
+        try store.setKey(NamedKey(name: "a", privateKeyPEM: "PEM-A"))
+        try store.setKey(NamedKey(name: "b", privateKeyPEM: "PEM-B"))
+
+        XCTAssertEqual(try KeyLibrary.forwardedKeys(for: host(forwarding: ["b", "a"]),
+                                                    keys: store).map(\.name),
+                       ["b", "a"])
     }
 
     /// A name with no key behind it is dropped, not fatal. The key may have
@@ -639,9 +650,9 @@ final class ForwardedKeysTests: XCTestCase {
     func testMissingKeyNamesAreDropped() throws {
         let store = InMemoryKeyStore()
         try store.setKey(NamedKey(name: "a", privateKeyPEM: "PEM-A"))
-        let library = KeyLibrary(store: store)
 
-        XCTAssertEqual(try library.forwardedKeys(for: host(forwarding: ["a", "gone"])).map(\.name),
+        XCTAssertEqual(try KeyLibrary.forwardedKeys(for: host(forwarding: ["a", "gone"]),
+                                                    keys: store).map(\.name),
                        ["a"])
     }
 }
@@ -707,8 +718,13 @@ Add the computed property beside `trimmedOnConnectCommand`:
     /// they were selected. Names with no key behind them are dropped: a key
     /// deleted from the library after the host was configured should cost that
     /// one identity, not the whole connection.
-    public func forwardedKeys(for host: SSHHost) throws -> [NamedKey] {
-        try host.forwardedKeys.compactMap { try store.key(named: $0) }
+    ///
+    /// Throws if the store can't be read, like `credential(for:keys:credentials:)`
+    /// above and for the same reason: an unreadable library and an empty one are
+    /// not the same answer, and reporting the first as the second would silently
+    /// forward nothing.
+    public static func forwardedKeys(for host: SSHHost, keys: KeyStore) throws -> [NamedKey] {
+        try host.forwardedKeys.compactMap { try keys.key(named: $0) }
     }
 ```
 
