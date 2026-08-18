@@ -7,13 +7,20 @@
 //  Swift in the SSH-enabled variants and nowhere else — matching the
 //  `#if canImport(CSSH)` gate used across the SSH sources.
 //
-//  Each include is guarded, because the variants layer: the SSH build has
-//  libssh2 but no mosh and no tailscale. They cannot be module maps —
-//  libssh2.xcframework already ships one, and Xcode copies every xcframework's
-//  headers into a single include/ directory where two module.modulemap files
-//  collide.
+//  The angle-bracket guards below are load-bearing, because the variants
+//  layer: the SSH build links libssh2 but not tailscale, so only the variant
+//  that puts a header on the search path gets the declarations that need it.
+//  They cannot be module maps — libssh2.xcframework already ships one, and
+//  Xcode copies every xcframework's headers into a single include/ directory
+//  where two module.modulemap files collide.
 //
 
+// Not a variant guard, despite appearances: a quote-include resolves relative
+// to this file's own directory first, and MoshBridge.h always sits beside it,
+// so this is found in every build. That is fine — MoshBridge.h is
+// self-contained plain C that declares functions without requiring mosh. The
+// real gating is in MoshBridge.mm (which needs mosh's own headers) and behind
+// `#if SLOOP_MOSH` in MoshTransport.swift.
 #if __has_include("MoshBridge.h")
 #import "MoshBridge.h"
 #endif
