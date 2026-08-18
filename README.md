@@ -4,9 +4,9 @@ A free, native terminal for Apple platforms — iPhone, iPad, Mac, and tvOS.
 SSH and Mosh, a real terminal emulator, and proper keyboard support — a
 first-class mobile shell, native and given away.
 
-> **Status: early scaffold.** The core library and app skeleton are in place and
-> a local echo terminal runs today. SSH (libssh2) and Mosh are stubbed with a
-> clear integration path. See [`Docs/ROADMAP.md`](Docs/ROADMAP.md).
+> **Status: early scaffold.** The core library and app skeleton are in place;
+> SSH (libssh2) and Mosh both work end-to-end. See
+> [`Docs/ROADMAP.md`](Docs/ROADMAP.md) for what's left before it ships.
 
 ## Architecture
 
@@ -35,9 +35,9 @@ xcodegen generate
 open Sloop.xcodeproj
 ```
 
-Pick the `Sloop_iOS` or `Sloop_macOS` scheme and run. The **Local terminal** row
-works immediately; saved hosts show an SSH "not built yet" fallback until the
-libssh2 xcframework is linked (`Docs/SSH.md`). tvOS is deferred — see
+Pick the `Sloop_iOS` or `Sloop_macOS` scheme and run. Saved hosts connect over
+SSH once the libssh2 xcframework is built and linked (`Docs/SSH.md`); until
+then they show a "not built yet" fallback. tvOS is deferred — see
 `Docs/ROADMAP.md`.
 
 ## Testing the core

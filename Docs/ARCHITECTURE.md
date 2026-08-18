@@ -7,12 +7,12 @@
 │ App/Sloop  (SwiftUI, per-platform thin UI)  │
 │  SloopApp → HostListView → TerminalScreen   │
 │  SwiftTermView  ⇄  SwiftTerm.TerminalView   │
+│  LibSSH2Transport                           │
 └──────────────────────┬─────────────────────┘
                        │  Transport protocol
 ┌──────────────────────┴─────────────────────┐
 │ SloopKit  (Foundation only, testable)       │
-│  Transport  EchoTransport  TerminalSession  │
-│  LibSSH2Transport   MoshBootstrap           │
+│  Transport  TerminalSession  MoshBootstrap  │
 │  Host  HostStore  Credential  SSHError      │
 └─────────────────────────────────────────────┘
 ```
@@ -35,8 +35,8 @@ protocol Transport: AnyObject {
 
 Implementations:
 
-- **`EchoTransport`** — local, no network. Ships today.
-- **`LibSSH2Transport`** — libssh2 shell channel. Skeleton in place.
+- **`LibSSH2Transport`** — libssh2 shell channel. Lives in `App/Sloop/SSH/`
+  (not SloopKit), and takes a `Dialer` — see "Dialers" below.
 - **`MoshTransport`** — Mosh SSP over UDP. Not started; `MoshBootstrap` parses
   the handshake it will need.
 
@@ -112,11 +112,13 @@ authenticated identity produces `SSHError.accessDenied`.
 - **No true "sign out."** `AccessLoginView` uses `WKWebView`'s default,
   persistent `WKWebsiteDataStore` on purpose — it's what lets a token renewal
   skip the IdP prompt on an otherwise-still-logged-in browser. The cost: the
-  IdP session outlives the stored token. Deleting the keychain token (nothing
-  in the app UI does this yet — `AccessTokenStore.removeToken` exists but has
-  no caller) doesn't end that IdP session, so the next login completes
-  silently rather than asking for credentials again. A real sign-out would
-  need to clear the web view's data store too.
+  IdP session outlives the stored token. The host list's "Sign Out of
+  Cloudflare Access" context-menu action, deleting a host, and
+  `TransportFactory` clearing a token the edge itself rejects
+  (`TokenClearingDialer`) all remove the local keychain token via
+  `AccessTokenStore.removeToken`, but none of them end that IdP session, so
+  the next login completes silently rather than asking for credentials
+  again. A real sign-out would need to clear the web view's data store too.
 - **A parent-domain cookie is accepted.** `accessCookieDomainMatches`
   ([`Sources/SloopKit/Cloudflare/AccessCookie.swift`](../Sources/SloopKit/Cloudflare/AccessCookie.swift))
   treats a `CF_Authorization` cookie scoped to `.example.com` as valid for
