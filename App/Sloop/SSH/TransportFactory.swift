@@ -44,8 +44,10 @@ enum TransportFactory {
                   let token = accessTokens.validToken(for: host.hostname) else {
                 return nil
             }
-            return CloudflareAccessDialer(url: url, hostname: host.hostname,
-                                          token: token.raw)
+            let dialer = CloudflareAccessDialer(url: url, hostname: host.hostname,
+                                                token: token.raw)
+            return TokenClearingDialer(wrapping: dialer, hostname: host.hostname,
+                                       accessTokens: accessTokens)
         case .tailscale:
             return nil
         }
@@ -83,3 +85,56 @@ enum TransportFactory {
     }
     #endif
 }
+
+#if canImport(CSSH)
+/// Wraps a Cloudflare Access dialer so a token the edge itself rejects can't
+/// strand the host.
+///
+/// A locally-unexpired token can still be rejected server-side — the Access
+/// session was revoked, a device-posture rule was added, the cookie was
+/// parent-domain-scoped and belongs to a different Access app — and
+/// `dial()` surfaces that as `SSHError.accessLoginRequired`/`.accessDenied`.
+/// Without this, `HostListModel.needsAccessLogin` keeps finding the same
+/// locally-valid-but-server-rejected token on every retry, so the login
+/// sheet this exact error message promises never opens; the user is stuck
+/// until the JWT's own `exp` passes. Clearing the stored token on that
+/// specific failure makes the next `needsAccessLogin` check see nothing,
+/// which is what actually opens the sheet.
+///
+/// Deliberately narrow: it removes the token only for the two errors that
+/// mean "the edge rejected this token," never for a network hiccup that
+/// deserves a plain retry with the same token.
+///
+/// Internal rather than file-private so `SloopAppTests` can drive it
+/// directly against a fake `Dialer`/`AccessTokenStore` — this exact
+/// catch-and-clear behavior is the whole fix for the stranded-host bug, and
+/// exercising it only through a real WebSocket handshake to `wss://<host>`
+/// wouldn't be practical from a unit test.
+final class TokenClearingDialer: Dialer {
+    private let wrapped: Dialer
+    private let hostname: String
+    private let accessTokens: AccessTokenStore
+
+    init(wrapping wrapped: Dialer, hostname: String, accessTokens: AccessTokenStore) {
+        self.wrapped = wrapped
+        self.hostname = hostname
+        self.accessTokens = accessTokens
+    }
+
+    func dial() throws -> Int32 {
+        do {
+            return try wrapped.dial()
+        } catch {
+            switch error as? SSHError {
+            case .accessLoginRequired, .accessDenied:
+                // Best-effort: a keychain failure here must not mask the dial
+                // error that's about to be rethrown below.
+                try? accessTokens.removeToken(for: hostname)
+            default:
+                break
+            }
+            throw error
+        }
+    }
+}
+#endif

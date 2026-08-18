@@ -252,5 +252,77 @@ final class SloopAppTests: XCTestCase {
         }
         wait(for: [done], timeout: 1)
     }
+
+    // MARK: - TokenClearingDialer (stranded-host fix)
+
+    /// A `Dialer` whose `dial()` outcome is fixed at init, for driving
+    /// `TokenClearingDialer` without a real network handshake.
+    private final class StubDialer: Dialer {
+        private let result: Result<Int32, Error>
+        init(result: Result<Int32, Error>) { self.result = result }
+        func dial() throws -> Int32 { try result.get() }
+    }
+
+    /// A rejected-but-locally-unexpired token (revoked session, new
+    /// device-posture rule, wrong-app cookie — anything the edge itself
+    /// refuses) must be cleared so the next `needsAccessLogin` check opens
+    /// the login sheet instead of retrying the same dead token forever.
+    @MainActor
+    func testTokenClearingDialerClearsTokenOnAccessLoginRequired() throws {
+        let tokens = InMemoryAccessTokenStore()
+        try tokens.setRawToken("stale-token", for: "ssh.example.com")
+        let failing = StubDialer(result: .failure(SSHError.accessLoginRequired(host: "ssh.example.com")))
+        let dialer = TokenClearingDialer(wrapping: failing, hostname: "ssh.example.com",
+                                         accessTokens: tokens)
+
+        XCTAssertThrowsError(try dialer.dial()) { error in
+            guard case SSHError.accessLoginRequired = error else {
+                return XCTFail("must rethrow the original error unchanged, got \(error)")
+            }
+        }
+        XCTAssertNil(tokens.rawToken(for: "ssh.example.com"),
+                    "a rejected token must not survive to strand the next connect attempt")
+    }
+
+    /// Same clearing behavior for a policy-level denial, not just an
+    /// expired/missing session.
+    @MainActor
+    func testTokenClearingDialerClearsTokenOnAccessDenied() throws {
+        let tokens = InMemoryAccessTokenStore()
+        try tokens.setRawToken("stale-token", for: "ssh.example.com")
+        let failing = StubDialer(result: .failure(SSHError.accessDenied(host: "ssh.example.com")))
+        let dialer = TokenClearingDialer(wrapping: failing, hostname: "ssh.example.com",
+                                         accessTokens: tokens)
+
+        XCTAssertThrowsError(try dialer.dial())
+        XCTAssertNil(tokens.rawToken(for: "ssh.example.com"))
+    }
+
+    /// A plain network hiccup is not "the edge rejected this token" and must
+    /// not throw away a token that might still be perfectly good.
+    @MainActor
+    func testTokenClearingDialerKeepsTokenOnOtherFailures() throws {
+        let tokens = InMemoryAccessTokenStore()
+        try tokens.setRawToken("still-good-token", for: "ssh.example.com")
+        let failing = StubDialer(result: .failure(SSHError.connectionFailed("timed out")))
+        let dialer = TokenClearingDialer(wrapping: failing, hostname: "ssh.example.com",
+                                         accessTokens: tokens)
+
+        XCTAssertThrowsError(try dialer.dial()) { error in
+            guard case SSHError.connectionFailed = error else {
+                return XCTFail("must rethrow the original error unchanged, got \(error)")
+            }
+        }
+        XCTAssertEqual(tokens.rawToken(for: "ssh.example.com"), "still-good-token")
+    }
+
+    /// A successful dial must pass the fd through untouched.
+    @MainActor
+    func testTokenClearingDialerPassesThroughSuccess() throws {
+        let tokens = InMemoryAccessTokenStore()
+        let dialer = TokenClearingDialer(wrapping: StubDialer(result: .success(42)),
+                                         hostname: "ssh.example.com", accessTokens: tokens)
+        XCTAssertEqual(try dialer.dial(), 42)
+    }
     #endif
 }

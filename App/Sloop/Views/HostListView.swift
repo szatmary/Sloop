@@ -60,6 +60,12 @@ struct HostListView: View {
                             Button { editing = host } label: {
                                 Label("Edit…", systemImage: "pencil")
                             }
+                            if host.connectionMethod == .cloudflareAccess {
+                                Button { model.signOutOfCloudflareAccess(host) } label: {
+                                    Label("Sign Out of Cloudflare Access",
+                                          systemImage: "person.crop.circle.badge.xmark")
+                                }
+                            }
                             Button(role: .destructive) { model.delete(host) } label: {
                                 Label("Delete", systemImage: "trash")
                             }

@@ -96,6 +96,13 @@ final class HostListModel: ObservableObject {
 
     func delete(_ host: SSHHost) {
         try? credentials.removeCredential(for: host.id)
+        // A bearer credential outliving the user's decision to delete the
+        // host is wrong on its own, independent of anything else: the token
+        // is a live means of connecting as this host and must not survive
+        // the host it was captured for.
+        if host.connectionMethod == .cloudflareAccess {
+            try? accessTokens.removeToken(for: host.hostname)
+        }
         store.remove(host)
         hosts = store.hosts
     }
@@ -110,6 +117,22 @@ final class HostListModel: ObservableObject {
     /// Persist a freshly captured Access token for the host's hostname.
     func storeAccessToken(_ raw: String, for host: SSHHost) throws {
         try accessTokens.setRawToken(raw, for: host.hostname)
+    }
+
+    /// Clear the stored Cloudflare Access token for this host, so the next
+    /// connection attempt opens a fresh browser login. This is the user's
+    /// manual escape from a token the edge keeps rejecting (see
+    /// `TokenClearingDialer` in `TransportFactory`, which does the same
+    /// thing automatically on a rejected dial) — a way out without waiting
+    /// for the JWT's own `exp` to pass.
+    ///
+    /// This only clears the app's own stored token. `AccessLoginView` uses
+    /// `WKWebView`'s persistent cookie store on purpose, so the identity
+    /// provider's session in the web view survives this — a real sign-out
+    /// would also need to clear that data store. A known, accepted
+    /// limitation, not an oversight.
+    func signOutOfCloudflareAccess(_ host: SSHHost) {
+        try? accessTokens.removeToken(for: host.hostname)
     }
 
     /// Build a session for a host, pulling its credential from the store. The
