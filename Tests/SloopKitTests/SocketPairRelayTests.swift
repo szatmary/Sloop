@@ -213,9 +213,83 @@ final class SocketPairRelayTests: XCTestCase {
         }
 
         wait(for: [shutdownDone, receiverDone], timeout: 10)
-        close(relay.localFD)
+        // Join the drain thread *before* closing `localFD`, not after.
+        // `shutdown()` having returned means it ran all the way through
+        // `close(remoteFD)`, and closing the peer is what gives this thread
+        // its EOF — reliably (measured: 0 misses in 30,000 runs), unlike
+        // `shutdown()`'s own wakeup, which is not reliable at all and is what
+        // `testPumpNeverParksInsideRead` exists to keep the relay off. Closing
+        // `localFD` first, as this used to, meant closing an fd another
+        // thread could still be parked in `read()` on: a race the test has
+        // no reason to run, and one that on a bad interleaving strands that
+        // thread (a `close()` does not unpark a reader already inside
+        // `read()` on the fd being closed) and fails the `readerDone` wait
+        // for reasons unrelated to anything under test.
         wait(for: [readerDone], timeout: 5)
+        close(relay.localFD)
         // Final bounded grace period: confirm no late/delayed onLocalClosed.
         wait(for: [notClosed], timeout: 1)
+    }
+
+    /// Round-4 finding, and the load-bearing property of the fix for it.
+    ///
+    /// `shutdown()` must get the pump out of its wait on `remoteFD` before it
+    /// may free that fd's number, and its join loop has no deadline — so a
+    /// wakeup that is merely *usually* delivered is a hang, not a delay. On
+    /// Darwin that is exactly what a blocked `read()` gives you:
+    /// `shutdown(fd, SHUT_RDWR)` returning 0 does not reliably unpark a
+    /// `read(fd)` another thread is already inside. Measured on macOS 26.5
+    /// with a minimal C repro (one thread parked in `read()` on one end of an
+    /// `AF_UNIX` `socketpair`, another calling `shutdown(SHUT_RDWR)` on that
+    /// same end): 24 permanent hangs in 5,000 runs, ~0.5%, with `shutdown()`
+    /// reporting success every time. A second `shutdown()` does not help
+    /// (`ENOTCONN`); only closing the peer fd frees the reader, which is
+    /// precisely what teardown may not do yet. That is what
+    /// `testShutdownDuringConcurrentReceiveIsSafeAndSuppressesLocalClosed`
+    /// had been failing on about 1 run in 100 — not a flake, a teardown-path
+    /// hang. `poll()` on the same fd *is* reliably woken by that same
+    /// `shutdown()` (0 hangs in 50,000 runs), so the pump now waits there.
+    ///
+    /// Testing that by racing teardown is a losing proposition — the window
+    /// is under a microsecond wide, so even a 4,000-iteration stress loop
+    /// reproduced it in only about 2 runs in 5 (that version was written,
+    /// measured, and dropped in favour of this one). So assert the property
+    /// instead of the symptom: with nothing readable, the pump must be
+    /// waiting *outside* `read()`. `outboundReadCount` counts reads at the
+    /// point they are issued, so a pump parked inside one has already been
+    /// counted — which makes "did it park in `read()`?" directly observable
+    /// rather than something to be inferred from a race.
+    func testPumpNeverParksInsideRead() throws {
+        let relay = try SocketPairRelay()
+        let delivered = expectation(description: "first chunk delivered")
+        delivered.assertForOverFulfill = false
+        relay.onOutbound = { _ in delivered.fulfill() }
+        relay.start()
+
+        // One byte through, so the pump is known to be past start-up and back
+        // around its loop — without this the count could be 0 simply because
+        // the pump thread hasn't run yet, and the test would pass vacuously.
+        let chunk: [UInt8] = [7]
+        _ = chunk.withUnsafeBytes { write(relay.localFD, $0.baseAddress, chunk.count) }
+        wait(for: [delivered], timeout: 5)
+
+        // Nothing more is readable, so a correct pump is now parked in its
+        // `poll()` having issued exactly the one read. A pump that waits
+        // inside `read()` instead has already issued its second one, within
+        // microseconds of the callback returning. Poll for a bounded window
+        // rather than sleeping a fixed amount: this fails as soon as the
+        // second read appears, and only spends the full window when passing.
+        let deadline = Date().addingTimeInterval(0.25)
+        while Date() < deadline {
+            guard relay.outboundReadCount == 1 else { break }
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+        XCTAssertEqual(relay.outboundReadCount, 1,
+                       "with nothing readable the pump must be waiting in poll(), not parked "
+                     + "inside read(remoteFD, …) — shutdown() cannot reliably interrupt a "
+                     + "blocked read, and its join loop has no deadline to fall back on")
+
+        close(relay.localFD)
+        relay.shutdown()
     }
 }

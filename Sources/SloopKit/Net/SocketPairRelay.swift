@@ -44,6 +44,42 @@ public final class SocketPairRelay {
     public let localFD: Int32
     private let remoteFD: Int32
 
+    /// Read end of the pump's teardown-wakeup pipe: the pump waits on this
+    /// alongside `remoteFD` (see `waitForOutboundBytes()`), so `shutdown()`
+    /// can unpark it without depending on the socket layer to do it.
+    ///
+    /// Round-4 finding, and the reason this pipe exists at all: on Darwin,
+    /// `shutdown(fd, SHUT_RDWR)` returning 0 does *not* reliably unpark a
+    /// `read(fd)` that another thread is already blocked in. Measured on
+    /// macOS 26.5 (Darwin 25.5) with a minimal two-thread C repro — one
+    /// thread parked in `read()` on one end of an `AF_UNIX` `socketpair`,
+    /// another calling `shutdown(SHUT_RDWR)` on that same end — the reader
+    /// stayed parked forever in 24 of 5,000 runs (~0.5%), with `shutdown()`
+    /// returning 0 every time. The window is under a microsecond wide:
+    /// teardown has to land within ~1 µs of the reader entering the syscall.
+    /// Calling `shutdown()` a second time does not help: the read
+    /// side is already marked shut, so the second call short-circuits with
+    /// `ENOTCONN` before it would re-issue the wakeup. Only closing the
+    /// *peer* fd frees the reader — which is exactly what `shutdown()` is
+    /// not allowed to do yet, since it must first know the pump has stopped
+    /// touching `remoteFD`. That deadlocked `shutdown()`'s join loop
+    /// permanently; it is a teardown-path hang, i.e. every session close is
+    /// a coin flip.
+    ///
+    /// `poll()`, unlike a blocked `read()`, *is* reliably woken by that same
+    /// `shutdown()` (0 hangs in 50,000 iterations of the same repro), so
+    /// polling before reading would have been enough on its own. The pipe is
+    /// nonetheless the primary mechanism, because it makes the pump's exit
+    /// depend on nothing but this class's own state: `shutdown()` writes one
+    /// byte that is never read back, so the wake is level-triggered and
+    /// permanent — any poll entered afterward returns immediately — rather
+    /// than a one-shot edge that a badly-timed park could miss.
+    private let wakeReadFD: Int32
+    /// Write end of the wakeup pipe. Written exactly once, one byte, by the
+    /// single `shutdown()` call that gets past the idempotency guard — so it
+    /// can never block on a full pipe.
+    private let wakeWriteFD: Int32
+
     /// Guards `teardownCommitted`, `deliberateTeardown`, `started`, and
     /// `activeFDUsers` together as one state machine — small, fast
     /// transitions only, never held across a blocking syscall (see
@@ -104,6 +140,14 @@ public final class SocketPairRelay {
     /// not that extra syscall happened. Counting attempts, not inferring
     /// from what a stray one would return, is what makes the assertion
     /// deterministic instead of dependent on fd-recycling timing.
+    ///
+    /// Incremented immediately *before* each `read()`, not after it returns,
+    /// so it really is a count of attempts: a `read()` the pump is currently
+    /// blocked inside has already been counted. That is what lets
+    /// `testPumpNeverParksInsideRead` observe the difference between a pump
+    /// waiting in `poll()` and one parked inside `read()` — a distinction
+    /// that decides whether `shutdown()` can interrupt it at all, and which
+    /// is invisible to a counter that only records completed reads.
     var outboundReadCount: Int {
         lock.lock()
         defer { lock.unlock() }
@@ -116,9 +160,17 @@ public final class SocketPairRelay {
     /// from anywhere else.
     private var pumpThread: Thread?
 
-    /// Signaled once by `pumpOutbound()` right before it returns, so
+    /// Broadcast once by `pumpOutbound()` right before it returns, so
     /// `shutdown()` can wait for the pump to actually stop touching
     /// `remoteFD` before freeing its fd number.
+    ///
+    /// `broadcast()`, not `signal()`: there are two places that can be
+    /// parked here — `shutdown()`'s join loop and `waitUntilPumpExits` — and
+    /// the pump only ever passes through this once. A `signal()` would wake
+    /// exactly one of them and strand the other; `shutdown()`'s loop has no
+    /// deadline, so stranding *it* is a permanent hang. The wakeup happens
+    /// once per relay lifetime, so waking a waiter that has nothing to do
+    /// costs nothing.
     private let pumpDone = NSCondition()
     private var pumpHasExited = false
 
@@ -153,8 +205,17 @@ public final class SocketPairRelay {
             }
         }
         #endif
+        var wake: [Int32] = [0, 0]
+        guard pipe(&wake) == 0 else {
+            let failure = errno
+            close(fds[0])
+            close(fds[1])
+            throw SSHError.connectionFailed("pipe failed: errno \(failure)")
+        }
         localFD = fds[0]
         remoteFD = fds[1]
+        wakeReadFD = wake[0]
+        wakeWriteFD = wake[1]
     }
 
     /// Begin pumping. Set `onOutbound`/`onLocalClosed` before calling.
@@ -238,6 +299,15 @@ public final class SocketPairRelay {
         let calledFromPumpThread = Thread.current === pumpThread
         lock.unlock()
 
+        // Unpark the pump first, and out of band of the socket entirely: the
+        // socket poison below is what stops *other* threads' in-flight
+        // `receive()`/`finishInbound()` calls, but it cannot be relied on to
+        // free a pump already parked waiting on `remoteFD` (see
+        // `wakeReadFD`). One byte, never read back, so the wake is permanent
+        // rather than a one-shot the pump could park just after.
+        var poke: UInt8 = 1
+        _ = write(wakeWriteFD, &poke, 1)
+
         #if canImport(Darwin)
         Darwin.shutdown(remoteFD, Int32(SHUT_RDWR))
         #elseif canImport(Glibc)
@@ -259,6 +329,14 @@ public final class SocketPairRelay {
         lock.unlock()
 
         close(remoteFD)
+        // Safe at exactly the same point `remoteFD` is: the pump is the only
+        // user of these, and it has either exited (joined above) or — in the
+        // reentrant-from-a-callback case, where the join is skipped — is
+        // guaranteed by `pumpOutbound()`'s teardown checks to return without
+        // polling again. Anything weaker than that would be a use-after-close
+        // on the wakeup pipe instead of on the socket.
+        close(wakeReadFD)
+        close(wakeWriteFD)
 
         lock.lock()
         remoteFDClosedStorage = true
@@ -281,13 +359,16 @@ public final class SocketPairRelay {
     private func endUsingFD() {
         lock.lock()
         activeFDUsers -= 1
-        if activeFDUsers == 0 { lock.signal() }
+        // `broadcast()` for the same reason as `pumpDone`'s: the wait this
+        // releases (`shutdown()`'s drain loop) has no deadline, so waking
+        // the wrong single waiter would hang rather than merely delay.
+        if activeFDUsers == 0 { lock.broadcast() }
         lock.unlock()
     }
 
-    /// Whether `shutdown()` has committed to closing `remoteFD` — used by
-    /// `pumpOutbound()` to decide whether it may safely read from `remoteFD`
-    /// again after a callback returns. See that method's comment.
+    /// Whether `shutdown()` has committed to closing `remoteFD` (and the
+    /// wakeup pipe) — used by `pumpOutbound()` to decide whether it may
+    /// safely touch either of them again. See that method's comment.
     private func isTeardownCommitted() -> Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -326,20 +407,31 @@ public final class SocketPairRelay {
     /// looping back into `read` would reissue a syscall against an fd number
     /// the OS may already have handed to something else entirely. Hence the
     /// `isTeardownCommitted()` check after *every* callback invocation,
-    /// below: it's what makes that assumption actually true.
+    /// below: it's what makes that assumption actually true. The matching
+    /// check at the top of the loop extends the same guarantee to the wakeup
+    /// pipe `waitForOutboundBytes()` polls, which `shutdown()` closes at the
+    /// same moment it closes `remoteFD`.
+    ///
+    /// Where the loop *waits* is the round-4 change: on `poll()`, not inside
+    /// `read()`. A blocked `read()` is not reliably freed by the
+    /// `shutdown(remoteFD, SHUT_RDWR)` that teardown issues, which used to
+    /// leave this method parked forever and `shutdown()`'s join loop parked
+    /// behind it — see `wakeReadFD` for the measurement.
     private func pumpOutbound() {
         defer {
             pumpDone.lock()
             pumpHasExited = true
-            pumpDone.signal()
+            pumpDone.broadcast()
             pumpDone.unlock()
         }
         var buffer = [UInt8](repeating: 0, count: 32 * 1024)
         while true {
-            let n = read(remoteFD, &buffer, buffer.count)
+            if isTeardownCommitted() { return }
+            guard waitForOutboundBytes() else { return }
             lock.lock()
             outboundReadCountStorage += 1
             lock.unlock()
+            let n = read(remoteFD, &buffer, buffer.count)
             if n > 0 {
                 onOutbound?(Data(buffer[0..<n]))
                 if isTeardownCommitted() { return }
@@ -358,6 +450,36 @@ public final class SocketPairRelay {
                 // above, isn't lost among decorative ones.
                 return
             }
+        }
+    }
+
+    /// Parks the pump until `remoteFD` has something to report — bytes, EOF,
+    /// or an error, all of which `poll` reports as readable — or `shutdown()`
+    /// pokes the wakeup pipe. Returns `false` when the pump must stop without
+    /// reading `remoteFD` again.
+    ///
+    /// This is the blocking wait the pump used to do inside `read()` itself.
+    /// It moved out here because a parked `read()` is not reliably freed by
+    /// `shutdown()`, while a parked `poll()` is — see `wakeReadFD`. The
+    /// `read()` that follows a readable `poll` still blocks in principle, but
+    /// only until it has consumed what `poll` just said was there, so it is
+    /// no longer where the pump waits.
+    private func waitForOutboundBytes() -> Bool {
+        var fds = [
+            pollfd(fd: remoteFD, events: Int16(POLLIN), revents: 0),
+            pollfd(fd: wakeReadFD, events: Int16(POLLIN), revents: 0),
+        ]
+        while true {
+            let ready = poll(&fds, nfds_t(fds.count), -1)
+            if ready < 0 {
+                if errno == EINTR { continue }   // interrupted, not an error — retry
+                return false
+            }
+            // Teardown wins over any pending bytes: once `shutdown()` has
+            // committed, `remoteFD`'s number is on its way to being freed and
+            // nothing may issue another syscall against it.
+            if fds[1].revents != 0 { return false }
+            if fds[0].revents != 0 { return true }
         }
     }
 
