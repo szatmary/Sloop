@@ -505,9 +505,9 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(frame { $0.primary == .key(.up) }.width, 47.6596, accuracy: 0.001)
         XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 47.6596, accuracy: 0.001)
         // ANSI widths as multiples of it: control 1.75 at caps lock, shift
-        // 2.25, space 4.5.
+        // 2.25, space 5.5.
         XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 83.4043, accuracy: 0.001)
         XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 107.2340, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 214.4681, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 262.1277, accuracy: 0.001)
     }
 }

@@ -52,20 +52,6 @@ public struct KeyCap: Equatable, Sendable {
         case flexible
     }
 
-    /// How a cap joins the key drawn above or below it.
-    ///
-    /// The reverse-L return key is two caps — a narrow one on the top row, a
-    /// wider one below — drawn touching, with only their outer corners rounded,
-    /// so they read as the single L-shaped key a keyboard has. Both send
-    /// return, which is the whole of what "one key" has to mean here.
-    public enum Join: Equatable, Sendable {
-        case none
-        /// Extends down into the row below, and squares its bottom corners.
-        case below
-        /// Squares its top corners to meet the cap above.
-        case above
-    }
-
     public let primary: Value
     /// Reached by dragging up from the key. Nil where a layout gives symbols
     /// their own row instead of hiding them behind a gesture.
@@ -74,18 +60,15 @@ public struct KeyCap: Equatable, Sendable {
     /// Whether press-and-hold repeats — true for backspace and arrows, where
     /// holding is how the key is normally used.
     public let repeats: Bool
-    public let join: Join
 
     public init(primary: Value,
                 secondary: Value? = nil,
                 width: Width = .unit,
-                repeats: Bool = false,
-                join: Join = .none) {
+                repeats: Bool = false) {
         self.primary = primary
         self.secondary = secondary
         self.width = width
         self.repeats = repeats
-        self.join = join
     }
 
     // MARK: Convenience constructors
@@ -99,10 +82,9 @@ public struct KeyCap: Equatable, Sendable {
     public static func key(_ terminalKey: TerminalKey,
                            secondary: Value? = nil,
                            width: Width = .unit,
-                           repeats: Bool = false,
-                           join: Join = .none) -> Self {
+                           repeats: Bool = false) -> Self {
         Self(primary: .key(terminalKey), secondary: secondary, width: width,
-             repeats: repeats, join: join)
+             repeats: repeats)
     }
 
     public static func modifier(_ modifiers: KeyModifiers,

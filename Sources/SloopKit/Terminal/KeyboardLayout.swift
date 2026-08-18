@@ -280,10 +280,7 @@ public struct KeyboardLayout: Equatable, Sendable {
                 case .wide(let scale): capWidth = unit * scale
                 case .flexible:        capWidth = flexibleWidth
                 }
-                // A cap joining the row below covers the gap between them, so
-                // the two halves of the reverse-L return key touch.
-                let capHeight = cap.join == .below ? rowHeight : rowHeight - spacing
-                result.append(KeyFrame(x: x, y: y, width: capWidth, height: capHeight))
+                result.append(KeyFrame(x: x, y: y, width: capWidth, height: rowHeight - spacing))
                 x += capWidth + spacing
             }
 
@@ -320,50 +317,31 @@ public struct KeyboardLayout: Equatable, Sendable {
         // centred against each other, and then the two halves of the return key
         // don't line up and it reads as a tetromino rather than a key.
         let mainRows: [[KeyCap]] = [
-            // 1 + 2 + 10 + 2 + 1.5 = 16.5, and every row below matches it.
-            //
-            // `[ ]` then return, as ISO has it — `=` was sitting between them,
-            // which put a number-row key in the corner the return key occupies
-            // on every keyboard ever made.
-            [.key(.escape), .key(.tab, width: .wide(2))]
+            // 1 + 2.5 + 10 + 3 = 16.5, and every row below is right-aligned to
+            // the same edge. `=` is back where ANSI keeps it, at the right end
+            // of the letters — and `+` with it, since `+` is shift-`=`.
+            [.key(.escape), .key(.tab, width: .wide(2.5))]
                 + "qwertyuiop".map { KeyCap.character($0) }
-                + [.character("["), .character("]"),
-                   // Upper half of the reverse-L return: narrower than the half
-                   // below, flush to the same right edge, which is what makes
-                   // the L. Backspace moved into the navigation cluster to
-                   // clear this corner for it.
-                   .key(.return, width: .wide(1.5), join: .below)],
-            // 1.75 + 9 + 3 + 2.75
+                + [.character("["), .character("]"), .character("=")],
+            // Control in the caps-lock position, which is where anyone who uses
+            // a terminal puts it anyway.
             [.modifier(.control, width: .wide(1.75))]
                 + "asdfghjkl".map { KeyCap.character($0) }
-                + [.character(";"), .character("'"), .character("\\"),
-                   .key(.return, width: .wide(2.75), join: .above)],
-            // 2.25 + 7 + 3. Shorter than the rows above it, which is fine:
-            // rows right-align against the cluster, so a short row simply
-            // starts further in — the stagger a keyboard has anyway. One shift
-            // is enough on a keyboard reached with thumbs rather than ten
-            // fingers; the right-hand one was a key that could be something
-            // else, and for now is space the letters get back.
+                + [.character(";"), .character("'"), .character("\\")],
+            // Return takes the right shift's place. One shift is enough on a
+            // keyboard reached with thumbs, and return is the key that wants to
+            // be big and easy to hit.
             [.modifier(.shift, width: .wide(2.25))]
                 + "zxcvbnm".map { KeyCap.character($0) }
                 + [.character(","), .character("."), .character("/"),
-                   .modifier(.shift, width: .wide(3.25))],
-            // 1 + 1 + 1 + 1 + 1 + 4.5 + 1 + 5 + 1
-            //
-            // The chords a shell needs constantly, in the room this row has
-            // spare: interrupt, end-of-file, suspend, clear. They were on the
-            // smart-keys bar this keyboard replaced, and arming control then
-            // reaching for a letter is two presses for something people hit a
-            // hundred times a session.
-            // `` ` `` and `=` together: both are number-row keys, and this is
-            // the row that took what the number row was carrying.
+                   .key(.return, width: .wide(2.25))],
+            // `` ` `` sits here because this row took what the number row was
+            // carrying. The chords are the ones a shell needs constantly:
+            // tmux's prefix first, then interrupt, end-of-file, suspend, clear.
             [.command(.dismissKeyboard),
-             .functionLayer, .modifier(.option),
-             .character("`"), .character("="),
-             .character(" ", width: .wide(4.5)),
+             .functionLayer, .modifier(.option), .character("`"),
+             .character(" ", width: .wide(5.5)),
              .modifier(.option),
-             // ⌃B first: it is tmux's prefix, so on this keyboard it is the
-             // most-pressed of the five by some distance.
              .chord(.control, "b"), .chord(.control, "c"),
              .chord(.control, "d"), .chord(.control, "z"),
              .chord(.control, "l"),

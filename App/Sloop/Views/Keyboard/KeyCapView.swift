@@ -91,16 +91,6 @@ final class KeyCapView: UIControl {
         }
         backgroundColor = .secondarySystemFill
         layer.cornerRadius = 5
-        // The reverse-L return key is two caps drawn touching; rounding the
-        // corners where they meet would draw a seam straight through it.
-        switch cap.join {
-        case .none:
-            break
-        case .below:
-            layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-        case .above:
-            layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
-        }
         isMultipleTouchEnabled = false
 
         // Keys that are an icon rather than a word get one. "⌨︎↓" was two
