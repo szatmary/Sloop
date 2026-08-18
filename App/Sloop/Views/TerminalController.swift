@@ -63,7 +63,18 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     /// Whether a hardware keyboard is attached. When one is, no software keyboard
     /// appears and no show/hide notification ever fires, so `keyboardVisible`
     /// stays false and must not be read as "there is room to reclaim".
-    var hardwareKeyboardAttached: Bool { GCKeyboard.coalesced != nil }
+    ///
+    /// `@Published`, driven by `GCKeyboardDidConnect`/`GCKeyboardDidDisconnect`
+    /// rather than left a plain computed read of `GCKeyboard.coalesced`,
+    /// because nothing else guarantees a re-render when a keyboard attaches
+    /// or detaches. Concretely: keyboard dismissed (the pill showing),
+    /// attach a Magic Keyboard — no show/hide notification of ours fires (see
+    /// `keyboardVisible`'s doc comment), so nothing publishes, and
+    /// `TerminalPane` would keep showing the pill instead of the bar until
+    /// some unrelated `@Published` change happened to force a redraw. That
+    /// is a regression against the pre-compact-keyboard behaviour, where the
+    /// bar was always present.
+    @Published private(set) var hardwareKeyboardAttached = GCKeyboard.coalesced != nil
 
     /// Whether Sloop's compact keyboard — as opposed to Apple's — is the
     /// current `inputView`. Set only from `setCompactKeyboard(_:)`, the single
@@ -96,6 +107,10 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     /// registered with `NotificationCenter.default` for the life of the process.
     private var keyboardShowObserver: NSObjectProtocol?
     private var keyboardHideObserver: NSObjectProtocol?
+    /// Tokens for the hardware-keyboard connect/disconnect observers backing
+    /// `hardwareKeyboardAttached`, removed alongside the pair above.
+    private var hardwareKeyboardConnectObserver: NSObjectProtocol?
+    private var hardwareKeyboardDisconnectObserver: NSObjectProtocol?
     #endif
 
     private let makeTransport: () -> Transport
@@ -136,6 +151,23 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
             object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.keyboardVisible = false }
+        }
+        // Recomputed from `GCKeyboard.coalesced` on both notifications,
+        // rather than hard-coded to true/false, so a second hardware
+        // keyboard being attached or removed while another is still present
+        // resolves correctly instead of assuming exactly one can ever be
+        // connected.
+        hardwareKeyboardConnectObserver = center.addObserver(
+            forName: .GCKeyboardDidConnect,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hardwareKeyboardAttached = GCKeyboard.coalesced != nil }
+        }
+        hardwareKeyboardDisconnectObserver = center.addObserver(
+            forName: .GCKeyboardDidDisconnect,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hardwareKeyboardAttached = GCKeyboard.coalesced != nil }
         }
         #endif
         apply(appearance)
@@ -294,6 +326,14 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
             center.removeObserver(observer)
             keyboardHideObserver = nil
         }
+        if let observer = hardwareKeyboardConnectObserver {
+            center.removeObserver(observer)
+            hardwareKeyboardConnectObserver = nil
+        }
+        if let observer = hardwareKeyboardDisconnectObserver {
+            center.removeObserver(observer)
+            hardwareKeyboardDisconnectObserver = nil
+        }
     }
     #endif
 
@@ -305,6 +345,8 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         let center = NotificationCenter.default
         if let observer = keyboardShowObserver { center.removeObserver(observer) }
         if let observer = keyboardHideObserver { center.removeObserver(observer) }
+        if let observer = hardwareKeyboardConnectObserver { center.removeObserver(observer) }
+        if let observer = hardwareKeyboardDisconnectObserver { center.removeObserver(observer) }
         #endif
     }
 
