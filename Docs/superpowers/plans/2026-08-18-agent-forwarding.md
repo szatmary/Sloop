@@ -35,11 +35,25 @@
   | `SSH_AGENT_RSA_SHA2_256` (flag) | 2 |
   | `SSH_AGENT_RSA_SHA2_512` (flag) | 4 |
 - **SSH wire types:** `byte` = 1 byte; `uint32` = 4 bytes big-endian; `string` = `uint32` length followed by exactly that many bytes. A frame is a `uint32` length followed by a payload whose first byte is the message type.
-- **Test commands:**
-  - SloopKit: `swift test --filter <TestClass>`
-  - App target: `xcodegen generate --spec project.ssh.yml` then
-    `xcodebuild test -scheme Sloop_macOS -destination 'platform=macOS' -skipPackagePluginValidation`
-  - App-target tests need `Vendor/libssh2.xcframework`, which is gitignored. Build it with `Scripts/build-libssh2.sh` or copy it from the main checkout before Task 5.
+- **Test commands** (all verified working in this worktree before Task 4 was dispatched):
+  - SloopKit: `swift test --filter <TestClass>`, or bare `swift test` for the full suite.
+  - App target: `xcodegen generate --spec project.ssh.yml`, then
+    ```bash
+    xcodebuild test -scheme Sloop_macOS -destination 'platform=macOS' \
+      -skipPackagePluginValidation \
+      CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+      CODE_SIGN_IDENTITY="" CODE_SIGN_ENTITLEMENTS=""
+    ```
+    **The signing overrides are required.** Without them the build fails with
+    `"Sloop_macOS" requires a provisioning profile` — the target sets
+    `CODE_SIGN_ENTITLEMENTS` and `ENABLE_HARDENED_RUNTIME` for release
+    signing, and no profile is configured in this environment. This is not a
+    code problem and must not be "fixed" by editing the project's signing
+    settings.
+  - `Vendor/libssh2.xcframework` is gitignored and already present in this
+    worktree. If it goes missing, rebuild with `Scripts/build-libssh2.sh` or
+    copy it from the main checkout.
+  - Baseline before Task 4: SloopKit 258 tests pass; app target 25 tests pass.
 
 ## File Structure
 
