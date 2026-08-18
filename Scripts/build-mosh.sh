@@ -52,6 +52,40 @@ git -C mosh checkout --quiet "$MOSH_TAG"
 # lacks it, so provide it.
 echo "mosh ${MOSH_TAG#mosh-}" > mosh/VERSION
 
+# One session per *thread*, not per process.
+#
+# mosh-client is one session in one process, so upstream can keep session state
+# in process-wide statics. Sloop runs every session on its own thread inside one
+# app, and two of these statics then get shared by sessions that know nothing
+# about each other:
+#
+#   * Network::get_compressor() hands out a single Compressor holding a 4 MiB
+#     scratch buffer, used for both compress_str and uncompress_str. Two
+#     sessions compressing outgoing state and decompressing incoming state
+#     through one buffer corrupt each other's payloads, and mosh reports the
+#     wreckage as an attack: "Illegal counterparty input (possible denial of
+#     service) ... failed test: message.text.size() >= 2 * sizeof( uint16_t )".
+#     Measured on the shipped 1.4.0 build: of 600 concurrent round-trips across
+#     two threads, 520 threw and 11 more returned data that wasn't what went in.
+#
+#   * timestamp.cc caches the frozen clock in `millis_cache`. Each session
+#     freezes the clock at the top of its own loop, so with two running, each
+#     one reads whatever instant the other froze — and mosh's RTT/RTO estimates
+#     and timestamp echoes are computed from it.
+#
+# thread_local is the whole fix: each session thread gets its own copy, with no
+# lock and no contention, which is exactly the isolation upstream gets for free
+# by being one session per process. It costs 4 MiB per live session.
+sed -i.bak 's|^  static Compressor the_compressor;|  static thread_local Compressor the_compressor;|' \
+  mosh/src/network/compressor.cc
+sed -i.bak 's|^static uint64_t millis_cache = -1;|static thread_local uint64_t millis_cache = -1;|' \
+  mosh/src/util/timestamp.cc
+grep -q "thread_local Compressor" mosh/src/network/compressor.cc \
+  || { echo "compressor patch did not apply — upstream moved"; exit 1; }
+grep -q "thread_local uint64_t millis_cache" mosh/src/util/timestamp.cc \
+  || { echo "timestamp patch did not apply — upstream moved"; exit 1; }
+rm -f mosh/src/network/compressor.cc.bak mosh/src/util/timestamp.cc.bak
+
 echo "==> Building HOST protoc (native, protobuf $PROTOBUF_TAG)"
 PB_CMAKE_SRC="protobuf/cmake"; test -f "$PB_CMAKE_SRC/CMakeLists.txt" || PB_CMAKE_SRC="protobuf"
 cmake -S "$PB_CMAKE_SRC" -B build/pb-host -G "Unix Makefiles" \
