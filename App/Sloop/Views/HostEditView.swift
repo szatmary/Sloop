@@ -69,6 +69,14 @@ struct HostEditView: View {
             Form {
                 Section("Connection") {
                     TextField("Alias", text: $host.alias)
+                        #if os(iOS)
+                        // Host names are lowercase far more often than not, and
+                        // iOS capitalising the first letter meant a lowercase
+                        // alias could not be typed at all without fighting the
+                        // keyboard. Hostname and Username already opt out.
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        #endif
                     TextField("Hostname", text: $host.hostname)
                         .textContentType(.URL)
                         #if os(iOS)
