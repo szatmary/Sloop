@@ -190,9 +190,26 @@ final class LibSSH2CommandRunner: CommandRunner {
                                               fingerprint: fingerprint) else {
                 return SSHError.connectionFailed("host key for \(endpoint) was not trusted")
             }
-            knownHosts.remember(endpoint: endpoint, keyType: typeName, fingerprint: fingerprint)
+            do {
+                try knownHosts.remember(endpoint: endpoint, keyType: typeName,
+                                        fingerprint: fingerprint)
+            } catch {
+                // Refuse rather than proceed on an unpinned key: a silent
+                // failure here means the next connection sees this host as
+                // new again, with no record of what was trusted.
+                return SSHError.connectionFailed(
+                    "couldn't record the host key for \(endpoint): \(error.localizedDescription)")
+            }
             return nil
         case .mismatch:
+            // A record we could not read is reported as .mismatch so it fails
+            // closed, but it is not a changed key: there is no previous
+            // fingerprint to show, so say what actually happened.
+            if knownHosts.isUnreadable(endpoint: endpoint) {
+                return SSHError.connectionFailed(
+                    "the stored host key for \(endpoint) is damaged and cannot be read — "
+                    + "verify the key out of band, then re-add the host to trust it again")
+            }
             let previous = knownHosts.recorded(endpoint: endpoint)?.fingerprint ?? "unknown"
             guard hostKeyVerifier.shouldTrustChangedKey(endpoint: endpoint,
                                                         keyType: typeName,
@@ -200,7 +217,16 @@ final class LibSSH2CommandRunner: CommandRunner {
                                                         previousFingerprint: previous) else {
                 return SSHError.connectionFailed("host key changed for \(endpoint) — refusing to connect")
             }
-            knownHosts.remember(endpoint: endpoint, keyType: typeName, fingerprint: fingerprint)
+            do {
+                try knownHosts.remember(endpoint: endpoint, keyType: typeName,
+                                        fingerprint: fingerprint)
+            } catch {
+                // Refuse rather than proceed on an unpinned key: a silent
+                // failure here means the next connection sees this host as
+                // new again, with no record of what was trusted.
+                return SSHError.connectionFailed(
+                    "couldn't record the host key for \(endpoint): \(error.localizedDescription)")
+            }
             return nil
         }
     }

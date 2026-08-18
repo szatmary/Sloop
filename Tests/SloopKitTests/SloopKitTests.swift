@@ -77,7 +77,7 @@ final class SloopKitTests: XCTestCase {
         XCTAssertTrue(closed)
     }
 
-    func testKnownHostsTrustOnFirstUse() {
+    func testKnownHostsTrustOnFirstUse() throws {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("sloop-known-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: tmp) }
@@ -86,12 +86,12 @@ final class SloopKitTests: XCTestCase {
         let endpoint = KnownHostsStore.endpoint(host: "example.com", port: 22)
         XCTAssertEqual(store.status(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "AAAA"), .unknown)
 
-        store.remember(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "AAAA")
+        try store.remember(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "AAAA")
         XCTAssertEqual(store.status(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "AAAA"), .match)
         XCTAssertEqual(store.status(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "BBBB"), .mismatch)
     }
 
-    func testKnownHostsRecordedReturnsStoredKey() {
+    func testKnownHostsRecordedReturnsStoredKey() throws {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("sloop-known-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: tmp) }
@@ -100,23 +100,23 @@ final class SloopKitTests: XCTestCase {
         let endpoint = KnownHostsStore.endpoint(host: "example.com", port: 22)
         XCTAssertNil(store.recorded(endpoint: endpoint))
 
-        store.remember(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "AAAA")
+        try store.remember(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "AAAA")
         let recorded = store.recorded(endpoint: endpoint)
         XCTAssertEqual(recorded?.keyType, "ssh-ed25519")
         XCTAssertEqual(recorded?.fingerprint, "AAAA")
 
         // After a changed key is accepted, the recorded fingerprint updates.
-        store.remember(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "BBBB")
+        try store.remember(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "BBBB")
         XCTAssertEqual(store.recorded(endpoint: endpoint)?.fingerprint, "BBBB")
     }
 
-    func testKnownHostsPersistsAcrossInstances() {
+    func testKnownHostsPersistsAcrossInstances() throws {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("sloop-known-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let endpoint = KnownHostsStore.endpoint(host: "h", port: 2222)
-        KnownHostsStore(fileURL: tmp).remember(endpoint: endpoint, keyType: "ssh-rsa", fingerprint: "XX")
+        try KnownHostsStore(fileURL: tmp).remember(endpoint: endpoint, keyType: "ssh-rsa", fingerprint: "XX")
         XCTAssertEqual(KnownHostsStore(fileURL: tmp).status(endpoint: endpoint, keyType: "ssh-rsa", fingerprint: "XX"), .match)
     }
 
@@ -160,7 +160,7 @@ final class SloopKitTests: XCTestCase {
         try original.write(to: tmp)
 
         let store = KnownHostsStore(fileURL: tmp)
-        store.remember(endpoint: "h:22", keyType: "ssh-ed25519", fingerprint: "AAAA")
+        try store.remember(endpoint: "h:22", keyType: "ssh-ed25519", fingerprint: "AAAA")
 
         XCTAssertEqual(try Data(contentsOf: quarantine), original,
                        "the unreadable file must be moved aside, not destroyed")
@@ -180,7 +180,7 @@ final class SloopKitTests: XCTestCase {
         let store = KnownHostsStore(fileURL: tmp)
         DispatchQueue.concurrentPerform(iterations: 200) { i in
             let endpoint = "host-\(i % 20):22"
-            store.remember(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "F\(i)")
+            try? store.remember(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "F\(i)")
             _ = store.status(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "F\(i)")
             _ = store.recorded(endpoint: endpoint)
         }
