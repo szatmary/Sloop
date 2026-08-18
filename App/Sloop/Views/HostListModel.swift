@@ -39,6 +39,11 @@ final class HostListModel: ObservableObject {
     /// to avoid one layer up.
     @Published private(set) var storageError: String?
 
+    /// Why a host couldn't be published to (or withdrawn from) Files.app.
+    /// Separate from `storageError` because it is recoverable and narrow: the
+    /// host is saved either way, only its Files location is out of step.
+    @Published private(set) var filesError: String?
+
     /// Nil when the shared container couldn't be opened — see `storageError`.
     /// Optional rather than defaulted to a private location: a store pointing
     /// somewhere the extension can't see is worse than no store, because it
@@ -106,6 +111,19 @@ final class HostListModel: ObservableObject {
             }
         }
         refreshLibraryKeys()
+
+        // Per-host credentials and Access tokens predate the extension and
+        // landed in the app's private keychain group, which the extension
+        // cannot read at all. Unmigrated, every published host fails to
+        // authenticate with what looks like a wrong password — on a host whose
+        // password is plainly right in the app.
+        do {
+            try SloopKeychainMigration.migrateToSharedAccessGroup()
+        } catch {
+            libraryError = error.localizedDescription
+        }
+
+        reconcileFilesDomains()
     }
 
     /// The host store, or the reason there isn't one.
@@ -155,6 +173,25 @@ final class HostListModel: ObservableObject {
         if let credential {
             try credentials.setCredential(credential, for: host.id)
         }
+        reconcileFilesDomains()
+    }
+
+    /// Brings Files.app's locations in line with the host list.
+    ///
+    /// Deliberately not part of `save`'s throwing contract: a host must save
+    /// even if the system refuses the domain, and reporting a File Provider
+    /// failure as "couldn't save the host" would send the user looking in the
+    /// wrong place entirely.
+    private func reconcileFilesDomains() {
+        let hosts = self.hosts
+        Task {
+            do {
+                try await FilesDomainRegistrar.reconcile(hosts: hosts)
+                await MainActor.run { self.filesError = nil }
+            } catch {
+                await MainActor.run { self.filesError = error.localizedDescription }
+            }
+        }
     }
 
     /// Import hosts from OpenSSH config text, skipping aliases that already
@@ -188,6 +225,10 @@ final class HostListModel: ObservableObject {
         let store = try requireStore()
         store.remove(host)
         hosts = store.hosts
+        // Before the credential goes: a domain outliving its host fails every
+        // request with "this host no longer exists" and cannot be removed from
+        // Files.app by the user.
+        reconcileFilesDomains()
         try credentials.removeCredential(for: host.id)
         // A bearer credential outliving the user's decision to delete the
         // host is wrong on its own: the token is a live means of connecting

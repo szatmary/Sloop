@@ -22,11 +22,38 @@ import Security
 /// `AccessTokenStore` requires this of its conformances explicitly — the store
 /// is written from the main actor and from SSH worker threads.
 final class GenericPasswordStore: @unchecked Sendable {
+    /// The access group per-host credentials and Cloudflare Access tokens live
+    /// in, shared by the app and the File Provider extension.
+    ///
+    /// Deliberately *not* the key library's `…sloop.shared` group. That one is
+    /// synchronizable — it rides iCloud Keychain to every device. These items
+    /// are `AfterFirstUnlockThisDeviceOnly` and are meant never to leave the
+    /// device; folding them into the synced group to solve a process-boundary
+    /// problem would change their sync posture as an invisible side effect.
+    ///
+    /// Hardcoded team prefix for the same reason `KeychainKeyStore` hardcodes
+    /// its own: a build variable only resolves inside Xcode's entitlements
+    /// processing, and this string is the contract two separate targets agree
+    /// on. It MUST match both targets' entitlements files.
+    static let sharedAccessGroup = "KR5WZAG3UE.org.szatmary.sloop.fileprovider"
+
+    /// The two services whose items the extension must be able to read. Named
+    /// here rather than defaulted at each call site so the stores and the
+    /// migration cannot drift apart — a migration that moved a service nobody
+    /// reads, or missed one somebody does, fails silently in both directions.
+    static let credentialsService = "org.szatmary.sloop.credentials"
+    static let accessTokensService = "org.szatmary.sloop.access-tokens"
+
     private let service: String
+    private let accessGroup: String?
     private let lock = NSLock()
 
-    init(service: String) {
+    /// - Parameter accessGroup: nil uses the caller's default group — which is
+    ///   what these items used before the extension existed, and what
+    ///   `migrateToSharedAccessGroup` reads from.
+    init(service: String, accessGroup: String? = GenericPasswordStore.sharedAccessGroup) {
         self.service = service
+        self.accessGroup = accessGroup
     }
 
     /// The stored bytes, or nil if this account genuinely has no item.
@@ -87,11 +114,62 @@ final class GenericPasswordStore: @unchecked Sendable {
     }
 
     private func baseQuery(for account: String) -> [String: Any] {
-        [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
+        if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
+        return query
+    }
+
+    /// Copies every item of `service` out of the caller's default access group
+    /// and into the shared one, once.
+    ///
+    /// Before the File Provider extension existed these items had no explicit
+    /// group, so they landed in the app's private one — which the extension
+    /// cannot read at all. Left unmigrated, every published host would fail to
+    /// authenticate with what looks like a wrong password, on a host whose
+    /// password is plainly right in the app.
+    ///
+    /// The old item is deleted only after the new one is written, and an
+    /// account that already exists in the shared group is left alone: whatever
+    /// is there is at least as new as what is being migrated.
+    ///
+    /// - Returns: how many items were moved.
+    @discardableResult
+    static func migrateToSharedAccessGroup(service: String) throws -> Int {
+        let legacy = GenericPasswordStore(service: service, accessGroup: nil)
+        let shared = GenericPasswordStore(service: service)
+
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+        ]
+        query[kSecAttrAccessGroup as String] = nil
+
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return 0 }
+        guard status == errSecSuccess, let items = result as? [[String: Any]] else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status),
+                          userInfo: [NSLocalizedDescriptionKey:
+                            "couldn't list keychain items for '\(service)' to migrate them "
+                            + "into the shared access group (OSStatus \(status))"])
+        }
+
+        var moved = 0
+        for item in items {
+            guard let account = item[kSecAttrAccount as String] as? String else { continue }
+            if try shared.data(for: account) != nil { continue }
+            guard let data = try legacy.data(for: account) else { continue }
+            try shared.set(data, for: account)
+            try legacy.remove(for: account)
+            moved += 1
+        }
+        return moved
     }
 
     private func keychainError(_ status: OSStatus) -> NSError {

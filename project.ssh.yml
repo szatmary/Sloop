@@ -13,6 +13,36 @@
 include:
   - project.yml
 
+targetTemplates:
+  # The Files.app integration. Declared here rather than in the base project on
+  # purpose: without libssh2 this is an extension that can only fail, and
+  # registering its domain would put a permanently broken location in Files.app.
+  # In the base build the "Show in Files" toggle simply isn't offered.
+  SloopFilesExtension:
+    type: app-extension
+    sources:
+      - path: App/SloopFiles
+        excludes:
+          - SloopFiles.entitlements
+    dependencies:
+      - package: SloopKit
+        product: SloopKit
+      - framework: Vendor/libssh2.xcframework
+        embed: false
+    settings:
+      base:
+        PRODUCT_NAME: SloopFiles
+        PRODUCT_MODULE_NAME: SloopFiles
+        PRODUCT_BUNDLE_IDENTIFIER: org.szatmary.sloop.files
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: App/SloopFiles/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/SloopFiles/SloopFiles.entitlements
+        SWIFT_VERSION: "5.9"
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: "NO"
+        SKIP_INSTALL: YES
+
 targets:
   # libssh2 goes on the framework, not the app: every `import CSSH` now lives in
   # App/SloopSSH. The app targets keep the dependency too so the linker resolves
@@ -25,11 +55,26 @@ targets:
     dependencies:
       - framework: Vendor/libssh2.xcframework
         embed: false
+  SloopFiles_iOS:
+    templates: [SloopFilesExtension]
+    platform: iOS
+    dependencies:
+      - target: SloopSSH_iOS
+        embed: false
+  SloopFiles_macOS:
+    templates: [SloopFilesExtension]
+    platform: macOS
+    dependencies:
+      - target: SloopSSH_macOS
+        embed: false
+
   Sloop_iOS:
     dependencies:
       - framework: Vendor/libssh2.xcframework
         embed: false
+      - target: SloopFiles_iOS
   Sloop_macOS:
     dependencies:
       - framework: Vendor/libssh2.xcframework
         embed: false
+      - target: SloopFiles_macOS

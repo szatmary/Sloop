@@ -234,6 +234,39 @@ struct HostEditView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                // Only offered where it could actually work. In a build without
+                // libssh2 the extension isn't included at all, and a toggle
+                // that adds a permanently broken location to Files.app is worse
+                // than no toggle.
+                if FilesDomainRegistrar.isAvailable {
+                    Section("Files") {
+                        Toggle("Show in Files", isOn: $host.showsInFiles)
+                        if host.showsInFiles {
+                            TextField("Folder (optional)",
+                                      text: Binding(get: { host.filesRootPath ?? "" },
+                                                    set: { host.filesRootPath = $0 }))
+                                .textFieldStyle(.roundedBorder)
+                                #if os(iOS)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                #endif
+                            Text(host.trimmedFilesRootPath.map { "Opens at \($0)." }
+                                 ?? "Opens where a new shell starts, usually your home folder.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            // Everything the extension cannot do for itself.
+                            // Saying so here is cheaper than the user meeting
+                            // it as a failure inside Files.app later.
+                            Text("Files can't answer prompts. Connect to this host in Sloop "
+                                 + "once first, so its host key is trusted"
+                                 + (host.connectionMethod == .cloudflareAccess
+                                    ? " and its Cloudflare Access login is current." : "."))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
             .onChange(of: host.connectionMethod) { _, method in
                 // Only the Access tunnel rules Mosh out — it carries TCP over a

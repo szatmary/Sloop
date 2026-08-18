@@ -14,9 +14,12 @@ public enum TransportFactory {
                     credential: Credential,
                     knownHosts: KnownHostsStore,
                     hostKeyVerifier: HostKeyVerifier,
-                    accessTokens: AccessTokenStore) -> Transport {
+                    accessTokens: AccessTokenStore,
+                    authorizationPresenter: TailscaleAuthorizationPresenter
+                        = NoAuthorizationPresenter()) -> Transport {
         #if canImport(CSSH)
-        switch dialer(for: host, accessTokens: accessTokens) {
+        switch dialer(for: host, accessTokens: accessTokens,
+                      authorizationPresenter: authorizationPresenter) {
         case .ready(let dialer):
             return LibSSH2Transport(host: host, credential: credential,
                                     dialer: dialer,
@@ -46,7 +49,9 @@ public enum TransportFactory {
     }
 
     private static func dialer(for host: SSHHost,
-                               accessTokens: AccessTokenStore) -> DialerResolution {
+                               accessTokens: AccessTokenStore,
+                               authorizationPresenter: TailscaleAuthorizationPresenter)
+    -> DialerResolution {
         switch host.connectionMethod {
         case .direct:
             return .ready(TCPDialer(host: host.hostname, port: host.port))
@@ -91,7 +96,9 @@ public enum TransportFactory {
             // Sloop's own tsnet node — no Tailscale app, no system VPN slot.
             // Bringing it up happens inside the dial, so the first connect is
             // where an unauthorized device is told to authorize itself.
-            return .ready(TailscaleDialer(host: host.hostname, port: host.port))
+            return .ready(TailscaleDialer(host: host.hostname, port: host.port,
+                                          role: .app,
+                                          presenter: authorizationPresenter))
             #else
             // This build doesn't link libtailscale, so the only way a tailnet
             // host is reachable is the Tailscale app's system VPN — and when

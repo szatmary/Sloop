@@ -3,6 +3,7 @@
 
 import Foundation
 import SwiftUI
+import SloopSSH
 
 /// Carries "this device needs authorizing on the tailnet" from the dial to the
 /// UI, so the user gets a browser rather than a URL printed in a terminal they
@@ -12,7 +13,7 @@ import SwiftUI
 /// SSH worker thread with no view in reach, while the thing it needs is a
 /// presentation. A singleton the root view observes is the seam between them.
 @MainActor
-final class TailscaleAuthPrompter: ObservableObject {
+final class TailscaleAuthPrompter: ObservableObject, TailscaleAuthorizationPresenter {
     static let shared = TailscaleAuthPrompter()
 
     /// The device-authorization URL, when one is outstanding. Setting it opens
@@ -20,6 +21,11 @@ final class TailscaleAuthPrompter: ObservableObject {
     @Published var url: IdentifiableURL?
 
     private init() {}
+
+    /// Called from the dial thread, via `TailscaleAuthorizationPresenter` —
+    /// the seam that lets the dialer live in a framework the extension also
+    /// links, without that framework reaching into `@MainActor` app state.
+    nonisolated func presentAuthorization(_ url: URL) { request(url) }
 
     /// Called from the dial thread.
     nonisolated func request(_ url: URL) {

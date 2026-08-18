@@ -58,6 +58,17 @@ public protocol SFTPClient: AnyObject {
     /// The directory a session starts in — the user's home on nearly every
     /// server. `SSHHost.filesRootPath` overrides it when set.
     func defaultDirectory() throws -> String
+
+    /// Releases the connection. Callers invoke it when they are torn down; the
+    /// File Provider system does exactly that, at times of its own choosing.
+    func close()
+}
+
+public extension SFTPClient {
+    /// A client with nothing to release. Not a silent fallback — an in-memory
+    /// tree genuinely holds no socket, and forcing it to declare an empty
+    /// method would be ceremony rather than safety.
+    func close() {}
 }
 
 /// An in-memory remote filesystem.

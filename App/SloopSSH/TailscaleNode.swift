@@ -4,6 +4,7 @@
 import Foundation
 import SloopKit
 #if SLOOP_TAILSCALE
+import CTailscale
 
 /// Sloop's own node on the user's tailnet, via `libtailscale` (tsnet).
 ///
