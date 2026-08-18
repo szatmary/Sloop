@@ -117,6 +117,10 @@ build_libssh2 () {
   cat > "$OUT/$name/include/module.modulemap" <<'MODMAP'
 module CSSH {
     header "libssh2.h"
+    // libssh2.h does not include the SFTP API; without this header the whole
+    // of libssh2_sftp_* — and LIBSSH2_SFTP_ATTRIBUTES with it — is invisible to
+    // Swift, which is what the Files.app integration is built on.
+    header "libssh2_sftp.h"
     export *
 }
 MODMAP
