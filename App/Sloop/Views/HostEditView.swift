@@ -19,6 +19,10 @@ struct HostEditView: View {
     @State private var pastedPassphrase: String = ""
     @State private var saveError: String?
     @State private var showingMoshHelp = false
+
+    /// Attach to an existing tmux session, or start one if there isn't a
+    /// session yet — the reason most people want a command on connect at all.
+    private static let tmuxSuggestion = "tmux attach || tmux new"
     private let libraryKeys: [NamedKey]
     private let onSaveKey: (NamedKey) throws -> Void
     private let onSave: (SSHHost, Credential?) -> Void
@@ -122,7 +126,7 @@ struct HostEditView: View {
                 }
 
                 Section {
-                    TextField("tmux attach || tmux new",
+                    TextField("No command",
                               text: Binding(get: { host.onConnectCommand ?? "" },
                                             set: { host.onConnectCommand = $0 }))
                         .font(.system(.body, design: .monospaced))
@@ -130,6 +134,24 @@ struct HostEditView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         #endif
+
+                    // The tmux line used to live in the placeholder, where it
+                    // read as a value that was already set but did nothing
+                    // until retyped by hand. A suggestion you can only accept
+                    // by copying it out is not a suggestion.
+                    if host.trimmedOnConnectCommand == nil {
+                        Button {
+                            host.onConnectCommand = Self.tmuxSuggestion
+                        } label: {
+                            HStack {
+                                Text(Self.tmuxSuggestion)
+                                    .font(.system(.footnote, design: .monospaced))
+                                Spacer()
+                                Image(systemName: "arrow.up.left.circle")
+                            }
+                        }
+                        .accessibilityLabel("Use \(Self.tmuxSuggestion)")
+                    }
                 } header: {
                     Text("Run on connect")
                 } footer: {
