@@ -39,17 +39,37 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     @Published var armedModifiers: KeyModifiers = []
 
     #if os(iOS)
-    /// Whether the software keyboard is currently on screen.
+    /// Whether the software keyboard is currently on screen *for this
+    /// terminal* — i.e. `terminalView` is first responder and a keyboard is up.
     ///
     /// Driven by the system's show/hide notifications rather than by tracking our
     /// own `dismissKeyboard()` calls, so a keyboard dismissed by the system — a
     /// hardware keyboard being attached, say — is observed too.
+    ///
+    /// `UIResponder.keyboardWillShowNotification` is posted globally for
+    /// *any* view in the process, and `SessionsModel` keeps a
+    /// `TerminalController` alive per open tab — including tabs that are
+    /// neither visible nor focused — so the show handler is gated on
+    /// `terminalView.isFirstResponder`. The hide handler is not: by the time
+    /// it fires, a terminal that just resigned already reports
+    /// `isFirstResponder == false`, so gating it the same way would make a
+    /// genuine self-dismiss (`dismissKeyboard()`, or the system tearing the
+    /// keyboard down for this terminal) unable to ever clear its own flag.
+    /// Left unconditional, an unrelated keyboard hiding elsewhere in the app
+    /// just writes `false` over an already-`false` value on every other
+    /// controller — a harmless no-op.
     @Published private(set) var keyboardVisible = false
 
     /// Whether a hardware keyboard is attached. When one is, no software keyboard
     /// appears and no show/hide notification ever fires, so `keyboardVisible`
     /// stays false and must not be read as "there is room to reclaim".
     var hardwareKeyboardAttached: Bool { GCKeyboard.coalesced != nil }
+
+    /// Tokens for the keyboard show/hide observers, removed in `close()` and
+    /// `deinit` so closed/deallocated controllers don't leave dead closures
+    /// registered with `NotificationCenter.default` for the life of the process.
+    private var keyboardShowObserver: NSObjectProtocol?
+    private var keyboardHideObserver: NSObjectProtocol?
     #endif
 
     private let makeTransport: () -> Transport
@@ -72,12 +92,23 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         // accessory view isn't shown at all.
         terminalView.inputAccessoryView = nil
         let center = NotificationCenter.default
-        center.addObserver(forName: UIResponder.keyboardWillShowNotification,
-                           object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.keyboardVisible = true }
+        keyboardShowObserver = center.addObserver(
+            forName: UIResponder.keyboardWillShowNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                // Notifications are process-wide, not per-view: every open
+                // tab's controller sees them, including backgrounded ones.
+                // Only the terminal actually becoming first responder is the
+                // one whose keyboard this is.
+                guard let self, self.terminalView.isFirstResponder else { return }
+                self.keyboardVisible = true
+            }
         }
-        center.addObserver(forName: UIResponder.keyboardWillHideNotification,
-                           object: nil, queue: .main) { [weak self] _ in
+        keyboardHideObserver = center.addObserver(
+            forName: UIResponder.keyboardWillHideNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
             MainActor.assumeIsolated { self?.keyboardVisible = false }
         }
         #endif
@@ -191,6 +222,34 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     /// Tear down the connection — called when the session's tab is closed.
     func close() {
         transport.close()
+        #if os(iOS)
+        removeKeyboardObservers()
+        #endif
+    }
+
+    #if os(iOS)
+    private func removeKeyboardObservers() {
+        let center = NotificationCenter.default
+        if let observer = keyboardShowObserver {
+            center.removeObserver(observer)
+            keyboardShowObserver = nil
+        }
+        if let observer = keyboardHideObserver {
+            center.removeObserver(observer)
+            keyboardHideObserver = nil
+        }
+    }
+    #endif
+
+    deinit {
+        // `close()` (called by `SessionsModel.close(_:)`) already removes
+        // these, but a controller built and dropped without going through
+        // `close()` — a unit test, say — must not leak the observers either.
+        #if os(iOS)
+        let center = NotificationCenter.default
+        if let observer = keyboardShowObserver { center.removeObserver(observer) }
+        if let observer = keyboardHideObserver { center.removeObserver(observer) }
+        #endif
     }
 
     // MARK: TerminalViewDelegate
