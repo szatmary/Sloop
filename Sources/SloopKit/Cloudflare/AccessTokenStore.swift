@@ -7,7 +7,16 @@ import Foundation
 /// The app ships a Keychain-backed implementation; tests use
 /// `InMemoryAccessTokenStore`. Kept as a protocol in SloopKit so the dial
 /// plumbing can depend on it without pulling in the Security framework.
-public protocol AccessTokenStore: AnyObject {
+///
+/// **Conformances must be safe to use from several threads at once**, which
+/// is why this protocol is `Sendable`. One store is shared by the whole app
+/// and it is genuinely used concurrently: `HostListModel` reads and writes it
+/// on the main actor (the pre-connect check, storing a freshly captured
+/// token, signing out, deleting a host) while `TokenClearingDialer` removes a
+/// rejected token from whichever SSH worker thread was dialing at the time.
+/// An unsynchronized dictionary or a check-then-act keychain update under
+/// that is undefined behaviour, not a lost update.
+public protocol AccessTokenStore: AnyObject, Sendable {
     func rawToken(for hostname: String) -> String?
     func setRawToken(_ raw: String, for hostname: String) throws
     func removeToken(for hostname: String) throws
@@ -36,18 +45,29 @@ public func normalizedAccessHostname(_ hostname: String) -> String {
 }
 
 /// A non-persistent token store for tests and previews.
-public final class InMemoryAccessTokenStore: AccessTokenStore {
+///
+/// `@unchecked Sendable` is earned by the lock, not assumed: every access to
+/// `storage` goes through it, so the concurrent use the protocol allows is
+/// serialized here rather than corrupting a Dictionary mid-resize.
+public final class InMemoryAccessTokenStore: AccessTokenStore, @unchecked Sendable {
+    private let lock = NSLock()
     private var storage: [String: String] = [:]
 
     public init() {}
 
     public func rawToken(for hostname: String) -> String? {
-        storage[normalizedAccessHostname(hostname)]
+        lock.lock()
+        defer { lock.unlock() }
+        return storage[normalizedAccessHostname(hostname)]
     }
     public func setRawToken(_ raw: String, for hostname: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
         storage[normalizedAccessHostname(hostname)] = raw
     }
     public func removeToken(for hostname: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
         storage[normalizedAccessHostname(hostname)] = nil
     }
 }

@@ -116,6 +116,32 @@ final class AccessTokenTests: XCTestCase {
         XCTAssertNil(store.validToken(for: "ssh.example.com"))
     }
 
+    /// One store is shared by the whole app and it really is used from
+    /// several threads: `HostListModel` reads and writes it on the main actor
+    /// while `TokenClearingDialer` removes a rejected token from the SSH
+    /// worker thread that was dialing. An unsynchronized Dictionary under
+    /// that is undefined behaviour — this hammers it from every core at once,
+    /// which crashes or hangs on a store without a lock (and is flagged
+    /// outright by `swift test --sanitize=thread`), then checks it still
+    /// works afterwards.
+    func testConcurrentUseFromManyThreads() throws {
+        let store = InMemoryAccessTokenStore()
+        let good = jwt(["exp": Date().addingTimeInterval(3600).timeIntervalSince1970])
+
+        DispatchQueue.concurrentPerform(iterations: 2_000) { i in
+            let hostname = "ssh\(i % 8).example.com"
+            switch i % 4 {
+            case 0: try? store.setRawToken(good, for: hostname)
+            case 1: _ = store.rawToken(for: hostname)
+            case 2: _ = store.validToken(for: hostname)
+            default: try? store.removeToken(for: hostname)
+            }
+        }
+
+        try store.setRawToken(good, for: "after.example.com")
+        XCTAssertEqual(store.validToken(for: "after.example.com")?.raw, good)
+    }
+
     /// Hostnames are case-insensitive but reach the store in whatever case
     /// the user typed or an imported SSH config used, so the store must
     /// normalize the key: setting under one case and reading under another
