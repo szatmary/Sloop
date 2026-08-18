@@ -54,10 +54,18 @@ enum TransportFactory {
     }
 
     /// The `wss://` URL a Cloudflare Access dialer would connect to, or nil
-    /// when `host.hostname` doesn't form a valid URL (empty, or containing
-    /// characters `URL` won't accept unencoded, e.g. a stray space).
+    /// when `host.hostname` doesn't form one: empty, or containing characters
+    /// `URL` won't accept unencoded (a stray space, say).
+    ///
+    /// The host component is checked, not just the parse. `URL(string:)`
+    /// happily returns a non-nil `wss://` for an empty hostname — a URL with
+    /// no host at all — which used to be handed to the dialer, where it spent
+    /// the full 20 s dial timeout failing to connect to nothing. The user has
+    /// a hostname field they left blank; they should be told that, now.
     private static func accessURL(for host: SSHHost) -> URL? {
-        URL(string: "wss://\(host.hostname)")
+        guard let url = URL(string: "wss://\(host.hostname)"),
+              url.host()?.isEmpty == false else { return nil }
+        return url
     }
 
     /// Why `dialer(for:)` returned nil, as terminal text. For Cloudflare

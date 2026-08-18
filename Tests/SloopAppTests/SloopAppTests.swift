@@ -194,6 +194,33 @@ final class SloopAppTests: XCTestCase {
                        "a malformed hostname is not a login problem: \(text)")
     }
 
+    /// An empty hostname is the same configuration error as a malformed one,
+    /// and `URL(string:)` does not catch it: `"wss://"` parses perfectly well
+    /// as a URL with no host. That got dialed, and the user waited out the
+    /// full 20 s connect timeout to be told nothing useful.
+    @MainActor
+    func testTransportFactoryReportsEmptyCloudflareAccessHostnameDistinctly() {
+        let host = SSHHost(alias: "t", hostname: "", username: "u",
+                           connectionMethod: .cloudflareAccess)
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sloop-app-known-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let transport = TransportFactory.ssh(host: host,
+                                             credential: Credential(),
+                                             knownHosts: KnownHostsStore(fileURL: tmp),
+                                             hostKeyVerifier: AutoAcceptHostKeyVerifier(),
+                                             accessTokens: InMemoryAccessTokenStore())
+        var text = ""
+        transport.onData = { text += String(decoding: $0, as: UTF8.self) }
+        transport.start()
+
+        XCTAssertTrue(text.lowercased().contains("hostname"),
+                      "should say the hostname is the problem: \(text)")
+        XCTAssertFalse(text.lowercased().contains("login"),
+                       "a blank hostname is not a login problem: \(text)")
+    }
+
     /// The token-missing case must still read as a login problem — the host
     /// list's pre-connect gate (`HostListModel.needsAccessLogin`) is built on
     /// this message staying put.
