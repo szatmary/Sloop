@@ -55,6 +55,23 @@ top of a working SSH terminal rather than first.
 - [ ] Background-connection handling and reconnect polish (Mosh roaming exists;
       exercise it on-device).
 
+## Tunnels — Cloudflare Access ✅, Tailscale next
+
+- [x] `Dialer` seam (`TCPDialer` wraps the existing direct-connect path, no
+      behavior change) + `SSHHost.connectionMethod`. See
+      [`Docs/ARCHITECTURE.md`](ARCHITECTURE.md).
+- [x] Cloudflare Access: native WebSocket carrier (`CloudflareAccessDialer`),
+      browser SSO (`AccessLoginView`), Keychain-backed token store. SSH-only —
+      Mosh needs UDP, which the tunnel can't carry. Unit-tested; **not yet
+      run against a real Cloudflare Tunnel** — see the checklist in
+      [`Docs/HANDOFF.md`](HANDOFF.md).
+- [ ] Tailscale via embedded TailscaleKit — separate plan, gated on a
+      real-device smoke test of the vendored framework before any integration
+      work starts (a past iOS sandbox failure in the same code path,
+      tailscale/tailscale#15410, is closed but unverified against the current
+      release). See
+      [`Docs/superpowers/specs/2026-08-12-tunnel-integrations-design.md`](superpowers/specs/2026-08-12-tunnel-integrations-design.md).
+
 ## Deferred
 
 - **tvOS app** — blocked on SwiftTerm: its UIKit terminal views don't compile

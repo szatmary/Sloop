@@ -43,6 +43,88 @@ Implementations:
 `SwiftTermView.Coordinator` is the only place the two worlds meet: it implements
 `TerminalViewDelegate` (SwiftTerm → us) and pumps `onData` back into the view.
 
+## Dialers: how the byte stream is established
+
+`Transport` says nothing about how bytes reach the SSH server; that's one
+layer down, the `Dialer` seam
+([`Sources/SloopKit/Net/Dialer.swift`](../Sources/SloopKit/Net/Dialer.swift)):
+
+```swift
+public protocol Dialer: AnyObject {
+    func dial() throws -> Int32
+}
+```
+
+`dial()` is called once, on a background thread, and may block; it returns a
+connected, bidirectional socket fd that the caller owns and closes.
+`LibSSH2Transport` (the interactive shell) and `LibSSH2CommandRunner` (the
+Mosh SSH-exec bootstrap) both take a `Dialer` and run libssh2's handshake,
+host-key check, and read/write pump over whatever fd it hands back — the SSH
+side never knows which dialer produced it.
+
+- **`TCPDialer`** — `getaddrinfo` + `connect`, the direct path.
+  `LibSSH2CommandRunner` always uses this one; it's only ever invoked for
+  Mosh's SSH-exec bootstrap, which only runs for `.direct` hosts anyway (see
+  below).
+- **`CloudflareAccessDialer`**
+  ([`Sources/SloopKit/Cloudflare/CloudflareAccessDialer.swift`](../Sources/SloopKit/Cloudflare/CloudflareAccessDialer.swift))
+  — what `cloudflared access ssh` does, natively: a `URLSessionWebSocketTask`
+  WebSocket to `wss://<hostname>`, the Access JWT in the `cf-access-token`
+  request header, binary frames carrying the raw SSH byte stream. A
+  [`SocketPairRelay`](../Sources/SloopKit/Net/SocketPairRelay.swift) bridges
+  that callback-shaped stream to one end of a `socketpair()` and hands the
+  other end out as the fd libssh2 runs over.
+- `.tailscale` is a recognized `ConnectionMethod` but not yet a working
+  dialer — `TransportFactory` returns `nil` for it today. Planned as a third
+  dialer over an embedded tailnet node; see [`Docs/ROADMAP.md`](ROADMAP.md).
+
+Tunneled hosts are SSH-only: Mosh needs UDP, which Cloudflare Access
+(TCP-over-WebSocket) can't carry and embedded Tailscale hasn't been verified
+to. `SSHHost.connectionMethod` selects the dialer via
+[`TransportFactory`](../App/Sloop/SSH/TransportFactory.swift); `HostEditView`
+disables the "Use Mosh" toggle whenever the method isn't `.direct`.
+
+### Getting the Access token
+
+A `WKWebView` sheet
+([`AccessLoginView`](../App/Sloop/Cloudflare/AccessLoginView.swift)) loads
+`https://<hostname>`, lets Access bounce through the identity provider, and
+after every navigation reads the `CF_Authorization` cookie for that hostname
+from the web view's cookie store — that cookie's value *is* the JWT, no
+separate token exchange. `HostListModel.needsAccessLogin(_:)` checks for a
+valid stored token before connecting and routes to this sheet when one's
+missing or expired; `TransportFactory` re-resolves the token at connect time
+so a fresh login is picked up immediately.
+
+Tokens live behind the `AccessTokenStore` protocol
+([`Sources/SloopKit/Cloudflare/AccessTokenStore.swift`](../Sources/SloopKit/Cloudflare/AccessTokenStore.swift)),
+keyed by lowercased hostname — a Keychain-backed implementation in the app
+(one generic-password item per hostname), `InMemoryAccessTokenStore` in tests.
+`AccessToken` parses only the JWT payload's `exp`/`aud` client-side (no
+signature check: the app is the bearer, not the verifier) to decide if a
+stored token is still worth trying before dialing. A WebSocket upgrade that
+Cloudflare's edge rejects for lack of a session produces
+`SSHError.accessLoginRequired`; one it rejects because the policy denies the
+authenticated identity produces `SSHError.accessDenied`.
+
+### Two things worth knowing
+
+- **No true "sign out."** `AccessLoginView` uses `WKWebView`'s default,
+  persistent `WKWebsiteDataStore` on purpose — it's what lets a token renewal
+  skip the IdP prompt on an otherwise-still-logged-in browser. The cost: the
+  IdP session outlives the stored token. Deleting the keychain token (nothing
+  in the app UI does this yet — `AccessTokenStore.removeToken` exists but has
+  no caller) doesn't end that IdP session, so the next login completes
+  silently rather than asking for credentials again. A real sign-out would
+  need to clear the web view's data store too.
+- **A parent-domain cookie is accepted.** `accessCookieDomainMatches`
+  ([`Sources/SloopKit/Cloudflare/AccessCookie.swift`](../Sources/SloopKit/Cloudflare/AccessCookie.swift))
+  treats a `CF_Authorization` cookie scoped to `.example.com` as valid for
+  `ssh.example.com`. That doesn't widen the browser's own trust boundary — the
+  cookie was already scoped that broadly by whatever server set it — and
+  Cloudflare's edge still rejects a token whose `aud` claim doesn't match the
+  application being dialed. Worth knowing, not a bug.
+
 ## Why the split
 
 - **Testable core.** SloopKit has no UIKit/AppKit, so `swift test` runs on Linux

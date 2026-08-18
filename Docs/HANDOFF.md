@@ -1,6 +1,6 @@
 # Sloop — handoff & ship-readiness
 
-_Last updated: 2026-08-08._
+_Last updated: 2026-08-17._
 
 Sloop is a free, native terminal for Apple platforms (iPhone, iPad, Mac): an
 SSH terminal with an optional Mosh (UDP/SSP) transport, modeled on "blink shell
@@ -28,14 +28,21 @@ biggest open risk and needs a human at a Mac with Xcode.
   commands** (⌘T/⌘W/⌘⇧[ ]), native macOS **Settings** window.
 - **Host management**: keychain-backed credentials, host editor, **SSH config
   import/export** (`~/.ssh/config`).
+- **Cloudflare Access tunnel**: a `Dialer` seam ([`Docs/ARCHITECTURE.md`](ARCHITECTURE.md)) with
+  `CloudflareAccessDialer` as a native WebSocket carrier for hosts behind
+  Cloudflare Tunnel, `AccessLoginView` for the browser SSO, and a
+  Keychain-backed token store; selected per-host, SSH-only (Mosh toggle
+  disabled). Unit-tested; not yet run against a real tunnel.
 - **CI**: SloopKit unit tests, libssh2/protobuf/mosh xcframeworks, base app
   (iOS+macOS), SSH app (iOS+macOS), Mosh app (iOS+macOS), unsigned macOS
   Release + rolling `nightly` GitHub release. All required and green.
 
 ### NOT done / not verifiable here
 
-- **Runtime validation** — no live SSH/Mosh session has been exercised. First
-  device test is step 1 below.
+- **Runtime validation** — no live SSH/Mosh session, and no live Cloudflare
+  Access tunnel connection, has been exercised. First device test is step 1
+  below; the Cloudflare Access checklist needs the maintainer's own Access
+  application and IdP.
 - **Code signing / distribution** — the app is unsigned.
 - **Marketing assets** (App Store screenshots). The app icon itself is DONE:
   `App/Sloop/Assets.xcassets` generated from the SVG master by
@@ -104,11 +111,47 @@ problem — it goes away with Developer ID signing + notarization (a ship step).
       relaunch; macOS ⌘, Settings.
 - [ ] **SSH config**: import `~/.ssh/config`; export and re-import round-trips.
 
+### Cloudflare Access (maintainer's tunnel)
+
+Cannot be exercised in CI or the simulator against a real IdP — this needs the
+maintainer's own Cloudflare Access application ([`Docs/ARCHITECTURE.md`](ARCHITECTURE.md)
+has the mechanics: `CloudflareAccessDialer`, `AccessLoginView`, `AccessTokenStore`).
+
+- [ ] Add a host, set "Connect via" to **Cloudflare Access**, and enter the
+      Access application's public hostname (the port field is hidden — sshd is
+      reached inside the tunnel).
+- [ ] First connect: the login sheet opens in-app, loads the hostname, and lets
+      the IdP flow complete; once it captures the `CF_Authorization` cookie the
+      sheet dismisses on its own and the terminal connects without a second
+      prompt.
+- [ ] Quit and relaunch, then reconnect: no browser sheet — the stored token is
+      reused directly.
+- [ ] Confirm the "Use Mosh" toggle is disabled (and forced off) for this host
+      in the editor, with the "needs UDP" explanation shown.
+- [ ] Let the token pass its own expiry (or use a short-lived test Access
+      policy) and reconnect from the host list: the login sheet reappears —
+      `HostListModel.needsAccessLogin` reads the stored JWT's own `exp` claim
+      before dialing.
+- [ ] Revoke the session in Zero Trust *before* its natural expiry and
+      reconnect: expect a clear "Cloudflare Access needs a browser login for
+      `<hostname>`" message in the terminal, not a hang or a raw error. Note
+      that this is expected to surface as a **failed connection**, not an
+      automatic re-prompt — the app has no way to notice a server-side
+      revocation until the cached token's own expiry passes (see "No true
+      sign out" in [`Docs/ARCHITECTURE.md`](ARCHITECTURE.md)). If this needs to
+      feel better before shipping, that's a follow-up, not a regression to
+      chase down now.
+
 ## Where things live
 
 - `Sources/SloopKit/` — Foundation-only core (models, transports' Swift side,
-  parsers). Unit-tested; Linux/CI-buildable.
-- `App/Sloop/` — the SwiftUI app + SwiftTerm glue + the SSH/Mosh native bridges.
+  parsers). Unit-tested; Linux/CI-buildable. `Sources/SloopKit/Net/` is the
+  `Dialer`/`SocketPairRelay` seam; `Sources/SloopKit/Cloudflare/` is the
+  platform-independent half of Access support (token model, store protocol,
+  the WebSocket dialer, the cookie-domain check).
+- `App/Sloop/` — the SwiftUI app + SwiftTerm glue + the SSH/Mosh native
+  bridges. `App/Sloop/Cloudflare/` has the Keychain token store and the
+  `WKWebView` login sheet.
 - `Scripts/build-*.sh` — cross-compile libssh2 / protobuf / mosh xcframeworks.
 - `project*.yml` — XcodeGen specs (base / `.ssh` / `.mosh`).
 - `Docs/` — `ROADMAP`, `SSH`, `MOSH`, `LICENSING`, `PROGRESS`, and this file.
