@@ -4,6 +4,13 @@
 import Foundation
 
 /// How Sloop authenticates to a host. Secrets never live here — see `Credential`.
+///
+/// There is deliberately no `agent` case. One was declared here for a long time
+/// with nothing behind it — no SSH-layer support, no UI, no way to select it —
+/// so it read as a supported auth method that silently was not one. Agent
+/// support is real work (an agent protocol, key custody, forwarding) and is on
+/// the roadmap as such; until it exists, the enum says only what Sloop can
+/// actually do.
 public enum AuthMethod: Codable, Hashable {
     case password
     /// References a private key stored in the keychain by name.
