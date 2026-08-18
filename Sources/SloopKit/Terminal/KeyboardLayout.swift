@@ -323,7 +323,9 @@ public struct KeyboardLayout: Equatable, Sendable {
             // Tab at its ANSI 1.5. Rows don't need matching totals — they are
             // right-aligned against the cluster, so their right edges line up
             // whatever their contents.
-            [.key(.escape), .key(.tab, width: .wide(1.5))]
+            // Tab stretches with backspace, the pair of wide keys at the ends
+            // of this row — the same job control and shift do on the two below.
+            [.key(.escape), .key(.tab, width: .flexible)]
                 + "qwertyuiop".map { KeyCap.character($0) }
                 + [.character("["), .character("]"),
                    // Backspace at the end of the top row, two units wide, as
@@ -349,7 +351,10 @@ public struct KeyboardLayout: Equatable, Sendable {
             // but not each other, and two keys that do the same kind of thing
             // being different sizes reads as a mistake. Control and shift take
             // the slack instead, which is what wide modifiers are for.
-            [.command(.paste, width: .wide(1.75)),
+            // Copy and paste are one unit, the size of escape: they are keys
+            // you press deliberately, not ones you reach for blind, and the
+            // width is better spent on the modifiers beside them.
+            [.command(.paste),
              .modifier(.control, width: .flexible)]
                 + "asdfghjkl".map { KeyCap.character($0) }
                 + [.character(";"), .character("'"), .character("\\"),
@@ -364,7 +369,7 @@ public struct KeyboardLayout: Equatable, Sendable {
             // Session switching, in the same spare space. It was reachable
             // only by an edge swipe — a gesture nothing announces, and one
             // VoiceOver and Switch Control cannot perform at all.
-            [.command(.copy, width: .wide(1.75)),
+            [.command(.copy),
              .modifier(.shift, width: .flexible)]
                 + "zxcvbnm".map { KeyCap.character($0) }
                 + [.character(","), .character("."), .character("/"),
@@ -375,7 +380,9 @@ public struct KeyboardLayout: Equatable, Sendable {
             [.command(.dismissKeyboard),
              .functionLayer, .modifier(.option), .character("`"),
              .character(" ", width: .flexible),
-             .modifier(.option),
+             // One option key. A keyboard has two because ten fingers reach
+             // from both sides; thumbs don't, and the second was width the
+             // space bar could use.
              .chord(.control, "b"), .chord(.control, "c"),
              .chord(.control, "d"), .chord(.control, "z"),
              .chord(.control, "l"),

@@ -507,26 +507,30 @@ final class KeyboardLayoutTests: XCTestCase {
             frames[flat.firstIndex(where: predicate)!]
         }
 
-        // One unit, 48.1720, shared by the letters, the navigation cluster and
+        // One unit, 49.7778, shared by the letters, the navigation cluster and
         // the number pad — one key size on the keyboard, not three. It is
         // solved for directly: the busiest letter row has to fit all three
         // blocks plus the gap between them, and that equation sets it.
-        XCTAssertEqual(frame { $0.primary == .character("q") }.width, 48.1720, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 48.1720, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.up) }.width, 48.1720, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character("q") }.width, 49.7778, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 49.7778, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.up) }.width, 49.7778, accuracy: 0.001)
 
-        // Copy and paste are the same width as each other — a fixed 1.75
-        // units on both rows. Sharing each row's slack instead made each match
-        // the modifier beside it but not the other, and two keys doing the same
-        // kind of thing at different sizes reads as a mistake.
-        XCTAssertEqual(frame { $0.primary == .command(.paste) }.width,
-                       frame { $0.primary == .command(.copy) }.width, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .command(.paste) }.width, 84.3011, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 51.1720, accuracy: 0.001)
-        // Shift eats what the session key used to take, which is what a wide
-        // modifier is for.
-        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 117.3871, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 87.3011, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 264.9032, accuracy: 0.001)
+        // Copy and paste are one unit, the size of escape, and identical to
+        // each other. Sizing them from each row's slack made copy wider than
+        // paste, which reads as a mistake for two keys doing the same kind of
+        // thing.
+        XCTAssertEqual(frame { $0.primary == .command(.paste) }.width, 49.7778, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .command(.copy) }.width, 49.7778, accuracy: 0.001)
+
+        // The wide keys at the ends of each row take whatever that row has
+        // left, which is what squares the keyboard's left edge: rows carry
+        // different numbers of keys, each costing a gap, so fixed widths could
+        // never make four rows the same length. Tab and backspace share the top
+        // row's slack, so they match each other.
+        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 63.7222, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 63.7222, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 52.7778, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 121.0, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 288.7778, accuracy: 0.001)
     }
 }
