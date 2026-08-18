@@ -33,11 +33,13 @@ top of a working SSH terminal rather than first.
       layout per device (symbol row on iPad, drag-up symbols on iPhone),
       installed via SwiftTerm's `inputView`. Chosen in Terminal Settings;
       Standard remains the default. Implementation is complete and
-      unit-tested, but two things remain unverified: no on-device testing has
-      been done (this work was done without hardware available), and the
-      compact layout's row heights are still unmeasured placeholders rather
-      than values checked against real touch targets. Spec:
+      unit-tested. Spec:
       `Docs/superpowers/specs/2026-08-17-terminal-rows-design.md`.
+- [ ] On-device verification of the dismissible and compact keyboards above —
+      nothing in this feature has run on real hardware yet (built and tested
+      in the simulator only). The compact layout's row heights are still
+      unmeasured placeholders rather than values checked against real touch
+      targets.
 - [ ] Font, color scheme, and cursor settings.
 - [ ] iPad multi-window tabs.
 
