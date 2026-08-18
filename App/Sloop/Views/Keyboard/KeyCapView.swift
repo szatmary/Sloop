@@ -52,23 +52,48 @@ final class KeyCapView: UIControl {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// Whether shift is armed, and whether the function layer is. Both change
+    /// what a tap on this key produces, so both change what it says.
+    private var shiftActive = false
+    private var functionLayerActive = false
+
     /// Redraw for shift: the character a tap will actually produce goes on the
     /// face, and the other one drops to the small legend above it.
     func setShifted(_ isShifted: Bool) {
-        guard case .character(let character) = cap.primary,
-              cap.secondary == nil else { return }
+        guard shiftActive != isShifted else { return }
+        shiftActive = isShifted
+        refreshLabels()
+    }
+
+    /// Redraw for the function layer: a key that fn turns into F1–F12 says so
+    /// while it's armed. Arming a layer that changes nothing on screen is the
+    /// same bug as arming shift and leaving `,` on a key about to send `<`.
+    func setFunctionLayer(_ isActive: Bool) {
+        guard functionLayerActive != isActive else { return }
+        functionLayerActive = isActive
+        refreshLabels()
+    }
+
+    private func refreshLabels() {
+        guard case .character(let character) = cap.primary, cap.secondary == nil else { return }
+
+        if functionLayerActive, let number = functionKeyNumber(forCharacter: character) {
+            primaryLabel.text = "F\(number)"
+            secondaryLabel.text = nil
+            return
+        }
+
         let shifted = KeyboardLayout.shifted(character)
         guard shifted != character else {
-            // Letters have no separate legend — upper case is the whole change.
             if character.isLetter {
-                primaryLabel.text = isShifted
+                primaryLabel.text = shiftActive
                     ? String(character).uppercased()
                     : String(character)
             }
             return
         }
-        primaryLabel.text = String(isShifted ? shifted : character)
-        secondaryLabel.text = String(isShifted ? character : shifted)
+        primaryLabel.text = String(shiftActive ? shifted : character)
+        secondaryLabel.text = String(shiftActive ? character : shifted)
     }
 
     /// Highlight a sticky modifier that is currently armed.
@@ -91,6 +116,13 @@ final class KeyCapView: UIControl {
         }
         backgroundColor = .secondarySystemFill
         layer.cornerRadius = 5
+        // The reverse-L return key is two caps drawn touching; rounding the
+        // corners where they meet would draw a seam through the middle of it.
+        switch cap.join {
+        case .none:  break
+        case .below: layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        case .above: layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        }
         isMultipleTouchEnabled = false
 
         // Keys that are an icon rather than a word get one. "⌨︎↓" was two
@@ -110,7 +142,10 @@ final class KeyCapView: UIControl {
             return
         }
 
-        primaryLabel.text = Self.label(for: cap.primary)
+        // The upper half of the reverse-L return key draws no glyph: it is one
+        // key, and one key has one label. The wider half below carries it,
+        // which is where a keyboard prints it.
+        primaryLabel.text = cap.join == .below ? "" : Self.label(for: cap.primary)
         primaryLabel.font = .monospacedSystemFont(ofSize: 17, weight: .regular)
         primaryLabel.textAlignment = .center
         primaryLabel.textColor = .label

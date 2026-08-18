@@ -280,7 +280,10 @@ public struct KeyboardLayout: Equatable, Sendable {
                 case .wide(let scale): capWidth = unit * scale
                 case .flexible:        capWidth = flexibleWidth
                 }
-                result.append(KeyFrame(x: x, y: y, width: capWidth, height: rowHeight - spacing))
+                // A cap joining the row below covers the gap between them, so
+                // the two halves of the reverse-L return key touch.
+                let capHeight = cap.join == .below ? rowHeight : rowHeight - spacing
+                result.append(KeyFrame(x: x, y: y, width: capWidth, height: capHeight))
                 x += capWidth + spacing
             }
 
@@ -317,20 +320,25 @@ public struct KeyboardLayout: Equatable, Sendable {
         // centred against each other, and then the two halves of the return key
         // don't line up and it reads as a tetromino rather than a key.
         let mainRows: [[KeyCap]] = [
-            // 1 + 2.5 + 10 + 3 = 16.5, and every row below is right-aligned to
-            // the same edge. `=` is back where ANSI keeps it, at the right end
-            // of the letters — and `+` with it, since `+` is shift-`=`.
-            [.key(.escape), .key(.tab, width: .wide(2.5))]
+            // Tab at its ANSI 1.5. Rows don't need matching totals — they are
+            // right-aligned against the cluster, so their right edges line up
+            // whatever their contents.
+            [.key(.escape), .key(.tab, width: .wide(1.5))]
                 + "qwertyuiop".map { KeyCap.character($0) }
-                + [.character("["), .character("]"), .character("=")],
+                + [.character("["), .character("]")],
             // Control in the caps-lock position, which is where anyone who uses
             // a terminal puts it anyway.
             [.modifier(.control, width: .wide(1.75))]
                 + "asdfghjkl".map { KeyCap.character($0) }
-                + [.character(";"), .character("'"), .character("\\")],
-            // Return takes the right shift's place. One shift is enough on a
-            // keyboard reached with thumbs, and return is the key that wants to
-            // be big and easy to hit.
+                + [.character(";"), .character("'"), .character("\\"),
+                   // Upper half of the reverse-L return key, spanning this row
+                   // and the one below — the two middle rows, where a keyboard
+                   // puts it relative to the letters. Narrower than the half
+                   // below it, and flush to the same right edge, which is what
+                   // makes the L.
+                   .key(.return, width: .wide(1.5), join: .below)],
+            // One shift, at the left. The right-hand one is where the wide
+            // half of the return key goes.
             [.modifier(.shift, width: .wide(2.25))]
                 + "zxcvbnm".map { KeyCap.character($0) }
                 + [.character(","), .character("."), .character("/"),
@@ -369,9 +377,11 @@ public struct KeyboardLayout: Equatable, Sendable {
             [.character("7"), .character("8"), .character("9"), .character("/")],
             [.character("4"), .character("5"), .character("6"), .character("*")],
             [.character("1"), .character("2"), .character("3"), .character("-")],
-            // A double-wide enter in the corner, as every number pad has —
-            // the key you hit with the edge of your hand after typing a number.
-            [.character("0"), .character("."), .key(.return, width: .wide(2))],
+            // A double-wide zero, as every number pad has, and `=` in the
+            // corner beside it — `+` comes with it, being shift-`=`. Return is
+            // not repeated here: the letters already carry it, two rows up and
+            // twice the size.
+            [.character("0", width: .wide(2)), .character("."), .character("=")],
         ]
 
         let trailing = zip(navigationRows, keypadRows).map { $0 + $1 }

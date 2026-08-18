@@ -166,6 +166,7 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
             // disarm, and it clears itself after the key it applies to.
             functionLayerArmed.toggle()
             view.setArmed(functionLayerArmed)
+            applyFunctionLayer()
 
         case .command(let command):
             switch command {
@@ -215,12 +216,22 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
     /// sequence had to decide what to do with it.
     private var functionLayerArmed = false
 
-    /// Drop the layer and unhighlight whichever key armed it.
+    /// Drop the layer, unhighlight whichever key armed it, and put the digits
+    /// back.
     private func clearFunctionLayer() {
         guard functionLayerArmed else { return }
         functionLayerArmed = false
         for view in keyViews where view.cap.primary == .functionLayer {
             view.setArmed(false)
+        }
+        applyFunctionLayer()
+    }
+
+    /// Tell every key whether the function layer is armed, so the ones fn
+    /// changes say what they will do.
+    private func applyFunctionLayer() {
+        for view in keyViews {
+            view.setFunctionLayer(functionLayerArmed)
         }
     }
 
