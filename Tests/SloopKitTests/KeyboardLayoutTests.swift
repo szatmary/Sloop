@@ -574,3 +574,38 @@ final class PadKeyboardSnapshotTests: XCTestCase {
         }
     }
 }
+
+/// Every key the terminal knows how to send has somewhere to be pressed.
+///
+/// `KeyEncoder` defines the vocabulary; a `TerminalKey` it can encode but the
+/// keyboard never offers is a key the user simply cannot press, and nothing
+/// else in the suite would notice — the character tests only cover characters.
+final class KeyCoverageTests: XCTestCase {
+    func testEveryTerminalKeyIsOnTheIPadKeyboard() {
+        let layout = KeyboardLayout.resolve(for: .init(idiom: .pad, orientation: .landscape))
+        let present = Set(layout.rows.flatMap { $0 }.compactMap { cap -> String? in
+            if case .key(let key) = cap.primary { return "\(key)" }
+            return nil
+        })
+        // Every case of TerminalKey except `function`, which is the fn layer's
+        // job and is covered by `FunctionLayerTests`.
+        let expected: [TerminalKey] = [.escape, .tab, .return, .backspace, .delete,
+                                       .up, .down, .left, .right,
+                                       .home, .end, .pageUp, .pageDown]
+        for key in expected {
+            XCTAssertTrue(present.contains("\(key)"), "no way to press \(key)")
+        }
+    }
+
+    /// F1–F12 are reachable through fn, which is what makes it acceptable that
+    /// no key on the board carries them directly.
+    func testFunctionKeysAreReachableThroughTheFnLayer() {
+        let layout = KeyboardLayout.resolve(for: .init(idiom: .pad, orientation: .landscape))
+        let characters = layout.rows.flatMap { $0 }.compactMap { cap -> Character? in
+            if case .character(let character) = cap.primary { return character }
+            return nil
+        }
+        let reachable = Set(characters.compactMap(functionKeyNumber(forCharacter:)))
+        XCTAssertEqual(reachable, Set(1...12))
+    }
+}
