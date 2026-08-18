@@ -67,6 +67,19 @@ top of a working SSH terminal rather than first.
 - iCloud host sync (the host list itself is still local-only; key material
   already syncs today via iCloud Keychain, E2E-encrypted, as part of the
   shared key library below — the host list is what's not yet synced).
+- **Carry the typed error into `ConnectionState`** — `TerminalController.wire`
+  stringifies at the boundary (`error?.localizedDescription`) and stores prose
+  in `.disconnected(reason:)`, so nothing downstream can tell a rejected
+  credential from a dropped Wi-Fi link from a tunnel that wants a browser
+  login. Every recovery affordance needs that distinction: an auth failure
+  should offer to fix the host's credential, a Cloudflare Access session that
+  expired should re-present the login sheet, and a network drop should just
+  reconnect. Today all three render as the same grey text with a Reconnect
+  button. This is the same lesson as `SSHError.authenticationFailed(String)`
+  one layer up — a failure reported honestly but indistinguishably costs hours
+  to diagnose and cannot be recovered from automatically. It wants its own
+  piece of work: it changes `ConnectionState`, which both the terminal UI and
+  the tunnel work build on. (Found by the Cloudflare Access session, 2026-08.)
 - **On-connect command** — a per-host command run automatically once the shell
   is up, so a host can drop you straight into a session rather than a bare
   prompt. The motivating case is `tmux attach || tmux new` (or `tmux a`):
