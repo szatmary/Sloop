@@ -16,12 +16,14 @@ enum TransportFactory {
                     hostKeyVerifier: HostKeyVerifier,
                     accessTokens: AccessTokenStore) -> Transport {
         #if canImport(CSSH)
-        guard let dialer = dialer(for: host, accessTokens: accessTokens) else {
-            return unavailable(for: host)
+        switch dialer(for: host, accessTokens: accessTokens) {
+        case .ready(let dialer):
+            return LibSSH2Transport(host: host, credential: credential,
+                                    dialer: dialer,
+                                    knownHosts: knownHosts, hostKeyVerifier: hostKeyVerifier)
+        case .unavailable(let explanation):
+            return MessageTransport(message: explanation)
         }
-        return LibSSH2Transport(host: host, credential: credential,
-                                dialer: dialer,
-                                knownHosts: knownHosts, hostKeyVerifier: hostKeyVerifier)
         #else
         return MessageTransport(message:
             "SSH isn't built into this app yet.\r\n" +
@@ -30,26 +32,51 @@ enum TransportFactory {
     }
 
     #if canImport(CSSH)
-    /// The dialer for the host's connection method, or nil when the method
-    /// can't produce one right now (a malformed hostname, no Access token,
-    /// unbuilt integration). `unavailable(for:)` re-derives which of those it
-    /// was, so the two failure causes reach the user as different messages.
+    /// A dialer for the host's connection method, or the reason there isn't
+    /// one — as the text the terminal will show.
+    ///
+    /// Carrying the reason out of the one switch that discovered it is the
+    /// point. When this returned a bare `Dialer?`, a second function had to
+    /// re-derive *which* nil it was by re-calling `accessURL` and re-switching
+    /// over the connection method — two switches to keep in step, one of whose
+    /// branches ("a direct host with no dialer") could not happen at all.
+    private enum DialerResolution {
+        case ready(Dialer)
+        case unavailable(String)
+    }
+
     private static func dialer(for host: SSHHost,
-                               accessTokens: AccessTokenStore) -> Dialer? {
+                               accessTokens: AccessTokenStore) -> DialerResolution {
         switch host.connectionMethod {
         case .direct:
-            return TCPDialer(host: host.hostname, port: host.port)
+            return .ready(TCPDialer(host: host.hostname, port: host.port))
+
         case .cloudflareAccess:
-            guard let url = accessURL(for: host),
-                  let token = accessTokens.validToken(for: host.hostname) else {
-                return nil
+            // "The hostname is wrong" must never read as "you need to sign
+            // in": no login can fix a hostname, and telling the user to try
+            // one traps them in a loop. The host list's pre-connect gate
+            // catches the missing-token case before this is reached; nothing
+            // gates the malformed-hostname one.
+            guard let url = accessURL(for: host) else {
+                let problem = host.hostname.isEmpty
+                    ? "This host has no hostname."
+                    : "\"\(host.hostname)\" isn't a valid hostname for Cloudflare Access."
+                return .unavailable(problem + "\r\n" +
+                    "Fix it in the host list, then reconnect — signing in won't help.\r\n")
+            }
+            guard let token = accessTokens.validToken(for: host.hostname) else {
+                return .unavailable(
+                    "Cloudflare Access needs a browser login for \(host.hostname).\r\n" +
+                    "Go back to the host list and reconnect to sign in.\r\n")
             }
             let dialer = CloudflareAccessDialer(url: url, hostname: host.hostname,
                                                 token: token.raw)
-            return TokenClearingDialer(wrapping: dialer, hostname: host.hostname,
-                                       accessTokens: accessTokens)
+            return .ready(TokenClearingDialer(wrapping: dialer, hostname: host.hostname,
+                                              accessTokens: accessTokens))
+
         case .tailscale:
-            return nil
+            return .unavailable(
+                "Tailscale support isn't built into this app yet — see Docs/ROADMAP.md.\r\n")
         }
     }
 
@@ -68,29 +95,6 @@ enum TransportFactory {
         return url
     }
 
-    /// Why `dialer(for:)` returned nil, as terminal text. For Cloudflare
-    /// Access this must not conflate "hostname is malformed" — a
-    /// configuration error no login can fix — with "no valid token" — the
-    /// case the host list's pre-connect gate normally catches before this is
-    /// ever reached, but the malformed-hostname case isn't gated anywhere.
-    private static func unavailable(for host: SSHHost) -> Transport {
-        switch host.connectionMethod {
-        case .cloudflareAccess where accessURL(for: host) == nil:
-            return MessageTransport(message:
-                "\"\(host.hostname)\" isn't a valid hostname for Cloudflare Access.\r\n" +
-                "Fix it in the host list, then reconnect — signing in won't help.\r\n")
-        case .cloudflareAccess:
-            return MessageTransport(message:
-                "Cloudflare Access needs a browser login for \(host.hostname).\r\n" +
-                "Go back to the host list and reconnect to sign in.\r\n")
-        case .tailscale:
-            return MessageTransport(message:
-                "Tailscale support isn't built into this app yet — see Docs/ROADMAP.md.\r\n")
-        case .direct:
-            return MessageTransport(message:
-                "Unable to connect to \(host.hostname).\r\n")
-        }
-    }
     #endif
 }
 
