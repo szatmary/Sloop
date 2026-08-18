@@ -75,6 +75,21 @@ struct HostEditView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // What this host is called, on its own: it is how the host
+                // list reads and which colour rail it gets, and it has nothing
+                // to do with reaching the machine.
+                Section("Name") {
+                    TextField("Name", text: $host.alias)
+                        #if os(iOS)
+                        // Host names are lowercase far more often than not, and
+                        // iOS capitalising the first letter meant a lowercase
+                        // alias could not be typed at all without fighting the
+                        // keyboard. Hostname and Username already opt out.
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        #endif
+                }
+
                 Section("Connection") {
                     // First, because it changes what everything below it means:
                     // a hostname is a machine on Direct, an Access application's
@@ -95,30 +110,12 @@ struct HostEditView: View {
                         .accessibilityLabel("About connection methods")
                     }
 
-                    TextField("Alias", text: $host.alias)
-                        #if os(iOS)
-                        // Host names are lowercase far more often than not, and
-                        // iOS capitalising the first letter meant a lowercase
-                        // alias could not be typed at all without fighting the
-                        // keyboard. Hostname and Username already opt out.
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        #endif
                     TextField("Hostname", text: $host.hostname)
                         .textContentType(.URL)
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         #endif
-                    TextField("Username", text: $host.username)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        #endif
-                    // Driven by the enum, not by a hand-written pair: a host
-                    // saved as .tailscale used to open this editor with no
-                    // matching option at all, so the picker showed nothing
-                    // selected and saving silently reinterpreted the host.
                     // A switch rather than an if/else, so a new connection
                     // method has to answer "and what does its port mean?"
                     // here rather than inheriting whatever the else branch
@@ -155,6 +152,19 @@ struct HostEditView: View {
                 }
 
                 Section("Authentication") {
+                    // Who you sign in as, beside how you prove it. It sat in
+                    // Connection, which is where the machine is described, not
+                    // who is knocking.
+                    TextField("Username", text: $host.username)
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        #endif
+                    // Driven by the enum, not by a hand-written pair: a host
+                    // saved as .tailscale used to open this editor with no
+                    // matching option at all, so the picker showed nothing
+                    // selected and saving silently reinterpreted the host.
+
                     Picker("Method", selection: $authKind) {
                         ForEach(AuthKind.allCases) { kind in
                             Text(kind.rawValue).tag(kind)
