@@ -189,8 +189,14 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
                 }
                 clearArmedModifiers()
 
-            case .previousSession:
-                SessionsModel.shared.selectPrevious()
+            case .copy:
+                // Only what's selected. With no selection there is nothing to
+                // copy and no way to guess what was meant, and putting the
+                // wrong thing on the pasteboard silently is worse than putting
+                // nothing there.
+                if let selection = controller.terminalView.getSelection(), !selection.isEmpty {
+                    UIPasteboard.general.string = selection
+                }
                 clearArmedModifiers()
 
             case .nextSession:

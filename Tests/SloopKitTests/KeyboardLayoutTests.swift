@@ -92,11 +92,22 @@ final class KeyboardLayoutTests: XCTestCase {
 
     // MARK: Well-formedness
 
-    func testAtMostOneFlexibleKeyPerRow() {
+    /// Flexible keys share their row's slack equally, so a row with two of
+    /// them gets two keys of matching width — which is how copy and paste come
+    /// out the same size as the control and shift keys beside them. What must
+    /// not happen is a row with none, since then nothing absorbs the
+    /// difference between rows and the keyboard's left edge goes ragged.
+    ///
+    /// Layouts that right-align only. The phone has no cluster to align
+    /// against, so its rows are centred and a ragged edge isn't possible.
+    func testEveryMainRowHasSomethingToAbsorbItsSlack() {
         for context in [padLandscape, padPortrait, phonePortrait, phoneLandscape] {
-            for (index, row) in KeyboardLayout.resolve(for: context).rows.enumerated() {
-                let flexible = row.filter { $0.width == .flexible }.count
-                XCTAssertLessThanOrEqual(flexible, 1, "row \(index) of \(context)")
+            let layout = KeyboardLayout.resolve(for: context)
+            guard layout.keypadColumns.contains(where: { $0 > 0 }) else { continue }
+            for (index, (row, keypadColumns)) in zip(layout.rows, layout.keypadColumns).enumerated() {
+                let main = row.dropLast(keypadColumns)
+                XCTAssertTrue(main.contains { $0.width == .flexible },
+                              "row \(index) of \(context) has no flexible key")
             }
         }
     }
@@ -475,17 +486,17 @@ final class KeyboardLayoutTests: XCTestCase {
         }
 
         // Every row draws at the letter unit, which is whatever the tightest
-        // letter row can afford — the bottom row, at 24.9286 now that the
+        // letter row can afford — the bottom row, at 26.8462 now that the
         // close-tab key is gone from it. The digit and qwerty rows could
         // afford 29.3333 on their own and are centred at the shared unit
         // instead: letters that change width between rows is what that avoids.
-        XCTAssertEqual(frame { $0.primary == .key(.escape) }.width, 24.9286, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 24.9286, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 24.9286, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.option) }.width, 24.9286, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.escape) }.width, 26.8462, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 26.8462, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 26.8462, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.option) }.width, 26.8462, accuracy: 0.001)
         // The space bar takes its row's slack, which here is exactly its
         // two-unit floor.
-        XCTAssertEqual(frame { $0.width == .flexible }.width, 49.8571, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.width == .flexible }.width, 26.8462, accuracy: 0.001)
     }
 
     func testPadLandscapeSlotWidthsMatchHandComputedValues() {
@@ -496,19 +507,24 @@ final class KeyboardLayoutTests: XCTestCase {
             frames[flat.firstIndex(where: predicate)!]
         }
 
-        // One unit, 47.6596, shared by the letters, the navigation cluster and
+        // One unit, 48.1720, shared by the letters, the navigation cluster and
         // the number pad — one key size on the keyboard, not three. It is
         // solved for directly: the busiest letter row has to fit all three
         // blocks plus the gap between them, and that equation sets it.
-        XCTAssertEqual(frame { $0.primary == .character("q") }.width, 47.6596, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 47.6596, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.up) }.width, 47.6596, accuracy: 0.001)
-        // Backspace is two units, at the end of the top row where ANSI has it.
-        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 95.3191, accuracy: 0.001)
-        // ANSI widths as multiples of it: control 1.75 at caps lock, shift
-        // 2.25, space 5.5.
-        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 83.4043, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 107.2340, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 262.1277, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character("q") }.width, 48.1720, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 48.1720, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.up) }.width, 48.1720, accuracy: 0.001)
+
+        // Copy and paste are the same width as each other — a fixed 1.75
+        // units on both rows. Sharing each row's slack instead made each match
+        // the modifier beside it but not the other, and two keys doing the same
+        // kind of thing at different sizes reads as a mistake.
+        XCTAssertEqual(frame { $0.primary == .command(.paste) }.width,
+                       frame { $0.primary == .command(.copy) }.width, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .command(.paste) }.width, 84.3011, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 51.1720, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 66.2151, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 87.3011, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 264.9032, accuracy: 0.001)
     }
 }

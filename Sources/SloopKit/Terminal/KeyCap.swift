@@ -44,9 +44,15 @@ public struct KeyCap: Equatable, Sendable {
         /// Send the pasteboard's contents as if typed. A tablet has no ⌘V, and
         /// the alternative is a long-press on the terminal itself.
         case paste
-        /// Move between open sessions. Otherwise reachable only by an edge
-        /// swipe, which nothing announces and VoiceOver cannot perform.
-        case previousSession, nextSession
+        /// Put the terminal's selection on the pasteboard. Does nothing when
+        /// nothing is selected — there is no sensible guess at what someone
+        /// meant to copy, and copying the wrong thing silently is worse than
+        /// copying nothing.
+        case copy
+        /// Cycle to the next open session. Otherwise reachable only by an
+        /// edge swipe, which nothing announces and VoiceOver cannot perform.
+        /// One direction is enough to reach every session.
+        case nextSession
     }
 
     /// How much horizontal room a key takes, in grid slots.

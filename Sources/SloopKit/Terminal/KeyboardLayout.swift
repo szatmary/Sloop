@@ -118,7 +118,7 @@ public struct KeyboardLayout: Equatable, Sendable {
         let gaps = spacing * Double(max(row.count - 1, 0))
         // A flexible cap is reserved at two units when sizing, so a row with a
         // space bar can't claim a unit the letter rows are unable to match.
-        let slots = fixedSlots(in: row) + (row.contains { $0.width == .flexible } ? 2 : 0)
+        let slots = fixedSlots(in: row) + (row.contains { $0.width == .flexible } ? 1 : 0)
         return slots > 0 ? (content - gaps) / slots : content
     }
 
@@ -155,7 +155,7 @@ public struct KeyboardLayout: Equatable, Sendable {
             guard carriesLetters else { continue }
 
             let slots = fixedSlots(in: row)
-                + (row.contains { $0.width == .flexible } ? 2 : 0)
+                + (row.contains { $0.width == .flexible } ? 1 : 0)
             let gaps = spacing * Double(max(row.count - 1, 0))
                 + (columns > 0 ? spacing : 0)   // the gap between the blocks
             let unit = slots > 0 ? (content - gaps) / slots : content
@@ -257,7 +257,7 @@ public struct KeyboardLayout: Equatable, Sendable {
             // Whatever a row's fixed keys don't use goes to its flexible cap,
             // never below two units.
             let flexibleWidth = flexibleCount > 0
-                ? max(unit * 2, (region - gaps - fixed) / flexibleCount)
+                ? max(unit, (region - gaps - fixed) / flexibleCount)
                 : 0
 
             let used = fixed + flexibleWidth * flexibleCount + gaps
@@ -331,14 +331,26 @@ public struct KeyboardLayout: Equatable, Sendable {
                    // cluster, which made it the same size as page-up — a key
                    // you hit constantly, drawn like one you don't — and left
                    // this row shorter than the ones below it.
-                   .key(.backspace, width: .wide(2), repeats: true)],
+                   // Stretches to fill the row. Each row has exactly one key
+                   // that does, which is what squares the keyboard's left edge:
+                   // rows carry different numbers of keys, and every key costs
+                   // a gap, so fixed widths can't make four rows the same
+                   // length. Backspace is the right one to grow here — it is
+                   // hit constantly and wants to be big.
+                   .key(.backspace, width: .flexible, repeats: true)],
             // Control in the caps-lock position, which is where anyone who uses
             // a terminal puts it anyway.
             // Paste fills the space this row leaves on the left. A tablet has
             // no ⌘V, and pasting a command or a URL into a terminal is
             // something people do constantly — until now by long-pressing the
             // terminal and hunting for a menu.
-            [.command(.paste), .modifier(.control, width: .wide(1.75))]
+            // Copy and paste are a fixed 1.75 units, the same on both rows —
+            // sharing each row's slack made them match the modifier beside them
+            // but not each other, and two keys that do the same kind of thing
+            // being different sizes reads as a mistake. Control and shift take
+            // the slack instead, which is what wide modifiers are for.
+            [.command(.paste, width: .wide(1.75)),
+             .modifier(.control, width: .flexible)]
                 + "asdfghjkl".map { KeyCap.character($0) }
                 + [.character(";"), .character("'"), .character("\\"),
                    // Upper half of the reverse-L return key, spanning this row
@@ -352,8 +364,9 @@ public struct KeyboardLayout: Equatable, Sendable {
             // Session switching, in the same spare space. It was reachable
             // only by an edge swipe — a gesture nothing announces, and one
             // VoiceOver and Switch Control cannot perform at all.
-            [.command(.previousSession), .command(.nextSession),
-             .modifier(.shift, width: .wide(2.25))]
+            [.command(.copy, width: .wide(1.75)),
+             .command(.nextSession),
+             .modifier(.shift, width: .flexible)]
                 + "zxcvbnm".map { KeyCap.character($0) }
                 + [.character(","), .character("."), .character("/"),
                    .key(.return, width: .wide(2.25))],
@@ -362,7 +375,7 @@ public struct KeyboardLayout: Equatable, Sendable {
             // tmux's prefix first, then interrupt, end-of-file, suspend, clear.
             [.command(.dismissKeyboard),
              .functionLayer, .modifier(.option), .character("`"),
-             .character(" ", width: .wide(5.5)),
+             .character(" ", width: .flexible),
              .modifier(.option),
              .chord(.control, "b"), .chord(.control, "c"),
              .chord(.control, "d"), .chord(.control, "z"),
