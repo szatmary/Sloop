@@ -67,6 +67,21 @@ top of a working SSH terminal rather than first.
 - iCloud host sync (the host list itself is still local-only; key material
   already syncs today via iCloud Keychain, E2E-encrypted, as part of the
   shared key library below — the host list is what's not yet synced).
+- **On-connect command** — a per-host command run automatically once the shell
+  is up, so a host can drop you straight into a session rather than a bare
+  prompt. The motivating case is `tmux attach || tmux new` (or `tmux a`):
+  reconnecting to the same multiplexed session is the normal workflow on a
+  phone or tablet, where the network drops constantly. Worth deciding whether
+  it runs in the PTY (visible, and the user can Ctrl-C out of it) or as an
+  exec channel, and whether a failed command should leave the plain shell.
+- **Custom compact keyboard** — replace the system keyboard with a
+  terminal-shaped one via SwiftTerm's settable `inputView`, folding today's
+  smart-keys bar into the keyboard instead of stacking a row above it. The
+  software keyboard is the single largest consumer of screen space, so this is
+  the biggest remaining win for visible rows. iPadOS's own floating keyboard
+  (pinch to shrink) helps today but cannot be invoked programmatically — there
+  is no public API — so a real fix means owning the keyboard. Design work:
+  key sizes, symbol/digit layers, portrait vs landscape.
 - SFTP / file transfer.
 - Port forwarding.
 - ~~Key management~~ → DONE: shared key library synced via iCloud Keychain;
