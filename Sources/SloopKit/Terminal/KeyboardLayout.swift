@@ -146,7 +146,13 @@ public struct KeyboardLayout: Equatable, Sendable {
                     + [.character(","), .character("."),
                        .character(" ", width: .flexible),
                        .key(.left, repeats: true), .key(.right, repeats: true),
-                       .command(.dismissKeyboard)],
+                       .command(.dismissKeyboard),
+                       // Last, and alone: the same reasoning
+                       // `KeyboardAccessoryBar` states for its own ✕ — closing
+                       // a tab drops a live SSH session, so it belongs where a
+                       // mis-tap while reaching for space/arrows/dismiss can't
+                       // reach it.
+                       .command(.closeTab)],
             ],
             // iPad keys are wide, so they can be short without becoming hard
             // to hit — which is the whole point, since height is what a
@@ -210,7 +216,10 @@ public struct KeyboardLayout: Equatable, Sendable {
                     + bottomLetters
                     + [.character(" ", width: .flexible),
                        .key(.left, repeats: true), .key(.right, repeats: true),
-                       .command(.dismissKeyboard)],
+                       .command(.dismissKeyboard),
+                       // Last, and alone — see the matching comment on the
+                       // iPad table.
+                       .command(.closeTab)],
             ],
             // Per CompactKeyboardView's slot algorithm (padding 4, spacing 3),
             // a 393pt-wide portrait screen renders the digit/tab/control rows

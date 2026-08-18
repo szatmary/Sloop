@@ -111,6 +111,18 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
+    func testEveryLayoutCanCloseItsTab() {
+        // `KeyboardAccessoryBar`'s ✕ is the only touch-reachable way to close
+        // a session when the software keyboard is up; compact mode replaces
+        // that bar entirely, so every layout must carry its own way to close
+        // the tab or a session opened in compact mode is unclosable by touch.
+        for context in [padLandscape, padPortrait, phonePortrait, phoneLandscape] {
+            let caps = KeyboardLayout.resolve(for: context).rows.flatMap { $0 }
+            XCTAssertTrue(caps.contains { $0.primary == .command(.closeTab) },
+                          "no way to close the tab in \(context)")
+        }
+    }
+
     func testBackspaceAndArrowsRepeat() {
         for context in [padLandscape, phonePortrait] {
             let caps = KeyboardLayout.resolve(for: context).rows.flatMap { $0 }
@@ -313,10 +325,12 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(frame { $0.primary == .key(.escape) }.width, 29.3333, accuracy: 0.001)
         XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 29.3333, accuracy: 0.001)
         XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 29.3333, accuracy: 0.001)
-        // Row 3 (bottom row): 13 caps including the flexible space bar, so
-        // the unit slot shrinks and the space bar absorbs two slots.
-        XCTAssertEqual(frame { $0.primary == .modifier(.option) }.width, 24.9286, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.width == .flexible }.width, 49.8571, accuracy: 0.001)
+        // Row 3 (bottom row): 14 caps now (13 + closeTab, added so a session
+        // opened in compact mode can be closed by touch) including the
+        // flexible space bar, so the unit slot shrinks and the space bar
+        // absorbs two slots.
+        XCTAssertEqual(frame { $0.primary == .modifier(.option) }.width, 23.0667, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.width == .flexible }.width, 46.1333, accuracy: 0.001)
     }
 
     func testPadLandscapeSlotWidthsMatchHandComputedValues() {
@@ -333,7 +347,8 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 96.0833, accuracy: 0.001)       // qwerty row
         XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 92.24, accuracy: 0.01) // home row unit
         XCTAssertEqual(frame { $0.primary == .key(.return) }.width, 138.36, accuracy: 0.01)      // home row wide
-        XCTAssertEqual(frame { $0.primary == .modifier(.option) }.width, 71.5, accuracy: 0.01)   // bottom row unit
-        XCTAssertEqual(frame { $0.width == .flexible }.width, 143.0, accuracy: 0.01)             // bottom row space
+        // Bottom row: 16 caps now (15 + closeTab).
+        XCTAssertEqual(frame { $0.primary == .modifier(.option) }.width, 67.1176, accuracy: 0.01)   // bottom row unit
+        XCTAssertEqual(frame { $0.width == .flexible }.width, 134.2353, accuracy: 0.01)             // bottom row space
     }
 }

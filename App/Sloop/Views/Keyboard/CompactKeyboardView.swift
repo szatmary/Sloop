@@ -171,11 +171,15 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
                 clearArmedModifiers()
                 controller.dismissKeyboard()
             case .closeTab:
-                // No layout table places a closeTab cap today, so this case
-                // is currently unreachable from this keyboard. Closing a tab
-                // is reached through TerminalPane's own affordance, not here;
-                // this stays a deliberate no-op rather than an oversight.
-                break
+                // Routed through the controller rather than handled here,
+                // because closing a tab needs a confirmation dialog — a
+                // mis-tap must not drop a live SSH session — and that dialog
+                // lives in TerminalPane's SwiftUI `@State`. This view only
+                // holds a weak reference to `controller`, not to the pane, so
+                // `controller.onCloseTabRequested` is the bridge: TerminalPane
+                // sets it once (in `onAppear`) to raise its own confirmation,
+                // the same way `KeyboardAccessoryBar`'s ✕ already does.
+                controller.onCloseTabRequested()
             }
 
         case .character, .key:

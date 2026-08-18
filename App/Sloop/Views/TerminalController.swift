@@ -80,6 +80,17 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     /// whatever unrelated redraw happens to come next.
     @Published private(set) var compactKeyboardActive = false
 
+    /// Called when the compact keyboard's close-tab key is tapped.
+    /// `TerminalPane` sets this (once, in `onAppear`) to raise its own
+    /// confirmation dialog before actually closing — the same dialog
+    /// `KeyboardAccessoryBar`'s ✕ already goes through. A plain closure, not
+    /// `@Published`: nothing observes it as state, it's consumed once per tap
+    /// by whichever view wired it, and `CompactKeyboardView` only holds a
+    /// weak reference to this controller, not to the SwiftUI view that owns
+    /// the confirmation state, so a callback stored here is the bridge
+    /// between them.
+    var onCloseTabRequested: () -> Void = {}
+
     /// Tokens for the keyboard show/hide observers, removed in `close()` and
     /// `deinit` so closed/deallocated controllers don't leave dead closures
     /// registered with `NotificationCenter.default` for the life of the process.

@@ -60,6 +60,13 @@ struct TerminalPane: View {
         } message: {
             Text("The connection will be closed.")
         }
+        #if os(iOS)
+        // The compact keyboard's own close-tab key has no SwiftUI state of
+        // its own to raise this dialog from — see
+        // `TerminalController.onCloseTabRequested`'s doc comment. Wired once
+        // per pane rather than on every body evaluation.
+        .onAppear { controller.onCloseTabRequested = { confirmingClose = true } }
+        #endif
     }
 }
 
