@@ -162,4 +162,95 @@ final class SloopAppTests: XCTestCase {
         XCTAssertTrue(closed)
         #endif
     }
+
+    /// A Cloudflare Access hostname that can't form a `wss://` URL (a typo
+    /// with a stray space, here) must be reported as a hostname problem, not
+    /// as "needs a login" — signing in cannot fix a malformed hostname, and
+    /// telling the user to do so traps them in a loop. Only meaningful when
+    /// CSSH is linked: without it, every host gets the same "not built in"
+    /// message regardless of connection method.
+    #if canImport(CSSH)
+    @MainActor
+    func testTransportFactoryReportsMalformedCloudflareAccessHostnameDistinctly() {
+        let host = SSHHost(alias: "t", hostname: "exa mple.com", username: "u",
+                           connectionMethod: .cloudflareAccess)
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sloop-app-known-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let transport = TransportFactory.ssh(host: host,
+                                             credential: Credential(),
+                                             knownHosts: KnownHostsStore(fileURL: tmp),
+                                             hostKeyVerifier: AutoAcceptHostKeyVerifier(),
+                                             accessTokens: InMemoryAccessTokenStore())
+        var text = ""
+        transport.onData = { text += String(decoding: $0, as: UTF8.self) }
+        transport.start()
+
+        XCTAssertTrue(text.contains("exa mple.com"), "should name the hostname: \(text)")
+        XCTAssertTrue(text.lowercased().contains("hostname"),
+                      "should say the hostname is the problem: \(text)")
+        XCTAssertFalse(text.lowercased().contains("login"),
+                       "a malformed hostname is not a login problem: \(text)")
+    }
+
+    /// The token-missing case must still read as a login problem — the host
+    /// list's pre-connect gate (`HostListModel.needsAccessLogin`) is built on
+    /// this message staying put.
+    @MainActor
+    func testTransportFactoryReportsMissingAccessTokenAsLoginRequired() {
+        let host = SSHHost(alias: "t", hostname: "example.com", username: "u",
+                           connectionMethod: .cloudflareAccess)
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sloop-app-known-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let transport = TransportFactory.ssh(host: host,
+                                             credential: Credential(),
+                                             knownHosts: KnownHostsStore(fileURL: tmp),
+                                             hostKeyVerifier: AutoAcceptHostKeyVerifier(),
+                                             accessTokens: InMemoryAccessTokenStore())
+        var text = ""
+        transport.onData = { text += String(decoding: $0, as: UTF8.self) }
+        transport.start()
+
+        XCTAssertTrue(text.contains("browser login"), "should ask for a login: \(text)")
+        XCTAssertTrue(text.contains("example.com"), "should name the hostname: \(text)")
+    }
+
+    /// `CommandRunnerFactory` must refuse to build a directly-dialing runner
+    /// for a tunneled host on its own terms — not merely because its one
+    /// caller (the Mosh probe in `HostListModel.connect`) happens to restrict
+    /// itself to `.direct` hosts today. If that caller-side guard is ever
+    /// relaxed, this is what stops SSH credentials from going straight to the
+    /// Access hostname's public port 22.
+    @MainActor
+    func testCommandRunnerFactoryRefusesTunneledHosts() {
+        let host = SSHHost(alias: "t", hostname: "example.com", username: "u",
+                           connectionMethod: .cloudflareAccess)
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sloop-app-known-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let runner = CommandRunnerFactory.ssh(host: host,
+                                              credential: Credential(),
+                                              knownHosts: KnownHostsStore(fileURL: tmp),
+                                              hostKeyVerifier: AutoAcceptHostKeyVerifier())
+
+        let done = expectation(description: "run completed")
+        runner.run("echo hi") { result in
+            switch result {
+            case .success:
+                XCTFail("a tunneled host must not run commands over a direct dial")
+            case .failure(let error):
+                guard case SSHError.notImplemented(let why) = error else {
+                    return XCTFail("expected notImplemented, got \(error)")
+                }
+                XCTAssertTrue(why.contains("tunnel"), why)
+            }
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 1)
+    }
+    #endif
 }

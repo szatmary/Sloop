@@ -31,14 +31,16 @@ enum TransportFactory {
 
     #if canImport(CSSH)
     /// The dialer for the host's connection method, or nil when the method
-    /// can't produce one right now (no Access token, unbuilt integration).
+    /// can't produce one right now (a malformed hostname, no Access token,
+    /// unbuilt integration). `unavailable(for:)` re-derives which of those it
+    /// was, so the two failure causes reach the user as different messages.
     private static func dialer(for host: SSHHost,
                                accessTokens: AccessTokenStore) -> Dialer? {
         switch host.connectionMethod {
         case .direct:
             return TCPDialer(host: host.hostname, port: host.port)
         case .cloudflareAccess:
-            guard let url = URL(string: "wss://\(host.hostname)"),
+            guard let url = accessURL(for: host),
                   let token = accessTokens.validToken(for: host.hostname) else {
                 return nil
             }
@@ -49,10 +51,24 @@ enum TransportFactory {
         }
     }
 
-    /// Why `dialer(for:)` returned nil, as terminal text. The host list's
-    /// pre-connect gate normally prevents the Access case from being seen.
+    /// The `wss://` URL a Cloudflare Access dialer would connect to, or nil
+    /// when `host.hostname` doesn't form a valid URL (empty, or containing
+    /// characters `URL` won't accept unencoded, e.g. a stray space).
+    private static func accessURL(for host: SSHHost) -> URL? {
+        URL(string: "wss://\(host.hostname)")
+    }
+
+    /// Why `dialer(for:)` returned nil, as terminal text. For Cloudflare
+    /// Access this must not conflate "hostname is malformed" — a
+    /// configuration error no login can fix — with "no valid token" — the
+    /// case the host list's pre-connect gate normally catches before this is
+    /// ever reached, but the malformed-hostname case isn't gated anywhere.
     private static func unavailable(for host: SSHHost) -> Transport {
         switch host.connectionMethod {
+        case .cloudflareAccess where accessURL(for: host) == nil:
+            return MessageTransport(message:
+                "\"\(host.hostname)\" isn't a valid hostname for Cloudflare Access.\r\n" +
+                "Fix it in the host list, then reconnect — signing in won't help.\r\n")
         case .cloudflareAccess:
             return MessageTransport(message:
                 "Cloudflare Access needs a browser login for \(host.hostname).\r\n" +

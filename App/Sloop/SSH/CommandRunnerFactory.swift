@@ -15,6 +15,16 @@ enum CommandRunnerFactory {
                     knownHosts: KnownHostsStore,
                     hostKeyVerifier: HostKeyVerifier) -> CommandRunner {
         #if canImport(CSSH)
+        // A tunneled host must never get a runner that dials its hostname
+        // directly — that would bypass the tunnel and send credentials to
+        // whatever answers on the host's public port 22. Today the only
+        // caller (the Mosh probe, via HostListModel.connect) already limits
+        // itself to `.direct` hosts, but that guard lives in a different
+        // file; this factory shouldn't depend on it staying that way.
+        guard host.connectionMethod == .direct else {
+            return UnavailableCommandRunner(message:
+                "Command execution isn't available for tunneled hosts — it would bypass the tunnel.")
+        }
         return LibSSH2CommandRunner(host: host, credential: credential,
                                     dialer: TCPDialer(host: host.hostname, port: host.port),
                                     knownHosts: knownHosts, hostKeyVerifier: hostKeyVerifier)
@@ -25,10 +35,16 @@ enum CommandRunnerFactory {
 }
 
 /// A `CommandRunner` that always fails — used when SSH isn't compiled into the
-/// app yet, so one-shot command callers have a well-defined fallback.
+/// app yet, or when the requested host can't safely get a runner from this
+/// factory, so one-shot command callers have a well-defined fallback.
 final class UnavailableCommandRunner: CommandRunner {
+    private let message: String
+
+    init(message: String = "SSH isn't built into this app yet — add Vendor/libssh2.xcframework (see Docs/SSH.md).") {
+        self.message = message
+    }
+
     func run(_ command: String, completion: @escaping (Result<CommandResult, Error>) -> Void) {
-        completion(.failure(SSHError.notImplemented(
-            "SSH isn't built into this app yet — add Vendor/libssh2.xcframework (see Docs/SSH.md).")))
+        completion(.failure(SSHError.notImplemented(message)))
     }
 }
