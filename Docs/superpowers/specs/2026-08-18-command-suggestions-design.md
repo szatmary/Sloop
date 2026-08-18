@@ -197,27 +197,37 @@ Whatever the strip's absence looks like, it has to look deliberate on
 current hardware, not broken. (Lineup facts as of 2026-08 — re-check before
 building.)
 
-**Develop the model work on the Mac.** Foundation Models runs on macOS 26 with
-Apple silicon, and the development machine is a MacBook Air M4 on macOS 26.5 —
-so extraction and suggestion can be built and iterated locally, with no device
-deploy, no provisioning, and a compile-run loop measured in seconds. This is
-the single biggest practical lever on the feature, because the hard part is not
-the code but the prompt: how a screen is turned into commands, and what makes a
-suggestion good. That wants dozens of fast iterations against real captured
-screens, which is unbearable over a device deploy and trivial on the Mac.
+**Iterate on the prompt without a device.** The hard part of this feature is not
+the code but the prompt: how a screen becomes a list of commands, and what makes
+a suggestion worth tapping. That wants dozens of fast iterations against real
+captured screen text, so the loop should not involve deploying to hardware.
+Foundation Models runs on macOS 26 on Apple silicon, so the macOS target, the
+iOS Simulator, and a plain command-line harness are all viable surfaces —
+confirm Simulator support before relying on it, since it is the least certain of
+the three.
 
 Two consequences for how it is built:
 
 - **Keep the model boundary free of iOS UI types.** Extraction and suggestion
   take text in and return values out. Nothing about them should require a
   `UIView`, a keyboard accessory, or an iOS-only framework, so they can be
-  exercised from the macOS app or a plain harness. This is good structure
-  regardless; being able to develop on the Mac is what makes it load-bearing.
+  exercised from the macOS app, the Simulator, or a plain harness. This is good
+  structure regardless; being able to iterate off-device is what makes it
+  load-bearing.
 - **The strip is iOS-shaped and macOS is not.** There is no software keyboard to
   attach to on the Mac, so the macOS presentation is a separate design question
   (inline completion, a popup, a strip under the terminal) — deliberately not
   answered here. The Mac's role in this spec is as the development and
   prompt-tuning surface, not as a second product surface.
+
+**Adapters and fine-tuning are explicitly out of scope.** Ship against the stock
+model and find out what it can already do. If suggestion quality turns out to be
+the limiting factor, Foundation Models supports LoRA-style adapters through
+Apple's adapter training toolkit, and captured shell sessions would be the
+training corpus — a public corpus rather than any user's own history, since one
+person's sessions are both too small to train on and the most sensitive data in
+the app. That is a later decision with its own spec, and it should be taken on
+evidence from the stock model rather than in advance of it.
 
 Suggested build order:
 
@@ -235,13 +245,11 @@ Suggested build order:
   hardware.** Elsewhere the strip does not appear. An alternative mode for older
   devices is planned as separate work; it is out of scope here so that this
   design is not shaped around a second, weaker one.
-- **The strip cannot be dogfooded on the author's iPad.** The paired device is
-  an iPad (9th generation) — A13, below the Apple Intelligence bar — so
-  judgements about how suggestions *feel* on a tablet are untestable until there
-  is A17 Pro or M-series iPad hardware to hand. That is a real gap: the tablet
-  is where the strip has the most room and the most to prove. The model itself
-  is testable elsewhere (see Implementation notes) — it is the tablet-shaped
-  interaction that has no test surface.
+- **Suggestion quality is whatever the base model gives.** No adapter, no
+  fine-tuning, no training corpus — see Implementation notes. If the stock model
+  turns out to be poor at reading terminal screens or at proposing shell
+  commands, that is a finding to act on later, not a gap this design plans
+  around.
 - **Extraction quality is the model's.** A mis-read screen produces a junk entry
   in a list the user can purge — not a wrong command executed.
 - **The model can suggest a wrong or destructive command.** That is the cost of
