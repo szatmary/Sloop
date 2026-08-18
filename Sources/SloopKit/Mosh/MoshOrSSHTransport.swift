@@ -19,7 +19,7 @@ import Foundation
 /// nil`), the started `mosh-server` is left to time out (~60s) while we use SSH.
 /// Both go away once the Mosh UDP/SSP transport lands and actually consumes the
 /// bootstrap.
-public final class MoshOrSSHTransport: Transport {
+public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
     public var onData: ((ArraySlice<UInt8>) -> Void)?
     public var onOpen: (() -> Void)?
     public var onClose: ((Error?) -> Void)?
@@ -151,6 +151,19 @@ public final class MoshOrSSHTransport: Transport {
         if let resize { transport.resize(cols: resize.cols, rows: resize.rows) }
         transport.start()
         if !bytes.isEmpty { transport.send(bytes[...]) }
+    }
+
+    /// Forward to whichever transport is live, if it can run a command at all.
+    ///
+    /// A Mosh session cannot: its SSH connection existed only long enough to
+    /// start `mosh-server` and is gone by the time anything asks. Saying so
+    /// plainly beats appearing to work.
+    public func runOnSession(_ command: String, completion: @escaping (String?) -> Void) {
+        lock.lock()
+        let live = active
+        lock.unlock()
+        guard let runner = live as? SessionCommandRunner else { return completion(nil) }
+        runner.runOnSession(command, completion: completion)
     }
 
     private func emit(_ text: String) {

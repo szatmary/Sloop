@@ -53,21 +53,27 @@ final class CommandSuggester {
 
     /// Read the host's own shell history over the connection that is already
     /// open, once per session.
-    func importHistory(over transport: Transport) {
+    func importHistory(over transport: Transport, report: @escaping (String) -> Void = { _ in }) {
         guard !hasImported else { return }
         hasImported = true
-        #if canImport(CSSH)
-        guard let ssh = transport as? LibSSH2Transport else { return }
-        ssh.runOnSession(ShellHistoryImporter.command) { [weak self] output in
-            guard let self, let output else { return }
-            let commands = ShellHistoryImporter.commands(fromHistoryOutput: output)
-            guard !commands.isEmpty else { return }
+        guard let runner = transport as? SessionCommandRunner else { return }
+        runner.runOnSession(ShellHistoryImporter.command) { [weak self] output in
+            guard let self else { return }
+            let commands = output.map(ShellHistoryImporter.commands(fromHistoryOutput:)) ?? []
             DispatchQueue.main.async {
+                let before = self.history.commands.count
                 self.history.importLines(commands)
                 self.persist()
+                let learned = self.history.commands.count - before
+                // Said once, on the connection where it happened. The import is
+                // invisible by design, and an invisible feature that quietly
+                // does nothing — as this did on every Mosh host — looks exactly
+                // like one that works.
+                report(learned > 0
+                       ? "[sloop] suggestions: learned \(learned) commands from this host's shell history\r\n"
+                       : "[sloop] suggestions: no shell history found on this host — learning as you type\r\n")
             }
         }
-        #endif
     }
 
     /// A Mosh session, a reconnect, anything that redrew the screen: the line

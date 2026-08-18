@@ -273,7 +273,9 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
                 // After the shell is up, never alongside it: the import rides
                 // a second channel on this same connection, and it is not
                 // allowed to be in the way of the thing the user asked for.
-                self.suggester?.importHistory(over: transport)
+                self.suggester?.importHistory(over: transport) { [weak self] notice in
+                    self?.terminalView.feed(text: notice)
+                }
             }
         }
         transport.onData = { [weak self, weak terminalView] bytes in

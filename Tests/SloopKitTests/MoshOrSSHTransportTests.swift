@@ -177,3 +177,57 @@ final class MoshOrSSHTransportTests: XCTestCase {
         XCTAssertFalse(ssh.started, "nor fall back to an SSH one")
     }
 }
+
+/// The history import asks the transport to run a command on the connection it
+/// already has. It used to ask by casting to the concrete SSH transport, which
+/// is exactly what a Mosh-enabled host does not hand back — so on those hosts
+/// the import silently did nothing, and the feature looked broken rather than
+/// absent.
+extension MoshOrSSHTransportTests {
+    private final class RunnerTransport: Transport, SessionCommandRunner {
+        var onData: ((ArraySlice<UInt8>) -> Void)?
+        var onOpen: (() -> Void)?
+        var onClose: ((Error?) -> Void)?
+        private(set) var ranCommand: String?
+        func start() {}
+        func send(_ bytes: ArraySlice<UInt8>) {}
+        func resize(cols: Int, rows: Int) {}
+        func close() {}
+        func runOnSession(_ command: String, completion: @escaping (String?) -> Void) {
+            ranCommand = command
+            completion("git status")
+        }
+    }
+
+    func testForwardsACommandToWhicheverTransportIsLive() {
+        let ssh = RunnerTransport()
+        let composite = MoshOrSSHTransport(
+            useMosh: false,
+            makeCommandRunner: { MockCommandRunner() },
+            makeSSHTransport: { ssh })
+        composite.start()
+
+        var output: String?
+        composite.runOnSession("history", completion: { output = $0 })
+        XCTAssertEqual(ssh.ranCommand, "history")
+        XCTAssertEqual(output, "git status")
+    }
+
+    /// A Mosh session's SSH connection existed only long enough to start
+    /// mosh-server. Reporting nil is how the caller learns to stop waiting.
+    func testReportsNothingWhenTheLiveTransportCannotRunCommands() {
+        let mosh = RecordingTransport("mosh")
+        let composite = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: { MockCommandRunner(stdout: "MOSH CONNECT 60001 key==\n") },
+            makeSSHTransport: { RecordingTransport("ssh") },
+            makeMoshTransport: { _ in mosh })
+        composite.start()
+
+        var asked = false
+        var output: String? = "unset"
+        composite.runOnSession("history") { asked = true; output = $0 }
+        XCTAssertTrue(asked)
+        XCTAssertNil(output)
+    }
+}

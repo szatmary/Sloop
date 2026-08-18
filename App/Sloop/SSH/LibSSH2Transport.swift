@@ -20,7 +20,7 @@ import SloopKit
 import Darwin
 #endif
 
-final class LibSSH2Transport: Transport {
+final class LibSSH2Transport: Transport, SessionCommandRunner {
     var onData: ((ArraySlice<UInt8>) -> Void)?
     var onOpen: (() -> Void)?
     var onClose: ((Error?) -> Void)?
