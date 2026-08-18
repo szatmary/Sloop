@@ -25,6 +25,33 @@ final class SloopAppTests: XCTestCase {
         func close() {}
     }
 
+    /// A transport must not outlive its controller.
+    ///
+    /// The callbacks in `wire(_:)` are stored *on* the transport, so capturing
+    /// it strongly there makes it retain itself and never deallocate. That
+    /// matters beyond tidiness: `LibSSH2Transport` holds a `Credential` with
+    /// the private key, its passphrase and any password as plaintext strings,
+    /// so a leak pins key material in memory for the life of the process and
+    /// closing a tab does not release it.
+    @MainActor
+    func testTransportIsNotRetainedByItsOwnCallbacks() {
+        weak var leaked: ProbeTransport?
+        do {
+            let probe = ProbeTransport()
+            leaked = probe
+            var controller: TerminalController? =
+                TerminalController(makeTransport: { probe }, onConnectCommand: "tmux a")
+            probe.onOpen?()          // exercise the capture in onOpen
+            probe.onClose?(nil)
+            controller = nil
+        }
+        drainMainQueue()
+
+        XCTAssertNil(leaked,
+                     "the transport outlived its controller — a callback stored on it "
+                     + "captured it strongly, pinning the credential it holds")
+    }
+
     /// The host's on-connect command is typed into the shell once the
     /// transport opens.
     @MainActor

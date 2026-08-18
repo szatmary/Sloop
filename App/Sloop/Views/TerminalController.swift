@@ -128,9 +128,15 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     }
 
     private func wire(_ transport: Transport) {
-        transport.onOpen = { [weak self] in
+        // `transport` is captured weakly on purpose. This closure is stored ON
+        // the transport, so capturing it strongly makes it retain itself: no
+        // transport would ever deallocate, and each one holds a `Credential`
+        // carrying the private key, its passphrase and any password as
+        // plaintext strings. Closing a tab would not free them, and every
+        // reconnect would pin another copy for the life of the process.
+        transport.onOpen = { [weak self, weak transport] in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, let transport else { return }
                 self.state = .connected
                 self.runOnConnectCommand(on: transport)
             }
