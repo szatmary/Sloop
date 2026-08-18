@@ -95,4 +95,50 @@ final class KeyEncoderTests: XCTestCase {
         XCTAssertEqual(KeyEncoder.bytes(for: "b", modifiers: .control), [0x02])
         XCTAssertEqual(KeyEncoder.bytes(for: "B", modifiers: .control), [0x02])
     }
+
+    // MARK: KeyCap.Value dispatch — the pure half of
+    // CompactKeyboardView.keyCapView(_:didProduce:)
+
+    /// The reviewer's hand-traced case: iPhone's "5" key drags up to "/"; with
+    /// ⇧ armed the terminal must see "?", never shift kept alongside "/".
+    func testKeyCapValueCharacterResolvesShiftBeforeEncoding() {
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .character("/"), armedModifiers: .shift, applicationCursor: false),
+            [0x3f]) // '?'
+    }
+
+    func testKeyCapValueCharacterWithoutShiftPassesThrough() {
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .character("a"), armedModifiers: [], applicationCursor: false),
+            [0x61])
+    }
+
+    /// `.key` values pass `.shift` THROUGH to `bytes(for:modifiers:applicationCursor:)`
+    /// rather than resolving and dropping it the way `.character` does — a
+    /// terminal receiving `ESC [ Z` (rather than plain tab) is how xterm
+    /// signals shift-tab (`CBT`, "cursor backward tab"). This was the
+    /// untested half of the character/key shift asymmetry this method's own
+    /// doc comment describes.
+    func testKeyCapValueKeyPassesShiftThroughForShiftTab() {
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .key(.tab), armedModifiers: .shift, applicationCursor: false),
+            [0x1b, 0x5b, 0x5a]) // ESC [ Z
+    }
+
+    func testKeyCapValueKeyRespectsApplicationCursorMode() {
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .key(.up), armedModifiers: [], applicationCursor: true),
+            [0x1b, 0x4f, 0x41]) // ESC O A
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .key(.up), armedModifiers: [], applicationCursor: false),
+            [0x1b, 0x5b, 0x41]) // ESC [ A
+    }
+
+    /// `.modifier` and `.command` are the software keyboard's own
+    /// affordances — arm a sticky modifier, dismiss the keyboard — and never
+    /// reach the remote end.
+    func testKeyCapValueModifierAndCommandProduceNoBytes() {
+        XCTAssertNil(KeyEncoder.bytes(for: .modifier(.control), armedModifiers: [], applicationCursor: false))
+        XCTAssertNil(KeyEncoder.bytes(for: .command(.dismissKeyboard), armedModifiers: [], applicationCursor: false))
+    }
 }

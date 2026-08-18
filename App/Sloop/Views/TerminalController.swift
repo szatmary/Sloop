@@ -10,6 +10,7 @@ private typealias PlatformFont = NSFont
 private typealias PlatformColor = NSColor
 #else
 import UIKit
+import GameController
 private typealias PlatformFont = UIFont
 private typealias PlatformColor = UIColor
 #endif
@@ -37,6 +38,81 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     /// combinations like tmux's ⌃B prefix could not be typed at all.
     @Published var armedModifiers: KeyModifiers = []
 
+    #if os(iOS)
+    /// Whether the software keyboard is currently on screen *for this
+    /// terminal* — i.e. `terminalView` is first responder and a keyboard is up.
+    ///
+    /// Driven by the system's show/hide notifications rather than by tracking our
+    /// own `dismissKeyboard()` calls, so a keyboard dismissed by the system — a
+    /// hardware keyboard being attached, say — is observed too.
+    ///
+    /// `UIResponder.keyboardWillShowNotification` is posted globally for
+    /// *any* view in the process, and `SessionsModel` keeps a
+    /// `TerminalController` alive per open tab — including tabs that are
+    /// neither visible nor focused — so the show handler is gated on
+    /// `terminalView.isFirstResponder`. The hide handler is not: by the time
+    /// it fires, a terminal that just resigned already reports
+    /// `isFirstResponder == false`, so gating it the same way would make a
+    /// genuine self-dismiss (`dismissKeyboard()`, or the system tearing the
+    /// keyboard down for this terminal) unable to ever clear its own flag.
+    /// Left unconditional, an unrelated keyboard hiding elsewhere in the app
+    /// just writes `false` over an already-`false` value on every other
+    /// controller — a harmless no-op.
+    @Published private(set) var keyboardVisible = false
+
+    /// Whether a hardware keyboard is attached. When one is, no software keyboard
+    /// appears and no show/hide notification ever fires, so `keyboardVisible`
+    /// stays false and must not be read as "there is room to reclaim".
+    ///
+    /// `@Published`, driven by `GCKeyboardDidConnect`/`GCKeyboardDidDisconnect`
+    /// rather than left a plain computed read of `GCKeyboard.coalesced`,
+    /// because nothing else guarantees a re-render when a keyboard attaches
+    /// or detaches. Concretely: keyboard dismissed (the pill showing),
+    /// attach a Magic Keyboard — no show/hide notification of ours fires (see
+    /// `keyboardVisible`'s doc comment), so nothing publishes, and
+    /// `TerminalPane` would keep showing the pill instead of the bar until
+    /// some unrelated `@Published` change happened to force a redraw. That
+    /// is a regression against the pre-compact-keyboard behaviour, where the
+    /// bar was always present.
+    @Published private(set) var hardwareKeyboardAttached = GCKeyboard.coalesced != nil
+
+    /// Whether Sloop's compact keyboard — as opposed to Apple's — is the
+    /// current `inputView`. Set only from `setCompactKeyboard(_:)`, the single
+    /// place that installs or clears it, so this can never drift from what's
+    /// actually attached to `terminalView`.
+    ///
+    /// `TerminalPane` reads this (with `keyboardVisible` and
+    /// `hardwareKeyboardAttached`) to decide whether `KeyboardAccessoryBar`
+    /// belongs on screen: the compact keyboard folds the bar's keys into
+    /// itself, so showing both would waste the 44pt compact mode exists to
+    /// reclaim and put two ⌃ buttons on screen at once. Published, not a
+    /// computed read of `terminalView.inputView`, so a view observing this
+    /// controller re-renders the instant the setting changes rather than on
+    /// whatever unrelated redraw happens to come next.
+    @Published private(set) var compactKeyboardActive = false
+
+    /// Called when the compact keyboard's close-tab key is tapped.
+    /// `TerminalPane` sets this (once, in `onAppear`) to raise its own
+    /// confirmation dialog before actually closing — the same dialog
+    /// `KeyboardAccessoryBar`'s ✕ already goes through. A plain closure, not
+    /// `@Published`: nothing observes it as state, it's consumed once per tap
+    /// by whichever view wired it, and `CompactKeyboardView` only holds a
+    /// weak reference to this controller, not to the SwiftUI view that owns
+    /// the confirmation state, so a callback stored here is the bridge
+    /// between them.
+    var onCloseTabRequested: () -> Void = {}
+
+    /// Tokens for the keyboard show/hide observers, removed in `close()` and
+    /// `deinit` so closed/deallocated controllers don't leave dead closures
+    /// registered with `NotificationCenter.default` for the life of the process.
+    private var keyboardShowObserver: NSObjectProtocol?
+    private var keyboardHideObserver: NSObjectProtocol?
+    /// Tokens for the hardware-keyboard connect/disconnect observers backing
+    /// `hardwareKeyboardAttached`, removed alongside the pair above.
+    private var hardwareKeyboardConnectObserver: NSObjectProtocol?
+    private var hardwareKeyboardDisconnectObserver: NSObjectProtocol?
+    #endif
+
     private let makeTransport: () -> Transport
     private let onConnectCommand: String?
     private var transport: Transport
@@ -59,6 +135,43 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         // it stays visible with a hardware keyboard attached, when an input
         // accessory view isn't shown at all.
         terminalView.inputAccessoryView = nil
+        let center = NotificationCenter.default
+        keyboardShowObserver = center.addObserver(
+            forName: UIResponder.keyboardWillShowNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                // Notifications are process-wide, not per-view: every open
+                // tab's controller sees them, including backgrounded ones.
+                // Only the terminal actually becoming first responder is the
+                // one whose keyboard this is.
+                guard let self, self.terminalView.isFirstResponder else { return }
+                self.keyboardVisible = true
+            }
+        }
+        keyboardHideObserver = center.addObserver(
+            forName: UIResponder.keyboardWillHideNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.keyboardVisible = false }
+        }
+        // Recomputed from `GCKeyboard.coalesced` on both notifications,
+        // rather than hard-coded to true/false, so a second hardware
+        // keyboard being attached or removed while another is still present
+        // resolves correctly instead of assuming exactly one can ever be
+        // connected.
+        hardwareKeyboardConnectObserver = center.addObserver(
+            forName: .GCKeyboardDidConnect,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hardwareKeyboardAttached = GCKeyboard.coalesced != nil }
+        }
+        hardwareKeyboardDisconnectObserver = center.addObserver(
+            forName: .GCKeyboardDidDisconnect,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hardwareKeyboardAttached = GCKeyboard.coalesced != nil }
+        }
         #endif
         apply(appearance)
         wire(transport)
@@ -71,8 +184,9 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         self.init(makeTransport: { transport })
     }
 
-    /// Apply the user's terminal appearance (font, colors, cursor) to the live
-    /// `TerminalView`. Safe to call repeatedly as settings change.
+    /// Apply the user's terminal appearance (font, colors, cursor and, on iOS,
+    /// keyboard style) to the live `TerminalView`. Safe to call repeatedly as
+    /// settings change.
     func apply(_ appearance: TerminalAppearance) {
         terminalView.font = PlatformFont.monospacedSystemFont(
             ofSize: CGFloat(appearance.fontSize), weight: .regular)
@@ -91,6 +205,12 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         case .bar: code = 6        // steady bar
         }
         terminalView.feed(text: "\u{1b}[\(code) q")
+
+        // Kept in its own branch so the keyboard concern stays separable
+        // from font and palette.
+        #if os(iOS)
+        setCompactKeyboard(appearance.keyboard == .compact)
+        #endif
     }
 
     private static func colors(
@@ -181,9 +301,87 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         transport.send(bytes)
     }
 
+    #if os(iOS)
+    /// Put the software keyboard away, giving its height back to the terminal.
+    ///
+    /// There is no matching `showKeyboard()`: SwiftTerm's own single-tap handler
+    /// already calls `becomeFirstResponder()`, so tapping the terminal brings it
+    /// back.
+    func dismissKeyboard() {
+        _ = terminalView.resignFirstResponder()
+    }
+
+    /// Swap between Apple's keyboard and Sloop's compact one.
+    ///
+    /// `inputView` is the same hook SwiftTerm's own `KeyboardView` uses; nil means
+    /// the system keyboard. Reloading is required because UIKit caches the input
+    /// view for as long as the responder stays first responder.
+    ///
+    /// Idempotent by construction, not just convention: `apply(_:)` calls this
+    /// on every appearance change, not only when the compact-keyboard setting
+    /// itself changes. Rebuilding unconditionally would tear down and
+    /// recreate the live `CompactKeyboardView` — killing any touch currently
+    /// being tracked — every time the font size or theme changes while it's
+    /// on screen. `compactKeyboardActive` mirrors the outcome for
+    /// `TerminalPane` to read.
+    func setCompactKeyboard(_ enabled: Bool) {
+        let alreadyEnabled = terminalView.inputView is CompactKeyboardView
+        guard enabled != alreadyEnabled else { return }
+        terminalView.inputView = enabled ? CompactKeyboardView(controller: self) : nil
+        compactKeyboardActive = enabled
+        if terminalView.isFirstResponder {
+            terminalView.reloadInputViews()
+        }
+    }
+    #endif
+
     /// Tear down the connection — called when the session's tab is closed.
     func close() {
         transport.close()
+        #if os(iOS)
+        removeKeyboardObservers()
+        // Belt-and-braces: the controller shouldn't hold a callback into a
+        // view it's finished with. `TerminalPane` already avoids capturing
+        // the controller (or view) in this closure, so this isn't load-
+        // bearing for the retain cycle — but `close()` isn't guaranteed to
+        // run on every path, so it's not a substitute for that fix either.
+        onCloseTabRequested = {}
+        #endif
+    }
+
+    #if os(iOS)
+    private func removeKeyboardObservers() {
+        let center = NotificationCenter.default
+        if let observer = keyboardShowObserver {
+            center.removeObserver(observer)
+            keyboardShowObserver = nil
+        }
+        if let observer = keyboardHideObserver {
+            center.removeObserver(observer)
+            keyboardHideObserver = nil
+        }
+        if let observer = hardwareKeyboardConnectObserver {
+            center.removeObserver(observer)
+            hardwareKeyboardConnectObserver = nil
+        }
+        if let observer = hardwareKeyboardDisconnectObserver {
+            center.removeObserver(observer)
+            hardwareKeyboardDisconnectObserver = nil
+        }
+    }
+    #endif
+
+    deinit {
+        // `close()` (called by `SessionsModel.close(_:)`) already removes
+        // these, but a controller built and dropped without going through
+        // `close()` — a unit test, say — must not leak the observers either.
+        #if os(iOS)
+        let center = NotificationCenter.default
+        if let observer = keyboardShowObserver { center.removeObserver(observer) }
+        if let observer = keyboardHideObserver { center.removeObserver(observer) }
+        if let observer = hardwareKeyboardConnectObserver { center.removeObserver(observer) }
+        if let observer = hardwareKeyboardDisconnectObserver { center.removeObserver(observer) }
+        #endif
     }
 
     // MARK: TerminalViewDelegate

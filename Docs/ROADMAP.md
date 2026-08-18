@@ -30,6 +30,18 @@ top of a working SSH terminal rather than first.
 - [x] Sticky-modifier smart-keys bar (Ctrl/Alt held for the next key).
 - [x] Font, color scheme, and cursor settings (`TerminalSettingsView`).
 - [x] Tabs, and a home screen that lists open sessions so you can jump to one.
+- [x] Dismissible keyboard — a `⌨︎↓` key and a floating pill that replaces the
+      smart-keys bar while the keyboard is down, so the bar stops reserving
+      44pt it isn't using.
+- [x] Custom compact keyboard — `KeyboardLayout` resolves a terminal-shaped
+      layout per device (symbol row on iPad, drag-up symbols on iPhone),
+      installed via SwiftTerm's `inputView`. Chosen in Terminal Settings;
+      Standard remains the default. Spec:
+      `Docs/superpowers/specs/2026-08-17-terminal-rows-design.md`.
+- [ ] On-device verification of the dismissible and compact keyboards above —
+      built and tested in the simulator only. The compact layout's row heights
+      are still unmeasured placeholders rather than values checked against real
+      touch targets.
 - [ ] iPad multi-window tabs (separate windows, not the in-app tabs above).
 
 ## M3 — Mosh ✅
@@ -111,14 +123,11 @@ top of a working SSH terminal rather than first.
   new`, so a dropped connection lands back in the same session instead of a
   bare prompt. Offered as a suggestion above the keyboard, and visible in the
   terminal, so Ctrl-C leaves the plain shell.
-- **Custom compact keyboard** — replace the system keyboard with a
-  terminal-shaped one via SwiftTerm's settable `inputView`, folding today's
-  smart-keys bar into the keyboard instead of stacking a row above it. The
-  software keyboard is the single largest consumer of screen space, so this is
-  the biggest remaining win for visible rows. iPadOS's own floating keyboard
-  (pinch to shrink) helps today but cannot be invoked programmatically — there
-  is no public API — so a real fix means owning the keyboard. Design work:
-  key sizes, symbol/digit layers, portrait vs landscape.
+- ~~Custom compact keyboard~~ → DONE in M2: a terminal-shaped keyboard via
+  SwiftTerm's settable `inputView`, folding the smart-keys bar into the keyboard
+  rather than stacking a row above it. The software keyboard is the largest
+  consumer of screen space, and iPadOS's own floating keyboard cannot be invoked
+  programmatically, so the only real fix was owning the keyboard.
 - **Connection timeouts and keepalives** — there are none. `grep -ri
   "timeout\|keepalive\|ServerAlive"` over `Sources/` and `App/` returns nothing,
   so an unreachable host hangs on `connect()` with no deadline and no way for

@@ -85,6 +85,37 @@ public enum KeyEncoder {
         return out
     }
 
+    /// Encode what a key cap produced — the one place that decides "what
+    /// bytes does this key send", so the character/key dispatch and the
+    /// shift-before-encoding rule aren't duplicated at every call site that
+    /// owns a `KeyCap.Value` (currently just `CompactKeyboardView`).
+    ///
+    /// For `.character`, shift is resolved to the character's shifted form
+    /// via `KeyboardLayout.shifted(_:)` and dropped from `armedModifiers`
+    /// before encoding — see `bytes(for:modifiers:)`'s doc comment for why:
+    /// a terminal receives `A`, never shift+`a`, so `.shift` must never reach
+    /// that overload for a character.
+    ///
+    /// Returns `nil` for `.modifier` and `.command`: neither emits anything
+    /// to the remote end. Both are the software keyboard's own affordances —
+    /// arming a sticky modifier, dismissing the keyboard — handled by the
+    /// caller, not here.
+    public static func bytes(for value: KeyCap.Value,
+                             armedModifiers: KeyModifiers,
+                             applicationCursor: Bool) -> [UInt8]? {
+        switch value {
+        case .character(let character):
+            let resolved = armedModifiers.contains(.shift)
+                ? KeyboardLayout.shifted(character)
+                : character
+            return bytes(for: resolved, modifiers: armedModifiers.subtracting(.shift))
+        case .key(let terminalKey):
+            return bytes(for: terminalKey, modifiers: armedModifiers, applicationCursor: applicationCursor)
+        case .modifier, .command:
+            return nil
+        }
+    }
+
     // MARK: - Private
 
     /// xterm's Ctrl+digit mapping, or nil when `ascii` isn't a digit.

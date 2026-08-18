@@ -4,9 +4,9 @@
 import SwiftUI
 import SloopKit
 
-/// Edits the terminal's appearance (font size, color theme, cursor shape). Bound
-/// to the shared `AppearanceStore`, so changes persist and restyle live
-/// terminals immediately.
+/// Edits the terminal's appearance (font size, color theme, cursor shape and,
+/// on iOS, keyboard style). Bound to the shared `AppearanceStore`, so changes
+/// persist and restyle live terminals immediately.
 struct TerminalSettingsView: View {
     @ObservedObject var store: AppearanceStore
     @Environment(\.dismiss) private var dismiss
@@ -40,6 +40,23 @@ struct TerminalSettingsView: View {
                     }
                     .pickerStyle(.segmented)
                 }
+
+                #if os(iOS)
+                Section("Keyboard") {
+                    Picker("Style", selection: $store.appearance.keyboard) {
+                        ForEach(TerminalAppearance.KeyboardStyle.allCases, id: \.self) { style in
+                            Text(style.rawValue.capitalized).tag(style)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text("Compact is shorter, leaving more of the screen for the terminal. "
+                       + "It is US QWERTY only, and has no dictation or emoji — switch back "
+                       + "to Standard for those.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                #endif
             }
             .navigationTitle("Terminal")
             #if os(iOS)

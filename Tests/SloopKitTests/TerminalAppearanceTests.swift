@@ -62,5 +62,27 @@ final class TerminalAppearanceTests: XCTestCase {
         // without updating the picker is caught here.
         XCTAssertEqual(TerminalAppearance.Theme.allCases.count, 4)
         XCTAssertEqual(TerminalAppearance.CursorStyle.allCases.count, 3)
+        XCTAssertEqual(TerminalAppearance.KeyboardStyle.allCases.count, 2)
+    }
+
+    func testKeyboardStyleDefaultsToStandard() {
+        XCTAssertEqual(TerminalAppearance.default.keyboard, .standard)
+    }
+
+    func testKeyboardStyleRoundTrips() throws {
+        let appearance = TerminalAppearance(fontSize: 14, theme: .dark,
+                                            cursor: .bar, keyboard: .compact)
+        let data = try JSONEncoder().encode(appearance)
+        let decoded = try JSONDecoder().decode(TerminalAppearance.self, from: data)
+        XCTAssertEqual(decoded.keyboard, .compact)
+    }
+
+    func testAppearanceStoredBeforeTheKeyboardSettingExistedStillDecodes() throws {
+        // A value persisted by an older build has no `keyboard` key at all.
+        let json = #"{"fontSize":13,"theme":"dark","cursor":"block"}"#
+        let decoded = try JSONDecoder().decode(TerminalAppearance.self,
+                                               from: Data(json.utf8))
+        XCTAssertEqual(decoded.keyboard, .standard)
+        XCTAssertEqual(decoded.theme, .dark)
     }
 }

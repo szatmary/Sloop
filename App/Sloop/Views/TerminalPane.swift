@@ -15,16 +15,40 @@ struct TerminalPane: View {
     @State private var confirmingClose = false
 
     var body: some View {
+        #if os(iOS)
+        // Computed once and reused at both use sites below, so there is
+        // exactly one place — `KeyboardChrome.resolve` — that decides
+        // standard vs. compact vs. hardware, rather than two independently
+        // derived conditions that could drift apart.
+        let chrome = KeyboardChrome.resolve(
+            keyboardVisible: controller.keyboardVisible,
+            hardwareKeyboardAttached: controller.hardwareKeyboardAttached,
+            compactKeyboardActive: controller.compactKeyboardActive)
+        #endif
         VStack(spacing: 0) {
             ConnectionStatusBar(state: controller.state) { controller.reconnect() }
             SwiftTermView(controller: controller)
             #if os(iOS)
-            KeyboardAccessoryBar(send: { controller.send($0) },
-                                 applicationCursor: { controller.applicationCursor },
-                                 armed: $controller.armedModifiers,
-                                 closeTab: { confirmingClose = true })
+            if chrome == .fullBar {
+                KeyboardAccessoryBar(send: { controller.send($0) },
+                                     applicationCursor: { controller.applicationCursor },
+                                     armed: $controller.armedModifiers,
+                                     closeTab: { confirmingClose = true },
+                                     dismissKeyboard: { controller.dismissKeyboard() })
+            }
             #endif
         }
+        #if os(iOS)
+        .overlay(alignment: .bottomTrailing) {
+            if chrome == .floatingPill {
+                FloatingKeyPill(send: { controller.send($0) },
+                                applicationCursor: { controller.applicationCursor },
+                                restore: { _ = controller.terminalView.becomeFirstResponder() })
+                    .padding(.trailing, 8)
+                    .padding(.bottom, 8)
+            }
+        }
+        #endif
         // The close key sits in the row your thumbs live in, and it drops a
         // live SSH session — a mis-tap costs real work. Confirm rather than
         // relocate: anywhere on that bar is somewhere you tap constantly.
@@ -36,6 +60,23 @@ struct TerminalPane: View {
         } message: {
             Text("The connection will be closed.")
         }
+        #if os(iOS)
+        // The compact keyboard's own close-tab key has no SwiftUI state of
+        // its own to raise this dialog from — see
+        // `TerminalController.onCloseTabRequested`'s doc comment. Wired once
+        // per pane rather than on every body evaluation.
+        //
+        // Capture the projected binding, `$confirmingClose`, not `self`.
+        // Writing `confirmingClose = true` directly would implicitly capture
+        // `self` (this `TerminalPane` value, including its
+        // `@ObservedObject var controller`), and since this closure is
+        // stored on `controller.onCloseTabRequested`, that closes a retain
+        // cycle: controller → onCloseTabRequested → TerminalPane copy →
+        // ObservedObject → controller. `State`'s projected value closes over
+        // the state's storage location instead, so the closure holds no
+        // reference to the controller (or the view) at all.
+        .onAppear { controller.onCloseTabRequested = { [$confirmingClose] in $confirmingClose.wrappedValue = true } }
+        #endif
     }
 }
 

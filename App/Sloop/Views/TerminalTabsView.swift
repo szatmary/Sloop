@@ -12,7 +12,6 @@ import UIKit
 /// so background tabs keep their connections live and their output up to date.
 struct TerminalTabsView: View {
     @ObservedObject var model: SessionsModel
-    @ObservedObject private var appearance = AppearanceStore.shared
     @Environment(\.dismiss) private var dismiss
     /// The back chevron is shown briefly on arrival and then fades: it is there
     /// to teach the edge-swipe, not to sit permanently on top of output.
@@ -59,8 +58,10 @@ struct TerminalTabsView: View {
             }
         )
         #endif
-        // Restyle every open terminal when appearance settings change.
-        .onChange(of: appearance.appearance) { _, new in model.applyAppearance(new) }
+        // Restyling on appearance change is handled by `SessionsModel`
+        // itself (subscribed to `AppearanceStore.shared.$appearance`), not
+        // here — this view isn't reliably on screen when a setting changes;
+        // see the doc comment on `SessionsModel.appearanceCancellable`.
         .navigationTitle(model.selectedTitle)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -107,9 +108,23 @@ struct TerminalTabsView: View {
         .overlay(alignment: .topLeading) {
             if showBackHint { BackChevron { dismiss() } }
         }
+        // The edge-swipe gesture above and the fading `BackChevron` are both
+        // unreachable under VoiceOver or Switch Control — neither can start a
+        // drag from a screen edge, and once the chevron fades there is no
+        // control left to activate. `.escape` is the first-class route those
+        // technologies already know how to trigger (a two-finger scrub under
+        // VoiceOver, or a configured Switch Control gesture), so it must work
+        // regardless of whether the chevron is still on screen.
+        .accessibilityAction(.escape) { dismiss() }
         .task {
             // Long enough to notice, short enough to stay out of the way.
             try? await Task.sleep(for: .seconds(3))
+            // VoiceOver users navigate by swiping between elements, not by
+            // starting drags from a screen edge, so the chevron is their only
+            // on-screen way back (the `.escape` action above is the other,
+            // but it's not discoverable without exploring). Don't fade out
+            // from under them.
+            guard !UIAccessibility.isVoiceOverRunning else { return }
             withAnimation(.easeOut(duration: 0.4)) { showBackHint = false }
         }
         #endif

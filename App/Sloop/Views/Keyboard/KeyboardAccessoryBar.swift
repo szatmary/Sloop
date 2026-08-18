@@ -31,6 +31,9 @@ struct KeyboardAccessoryBar: View {
     /// a hardware keyboard — without this, sessions could never be closed by
     /// touch. Deliberately last so it isn't mis-tapped next to ⌃.
     var closeTab: () -> Void = {}
+    /// Put the keyboard away. The single biggest recovery of terminal rows
+    /// available, and until now there was no way to do it at all.
+    var dismissKeyboard: () -> Void = {}
 
     private var control: Bool { armed.contains(.control) }
     private var option: Bool { armed.contains(.option) }
@@ -59,14 +62,25 @@ struct KeyboardAccessoryBar: View {
                 divider
 
                 // B first: it's tmux's prefix, the most-reached-for combo for
-                // anyone running tmux over SSH.
+                // anyone running tmux over SSH. These honor an already-armed
+                // ⌥ the same way `emit` does (arm ⌥, tap ⌃B → ⌥⌃B) rather than
+                // ignoring it — they're keys in this bar like any other, so
+                // the sticky modifier's stated contract ("applies to the next
+                // key … then auto-disarms") applies here too. Either way,
+                // armed must not survive the tap, so it clears after sending.
                 ForEach(Array("BCDZLRAE"), id: \.self) { letter in
                     special("⌃\(letter)") {
-                        send(KeyEncoder.bytes(for: letter, modifiers: .control)[...])
+                        send(KeyEncoder.bytes(for: letter, modifiers: armed.union(.control))[...])
+                        armed = []
                     }
                 }
                 divider
-                special("✕ tab") { closeTab() }
+                special("⌨︎↓") { dismissKeyboard() }
+                divider
+                special("✕ tab") {
+                    armed = []
+                    closeTab()
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
