@@ -120,6 +120,77 @@ final class SloopKitTests: XCTestCase {
         XCTAssertEqual(KnownHostsStore(fileURL: tmp).status(endpoint: endpoint, keyType: "ssh-rsa", fingerprint: "XX"), .match)
     }
 
+    /// A damaged record must fail that endpoint closed. Reporting `.unknown`
+    /// would show the trust-on-first-use prompt, which is exactly what an
+    /// attacker who can corrupt one line is after.
+    func testKnownHostsUnreadableRecordFailsClosedForThatHostOnly() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sloop-known-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        // One good record, one that names its endpoint but has lost its key.
+        let json = """
+        [{"endpoint":"good:22","keyType":"ssh-ed25519","fingerprint":"AAAA"},
+         {"endpoint":"damaged:22","keyType":"ssh-ed25519"}]
+        """
+        try Data(json.utf8).write(to: tmp)
+
+        let store = KnownHostsStore(fileURL: tmp)
+        XCTAssertEqual(store.status(endpoint: "good:22", keyType: "ssh-ed25519", fingerprint: "AAAA"),
+                       .match, "an intact record must still work")
+        XCTAssertEqual(store.status(endpoint: "damaged:22", keyType: "ssh-ed25519", fingerprint: "AAAA"),
+                       .mismatch, "an unreadable pin must refuse, not fall back to first-use trust")
+        XCTAssertEqual(store.status(endpoint: "never-seen:22", keyType: "ssh-ed25519", fingerprint: "AAAA"),
+                       .unknown, "other hosts are unaffected")
+    }
+
+    /// An unparseable file must not be silently emptied and then overwritten —
+    /// that destroys every pin the user has, with no error at any point.
+    func testKnownHostsPreservesAnUnparseableFile() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sloop-known-\(UUID().uuidString).json")
+        let quarantine = tmp.deletingLastPathComponent()
+            .appendingPathComponent(tmp.lastPathComponent + ".unreadable")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(at: quarantine)
+        }
+
+        let original = Data("{ this is not the file you are looking for".utf8)
+        try original.write(to: tmp)
+
+        let store = KnownHostsStore(fileURL: tmp)
+        store.remember(endpoint: "h:22", keyType: "ssh-ed25519", fingerprint: "AAAA")
+
+        XCTAssertEqual(try Data(contentsOf: quarantine), original,
+                       "the unreadable file must be moved aside, not destroyed")
+        XCTAssertEqual(KnownHostsStore(fileURL: tmp)
+                        .status(endpoint: "h:22", keyType: "ssh-ed25519", fingerprint: "AAAA"),
+                       .match, "and the store must be usable again afterwards")
+    }
+
+    /// The store is shared by every connection and SSH runs on its own threads
+    /// (a Mosh host alone runs two), so concurrent access must not corrupt the
+    /// entry list.
+    func testKnownHostsSurvivesConcurrentAccess() {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sloop-known-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let store = KnownHostsStore(fileURL: tmp)
+        DispatchQueue.concurrentPerform(iterations: 200) { i in
+            let endpoint = "host-\(i % 20):22"
+            store.remember(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "F\(i)")
+            _ = store.status(endpoint: endpoint, keyType: "ssh-ed25519", fingerprint: "F\(i)")
+            _ = store.recorded(endpoint: endpoint)
+        }
+
+        // Every endpoint written must be readable, and none may have been lost.
+        for i in 0..<20 {
+            XCTAssertNotNil(store.recorded(endpoint: "host-\(i):22"))
+        }
+    }
+
     func testInMemoryCredentialStoreRoundTrips() throws {
         let store = InMemoryCredentialStore()
         let id = UUID()
