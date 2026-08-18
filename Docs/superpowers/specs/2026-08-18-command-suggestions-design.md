@@ -32,16 +32,29 @@ curate. `!1`, `!2` already exist as an idiom for exactly this.
   "we send your terminal to a server" is a promise a shell client should not
   make. Also rejected on grounds of network: Sloop exists because mobile
   networks drop.
-- **The model is required; there is no heuristic fallback.** An earlier draft
-  carried a prompt-stripping extractor for devices without Apple Intelligence.
-  Dropped deliberately: it was a second, worse implementation of the feature's
-  core, and maintaining a parser the model exists to replace is the exact
-  complexity this design is trying not to have. Where the model is unavailable,
-  the suggestion strip is simply absent.
-- **Suggestions insert, never execute.** Tapping a suggestion fills the input
-  line; the user presses Return. There is no path where the app runs a command
-  the user did not send, so there is no confidently-wrong-destructive-command
-  failure mode.
+- **The model is required for this design; an alternative mode for older devices
+  is deferred, not rejected.** An earlier draft carried a prompt-stripping
+  extractor as a built-in fallback. Dropped from *this* spec deliberately —
+  designing both at once meant a second, worse implementation of the feature's
+  core competing for attention with the first. Where the model is unavailable
+  the suggestion strip is simply absent, and something for those devices is
+  separate work with its own spec.
+- **The model may invent commands, not just recall them.** This is autocomplete,
+  not a history picker: the useful suggestion is often one you have never run —
+  the flag you can't remember, the incantation you'd otherwise go and look up.
+  History is *context* that teaches the model your conventions (`docker compose`
+  or `docker-compose`, your paths, your host naming), not the menu it must
+  choose from.
+- **Suggestions insert, never execute — and this is now the only safety
+  boundary.** Tapping fills the input line; the user presses Return. Because the
+  model can invent, it can invent something wrong or destructive, so nothing may
+  auto-accept, auto-run, or run on a single tap. The user reads it and sends it,
+  exactly as with shell tab-completion.
+- **Invented suggestions look different from recalled ones.** A command drawn
+  from history carries the authority of "I ran this before"; a generated one
+  does not, and must not borrow it. The strip distinguishes the two visually so
+  the user knows which claim is being made — a cheap safeguard against the real
+  failure mode, which is not a bad suggestion but an unexamined one.
 
 ### Why reading the screen is also the safe choice
 
@@ -107,26 +120,39 @@ Requirements on the store:
   ever printed at me", and it is the whole reason the durable artifact stays
   small and explicable.
 
-### 4. Ranking
+### 4. Suggestion
 
-`CommandHistory` orders by frecency (recency × frequency) and filters by prefix
-once the user starts typing — the behaviour people already expect from shell
-history search. That ordering decides which candidates are worth offering.
+The model is given three things and asked for the next command: what is on the
+screen now, what the user has typed on the current line so far, and a slice of
+`CommandHistory` for this host.
 
-The model then re-ranks those candidates against the current screen, so
-suggestions are contextual: after `git status` the useful next commands are
-`git add`/`git commit`, not whatever was most recent globally.
+History's job here is **context, not candidates**. It is what teaches the model
+that this user writes `docker compose` rather than `docker-compose`, that
+deploys go through `make deploy` and not a raw `kubectl`, what the hosts and
+paths are called. A suggestion may come straight out of history, may be a
+variation on something in it, or may be novel — the last case is often the most
+useful one, because the command you cannot remember is the command worth
+suggesting.
 
-It never invents a command — it only sorts commands the user has already run, so
-a bad ranking is an unhelpful suggestion, never a dangerous one. This is the
-single most important safety property of the design, and the reason ranking
-rather than generation is the model's job.
+`CommandHistory` still orders by frecency (recency × frequency) and filters by
+prefix as the user types, which decides *which* slice of history is worth
+sending as context and keeps the prompt small.
+
+Each returned suggestion is tagged as recalled (matches a stored command) or
+invented, which is what drives the visual distinction in §5. That tag is
+computed by comparing against the store, not asserted by the model — the model
+is not asked to be honest about its own novelty.
 
 ### 5. UI — a strip above the keyboard, numbered
 
 A horizontal strip of suggestions sits with the keyboard accessory. Tapping one
 inserts it at the cursor; it does not send. Entries are numbered so the `!1`,
 `!2` idiom works by eye and by tap.
+
+Recalled and invented suggestions are visually distinct (§Decisions). A recalled
+command is something the user has run on this host before and can trust on that
+basis; an invented one is the model's guess and deserves a read before Return.
+Presenting them identically would launder the second into the first.
 
 This composes with the compact keyboard rather than competing with it: the
 compact keyboard makes each character cheaper, and suggestions make most of the
@@ -183,10 +209,25 @@ Suggested build order:
 ## Accepted limitations
 
 - **The feature requires iOS 26 with Apple Intelligence enabled on supported
-  hardware.** Elsewhere the strip does not appear. This is a deliberate choice
-  over shipping a worse second implementation.
+  hardware.** Elsewhere the strip does not appear. An alternative mode for older
+  devices is planned as separate work; it is out of scope here so that this
+  design is not shaped around a second, weaker one.
+- **It cannot be dogfooded on the author's iPad.** The paired device is an iPad
+  (9th generation) — A13, below the Apple Intelligence bar — so the only
+  hardware on hand that can run this is an iPhone 15 Pro Max (A17 Pro). The
+  device where phone-typing hurts most is the one that cannot run the fix, which
+  makes the deferred alternative mode more than a nicety. Any judgement about
+  how the strip *feels* on a tablet is untestable until there is M-series or
+  A17 Pro iPad hardware to hand.
 - **Extraction quality is the model's.** A mis-read screen produces a junk entry
   in a list the user can purge — not a wrong command executed.
+- **The model can suggest a wrong or destructive command.** That is the cost of
+  letting it invent rather than only recall, and it is accepted deliberately —
+  the suggestion worth having is usually the one you could not have recalled.
+  The mitigations are that nothing runs without the user pressing Return, and
+  that invented suggestions are marked as such. The residual risk is a plausible
+  suggestion accepted without reading, which is the same risk shell
+  tab-completion and every code-completion tool already carries.
 - **Secrets echoed on the command line are recorded**, exactly as the remote
   shell records them. Mitigated by the leading-space rule and by purge, not
   eliminated.
