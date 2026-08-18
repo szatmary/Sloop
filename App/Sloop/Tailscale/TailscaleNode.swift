@@ -28,11 +28,6 @@ final class TailscaleNode: @unchecked Sendable {
     private let lock = NSLock()
     private var handle: tailscale = -1
     private var started = false
-    /// The URL the user must visit to authorize this device, once tsnet has
-    /// asked for one. libtailscale's C API has no accessor for it: tsnet writes
-    /// it to the log, so the log is where it's read from — see `watchLog`.
-    private var pendingAuthURL: String?
-    private var logPipe: Pipe?
 
     private init() {}
 
@@ -67,27 +62,39 @@ final class TailscaleNode: @unchecked Sendable {
         if !started { try startLocked() }
 
         let deadline = Date().addingTimeInterval(timeout)
+        var lastState = "Unknown"
         while Date() < deadline {
-            if hasTailnetAddressLocked() { return }
-            if let raw = pendingAuthURL, let url = URL(string: raw) {
+            let status = statusLocked()
+            lastState = status.state
+            if status.state == "Running" { return }
+            if let raw = status.authURL, let url = URL(string: raw) {
                 throw NodeError.needsAuthorization(url)
             }
             lock.unlock()
             Thread.sleep(forTimeInterval: 0.25)
             lock.lock()
         }
-        if let raw = pendingAuthURL, let url = URL(string: raw) {
-            throw NodeError.needsAuthorization(url)
-        }
-        throw NodeError.tailscale("Sloop's tailnet node didn't come up: \(errorMessageLocked())")
+        throw NodeError.tailscale(
+            "Sloop's tailnet node didn't come up — it's still \(lastState). " +
+            "\(errorMessageLocked())")
     }
 
-    /// Whether the node holds a tailnet address yet — the readiness test that
-    /// doesn't block. Caller holds the lock.
-    private func hasTailnetAddressLocked() -> Bool {
-        var buffer = [CChar](repeating: 0, count: 256)
-        guard tailscale_getips(handle, &buffer, buffer.count) == 0 else { return false }
-        return !String(cString: buffer).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    /// What tsnet says it's doing: its backend state, and the URL to authorize
+    /// this device when it's waiting for one. Caller holds the lock.
+    ///
+    /// Asked of tsnet directly rather than read out of its log — see
+    /// `Scripts/libtailscale-sloop-status.go` for why the log is the wrong
+    /// place to learn this.
+    private func statusLocked() -> (state: String, authURL: String?) {
+        var buffer = [CChar](repeating: 0, count: 1024)
+        guard TsnetSloopStatus(handle, &buffer, buffer.count) == 0 else {
+            return ("Unknown", nil)
+        }
+        let lines = String(cString: buffer).split(separator: "\n", maxSplits: 1,
+                                                  omittingEmptySubsequences: false)
+        let state = lines.first.map(String.init) ?? "Unknown"
+        let url = lines.count > 1 ? String(lines[1]) : ""
+        return (state, url.isEmpty ? nil : url)
     }
 
     /// A connected socket to `host:port` over the tailnet.
@@ -123,43 +130,10 @@ final class TailscaleNode: @unchecked Sendable {
         // everyone running Sloop.
         _ = tailscale_set_hostname(handle, deviceName())
 
-        watchLog()
-
         guard tailscale_start(handle) == 0 else {
             throw NodeError.tailscale("Couldn't start Sloop's tailnet node: \(errorMessageLocked())")
         }
         started = true
-    }
-
-    /// tsnet's log is the only place the device-authorization URL appears, so
-    /// it's read rather than discarded.
-    private func watchLog() {
-        let pipe = Pipe()
-        logPipe = pipe
-        _ = tailscale_set_logfd(handle, pipe.fileHandleForWriting.fileDescriptor)
-
-        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            guard let url = Self.authorizationURL(inLogOutput: text) else { return }
-            guard let self else { return }
-            self.lock.lock()
-            self.pendingAuthURL = url
-            self.lock.unlock()
-        }
-    }
-
-    /// Pull the device-authorization URL out of a chunk of tsnet log output.
-    /// Exposed for testing — the format is upstream's and worth pinning.
-    static func authorizationURL(inLogOutput text: String) -> String? {
-        for token in text.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" }) {
-            let candidate = token.trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,)"))
-            if candidate.hasPrefix("https://login.tailscale.com/a/")
-                || candidate.contains("/a/") && candidate.hasPrefix("https://") && candidate.contains("tailscale") {
-                return candidate
-            }
-        }
-        return nil
     }
 
     private func stateDirectory() throws -> URL {

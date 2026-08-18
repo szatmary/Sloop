@@ -11,6 +11,8 @@ linked below; each remains under its own terms.
 | [OpenSSL](https://www.openssl.org) | Apache-2.0 | Yes (`libcrypto` merged into `libssh2.xcframework`) | libssh2's crypto backend |
 | [Mosh](https://mosh.org) | **GPL-3.0** | Yes (`Vendor/mosh.xcframework`) | UDP/SSP mobile-shell transport |
 | [Protocol Buffers](https://github.com/protocolbuffers/protobuf) | BSD-3-Clause | Yes (merged into `mosh.xcframework`) | Mosh's wire format |
+| [libtailscale](https://github.com/tailscale/libtailscale) | BSD-3-Clause | Yes (`Vendor/libtailscale.xcframework`, Tailscale builds only) | C API over tsnet |
+| [Tailscale](https://github.com/tailscale/tailscale) (`tsnet` and its dependencies) | BSD-3-Clause | Yes (compiled into `libtailscale.xcframework`) | Sloop's own userspace tailnet node |
 | zlib (`libz`) | zlib | No — Apple SDK system library | Mosh payload compression |
 | [ios-cmake](https://github.com/leetal/ios-cmake) | BSD-3-Clause | No — build tooling only | Cross-compile toolchain |
 

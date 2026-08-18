@@ -35,6 +35,14 @@ if [ ! -d libtailscale ]; then
 fi
 cd libtailscale
 
+# libtailscale can start a node and dial over it, but has no way to ask what the
+# node is doing — and both answers a UI needs live on the status tsnet already
+# has: whether it is running, and the URL to authorize this device when it
+# isn't. Add an export that returns them, rather than scraping the URL out of
+# tsnet's log, which reads a debugging aid as an API and fails by stranding the
+# user at a login they cannot start.
+cp "$ROOT/Scripts/libtailscale-sloop-status.go" ./sloop_status.go
+
 # One slice per platform. Go names the iOS device platform "ios"; the simulator
 # is the same GOOS with a simulator sysroot and an explicit -target, since the
 # SDK alone doesn't distinguish them to the linker.
@@ -58,6 +66,16 @@ build_slice () {
   rm -rf "$OUT/$name/Headers"
   mkdir -p "$OUT/$name/Headers"
   cp tailscale.h "$OUT/$name/Headers/"
+  # Declare the added export alongside upstream's API. cgo emits it as a plain
+  # C symbol, so nothing else is needed to call it.
+  cat >> "$OUT/$name/Headers/tailscale.h" <<'EOF'
+
+// Added by Sloop (Scripts/libtailscale-sloop-status.go): writes
+// "<BackendState>\n<AuthURL>" into buf. BackendState is tsnet's own
+// vocabulary ("NeedsLogin", "Starting", "Running"); AuthURL is empty unless
+// this device is waiting to be authorized.
+extern int TsnetSloopStatus(int sd, char* buf, size_t buflen);
+EOF
 }
 
 build_slice "ios-arm64"     "ios"    "iphoneos"        "arm64-apple-ios$IOS_TARGET"
