@@ -26,6 +26,18 @@ top of a working SSH terminal rather than first.
 
 - [x] External-keyboard shortcuts (arrows, Ctrl/Alt/Meta chords) via key commands.
 - [x] Sticky-modifier smart-keys bar (Ctrl/Alt held for the next key).
+- [x] Dismissible keyboard — a `⌨︎↓` key and a floating pill that replaces the
+      smart-keys bar while the keyboard is down, so the bar stops reserving
+      44pt it isn't using.
+- [x] Custom compact keyboard — `KeyboardLayout` resolves a terminal-shaped
+      layout per device (symbol row on iPad, drag-up symbols on iPhone),
+      installed via SwiftTerm's `inputView`. Chosen in Terminal Settings;
+      Standard remains the default. Implementation is complete and
+      unit-tested, but two things remain unverified: no on-device testing has
+      been done (this work was done without hardware available), and the
+      compact layout's row heights are still unmeasured placeholders rather
+      than values checked against real touch targets. Spec:
+      `Docs/superpowers/specs/2026-08-17-terminal-rows-design.md`.
 - [ ] Font, color scheme, and cursor settings.
 - [ ] iPad multi-window tabs.
 
@@ -74,14 +86,6 @@ top of a working SSH terminal rather than first.
   phone or tablet, where the network drops constantly. Worth deciding whether
   it runs in the PTY (visible, and the user can Ctrl-C out of it) or as an
   exec channel, and whether a failed command should leave the plain shell.
-- **Custom compact keyboard** — replace the system keyboard with a
-  terminal-shaped one via SwiftTerm's settable `inputView`, folding today's
-  smart-keys bar into the keyboard instead of stacking a row above it. The
-  software keyboard is the single largest consumer of screen space, so this is
-  the biggest remaining win for visible rows. iPadOS's own floating keyboard
-  (pinch to shrink) helps today but cannot be invoked programmatically — there
-  is no public API — so a real fix means owning the keyboard. Design work:
-  key sizes, symbol/digit layers, portrait vs landscape.
 - SFTP / file transfer.
 - Port forwarding.
 - ~~Key management~~ → DONE: shared key library synced via iCloud Keychain;
