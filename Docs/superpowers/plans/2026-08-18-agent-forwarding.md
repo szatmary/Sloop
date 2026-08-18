@@ -961,7 +961,8 @@ Generate a real key pair per algorithm at test time with `ssh-keygen` into a tem
 // GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
 
 import XCTest
-@testable import Sloop
+// The macOS app target is named Sloop_macOS, so its module is Sloop_macOS.
+@testable import Sloop_macOS
 import SloopKit
 
 #if canImport(CSSH)
@@ -1364,7 +1365,8 @@ Read `App/Sloop/SSH/HostKeyPrompter.swift` in full first. This mirrors it — sa
 // GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
 
 import XCTest
-@testable import Sloop
+// The macOS app target is named Sloop_macOS, so its module is Sloop_macOS.
+@testable import Sloop_macOS
 
 final class AgentSignPrompterTests: XCTestCase {
     /// The SSH thread must not proceed until the user has answered, and must
