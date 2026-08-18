@@ -29,12 +29,31 @@ public final class MoshOrSSHTransport: Transport {
     private let makeSSHTransport: () -> Transport
     private let makeMoshTransport: ((MoshBootstrap) -> Transport)?
 
+    /// Guards everything below: the bootstrap completion arrives on the probe's
+    /// worker thread while `send`/`resize`/`close` are called from the main one.
+    private let lock = NSLock()
     /// The transport currently carrying data (SSH shell or Mosh), once chosen.
     private var active: Transport?
     /// Held so the command runner survives the async probe — the libssh2 runner
     /// captures itself weakly on its worker thread, so a temporary would
     /// deallocate before the completion fires.
     private var bootstrapper: MoshBootstrapper?
+
+    /// Input and geometry that arrived while the probe was still running.
+    ///
+    /// Choosing Mosh takes a full SSH connect, auth and exec round trip, and the
+    /// terminal is live throughout: SwiftTerm reports its size during that
+    /// window and the user can type into it. Dropping those on the floor cost a
+    /// visible bug — the remote terminal kept mosh's 80×24 default while the
+    /// real view was wider, so the server drew frames for the wrong geometry and
+    /// the screen came out garbled in a way that looks like broken emulation.
+    /// SwiftTerm only reports a size *change*, so on a device that never rotates
+    /// the mistake is never corrected.
+    private var pendingBytes: [UInt8] = []
+    private var pendingResize: (cols: Int, rows: Int)?
+    /// Set when the tab is closed before the probe finished, so the completion
+    /// doesn't go on to open a connection nobody owns.
+    private var closedBeforeActivation = false
 
     public init(useMosh: Bool,
                 makeCommandRunner: @escaping () -> CommandRunner,
@@ -74,17 +93,64 @@ public final class MoshOrSSHTransport: Transport {
         }
     }
 
-    public func send(_ bytes: ArraySlice<UInt8>) { active?.send(bytes) }
-    public func resize(cols: Int, rows: Int) { active?.resize(cols: cols, rows: rows) }
-    public func close() { active?.close() }
+    public func send(_ bytes: ArraySlice<UInt8>) {
+        lock.lock()
+        if let active {
+            lock.unlock()
+            active.send(bytes)
+            return
+        }
+        pendingBytes.append(contentsOf: bytes)
+        lock.unlock()
+    }
+
+    public func resize(cols: Int, rows: Int) {
+        lock.lock()
+        if let active {
+            lock.unlock()
+            active.resize(cols: cols, rows: rows)
+            return
+        }
+        // Only the latest matters — the terminal has one size.
+        pendingResize = (cols, rows)
+        lock.unlock()
+    }
+
+    public func close() {
+        lock.lock()
+        let live = active
+        // A close during the probe must still take effect: without this the
+        // completion activates a fresh connection for a tab the user already
+        // closed, which nobody owns and nothing will ever close.
+        if live == nil { closedBeforeActivation = true }
+        lock.unlock()
+        live?.close()
+    }
 
     /// Adopt `transport` as the live one and forward its callbacks out.
     private func activate(_ transport: Transport) {
+        lock.lock()
+        if closedBeforeActivation {
+            lock.unlock()
+            return
+        }
         active = transport
+        let resize = pendingResize
+        let bytes = pendingBytes
+        pendingResize = nil
+        pendingBytes.removeAll()
+        lock.unlock()
+
         transport.onData = { [weak self] bytes in self?.onData?(bytes) }
         transport.onOpen = { [weak self] in self?.onOpen?() }
         transport.onClose = { [weak self] error in self?.onClose?(error) }
+
+        // Size before start: MoshTransport reads its geometry when it creates
+        // the session, so a resize applied afterwards would leave the first
+        // frames drawn at the wrong width.
+        if let resize { transport.resize(cols: resize.cols, rows: resize.rows) }
         transport.start()
+        if !bytes.isEmpty { transport.send(bytes[...]) }
     }
 
     private func emit(_ text: String) {
