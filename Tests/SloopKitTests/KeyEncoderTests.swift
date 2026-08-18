@@ -95,4 +95,47 @@ final class KeyEncoderTests: XCTestCase {
         XCTAssertEqual(KeyEncoder.bytes(for: "b", modifiers: .control), [0x02])
         XCTAssertEqual(KeyEncoder.bytes(for: "B", modifiers: .control), [0x02])
     }
+
+    // MARK: KeyCap.Value dispatch — the pure half of
+    // CompactKeyboardView.keyCapView(_:didProduce:)
+
+    /// The reviewer's hand-traced case: iPhone's "5" key drags up to "/"; with
+    /// ⇧ armed the terminal must see "?", never shift kept alongside "/".
+    func testKeyCapValueCharacterResolvesShiftBeforeEncoding() {
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .character("/"), armedModifiers: .shift, applicationCursor: false),
+            [0x3f]) // '?'
+    }
+
+    func testKeyCapValueCharacterWithoutShiftPassesThrough() {
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .character("a"), armedModifiers: [], applicationCursor: false),
+            [0x61])
+    }
+
+    /// Shift is dropped from the modifier set once resolved into the
+    /// character — only the remaining modifiers (here, control) reach
+    /// `bytes(for:modifiers:)`.
+    func testKeyCapValueCharacterKeepsNonShiftModifiersAfterResolving() {
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .character("c"), armedModifiers: [.control, .shift], applicationCursor: false),
+            [0x03]) // Ctrl-C: shift upper-cases 'c' to 'C', which control-masks the same as 'c'
+    }
+
+    func testKeyCapValueKeyRespectsApplicationCursorMode() {
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .key(.up), armedModifiers: [], applicationCursor: true),
+            [0x1b, 0x4f, 0x41]) // ESC O A
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .key(.up), armedModifiers: [], applicationCursor: false),
+            [0x1b, 0x5b, 0x41]) // ESC [ A
+    }
+
+    /// `.modifier` and `.command` are the software keyboard's own
+    /// affordances — arm a sticky modifier, dismiss the keyboard — and never
+    /// reach the remote end.
+    func testKeyCapValueModifierAndCommandProduceNoBytes() {
+        XCTAssertNil(KeyEncoder.bytes(for: .modifier(.control), armedModifiers: [], applicationCursor: false))
+        XCTAssertNil(KeyEncoder.bytes(for: .command(.dismissKeyboard), armedModifiers: [], applicationCursor: false))
+    }
 }

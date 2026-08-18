@@ -223,7 +223,16 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     /// `inputView` is the same hook SwiftTerm's own `KeyboardView` uses; nil means
     /// the system keyboard. Reloading is required because UIKit caches the input
     /// view for as long as the responder stays first responder.
+    ///
+    /// Idempotent by construction, not just convention: `apply(_:)` (Task 8)
+    /// calls this on every appearance change, not only when the
+    /// compact-keyboard setting itself changes. Rebuilding unconditionally
+    /// would tear down and recreate the live `CompactKeyboardView` — killing
+    /// any touch currently being tracked — every time the font size or theme
+    /// changes while it's on screen.
     func setCompactKeyboard(_ enabled: Bool) {
+        let alreadyEnabled = terminalView.inputView is CompactKeyboardView
+        guard enabled != alreadyEnabled else { return }
         terminalView.inputView = enabled ? CompactKeyboardView(controller: self) : nil
         if terminalView.isFirstResponder {
             terminalView.reloadInputViews()

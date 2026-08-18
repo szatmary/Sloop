@@ -3,6 +3,26 @@
 
 import Foundation
 
+/// One key's position and size within a resolved layout, in points.
+///
+/// Plain `Double`s rather than `CGRect`/`CGFloat`: `KeyboardLayout` has no
+/// CoreGraphics dependency today (only Foundation, so it builds and
+/// unit-tests on any platform — see the package's own doc comment), and a
+/// frame type shouldn't be the thing that changes that.
+public struct KeyFrame: Equatable, Sendable {
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
+
+    public init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
+}
+
 /// A resolved software-keyboard layout: which keys, in which rows, how tall.
 ///
 /// The layout varies by device because the constraint does. An iPad in
@@ -51,6 +71,53 @@ public struct KeyboardLayout: Equatable, Sendable {
         case .pad:   return pad(context)
         case .phone: return phone(context)
         }
+    }
+
+    // MARK: Frames
+
+    /// One frame per cap, across all rows, in the same row-major order the
+    /// caller built its key views in — so zipping `frames(...)` against those
+    /// views lines them up positionally, with no index of its own to drift
+    /// out of sync.
+    ///
+    /// Grid math, not a real layout engine: fixed-width caps (`.unit`,
+    /// `.wide`) claim their share of a row first; a `.flexible` cap — the
+    /// space bar — absorbs whatever's left, reserved at two slots so it stays
+    /// a usable target rather than collapsing to a sliver. This lives here
+    /// (pure, platform-agnostic) rather than in `CompactKeyboardView` (UIKit,
+    /// unreachable from a package test) specifically so `KeyboardLayoutTests`
+    /// can check it against hand-computed values instead of a reviewer having
+    /// to hand-trace `layoutSubviews`.
+    public func frames(width: Double, padding: Double, spacing: Double) -> [KeyFrame] {
+        var result: [KeyFrame] = []
+        var y = padding
+        for row in rows {
+            let fixedSlots = row.reduce(0.0) { total, cap in
+                switch cap.width {
+                case .unit:            return total + 1
+                case .wide(let scale): return total + scale
+                case .flexible:        return total
+                }
+            }
+            let gaps = spacing * Double(max(row.count - 1, 0))
+            let available = width - padding * 2 - gaps
+            let hasFlexible = row.contains { $0.width == .flexible }
+            let slotWidth = available / (fixedSlots + (hasFlexible ? 2 : 0))
+
+            var x = padding
+            for cap in row {
+                let capWidth: Double
+                switch cap.width {
+                case .unit:            capWidth = slotWidth
+                case .wide(let scale): capWidth = slotWidth * scale
+                case .flexible:        capWidth = slotWidth * 2
+                }
+                result.append(KeyFrame(x: x, y: y, width: capWidth, height: rowHeight - spacing))
+                x += capWidth + spacing
+            }
+            y += rowHeight
+        }
+        return result
     }
 
     // MARK: iPad — five rows, symbols visible

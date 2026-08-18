@@ -205,4 +205,125 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(KeyboardLayout.shifted("A"), "A")
         XCTAssertEqual(KeyboardLayout.shifted("!"), "!")
     }
+
+    // MARK: Frames
+    //
+    // `frames(width:padding:spacing:)` is the grid math `CompactKeyboardView`
+    // used to hand-roll in `layoutSubviews` — pulled into SloopKit so it's a
+    // pure function a test can check, rather than something only reachable by
+    // a reviewer hand-tracing UIKit layout. `padding`/`spacing` below match
+    // `CompactKeyboardView`'s own constants (4, 3).
+
+    private let framePadding: Double = 4
+    private let frameSpacing: Double = 3
+    private var allContexts: [KeyboardLayout.Context] {
+        [padLandscape, padPortrait, phonePortrait, phoneLandscape]
+    }
+
+    func testFrameCountMatchesCapCount() {
+        for context in allContexts {
+            let layout = KeyboardLayout.resolve(for: context)
+            let capCount = layout.rows.reduce(0) { $0 + $1.count }
+            let frames = layout.frames(width: context.width, padding: framePadding, spacing: frameSpacing)
+            XCTAssertEqual(frames.count, capCount, "\(context)")
+        }
+    }
+
+    func testEveryRowsRightEdgeLandsOnWidthMinusPadding() {
+        for context in allContexts {
+            let layout = KeyboardLayout.resolve(for: context)
+            let frames = layout.frames(width: context.width, padding: framePadding, spacing: frameSpacing)
+            var index = 0
+            for (rowIndex, row) in layout.rows.enumerated() {
+                let last = frames[index + row.count - 1]
+                XCTAssertEqual(last.x + last.width, context.width - framePadding, accuracy: 0.001,
+                               "row \(rowIndex) of \(context)")
+                index += row.count
+            }
+        }
+    }
+
+    func testNoFrameExceedsBounds() {
+        for context in allContexts {
+            let layout = KeyboardLayout.resolve(for: context)
+            let frames = layout.frames(width: context.width, padding: framePadding, spacing: frameSpacing)
+            for frame in frames {
+                XCTAssertGreaterThanOrEqual(frame.x, 0, "\(context)")
+                XCTAssertGreaterThanOrEqual(frame.y, 0, "\(context)")
+                XCTAssertLessThanOrEqual(frame.x + frame.width, context.width, "\(context)")
+            }
+        }
+    }
+
+    func testFlexibleKeyIsNeverNarrowerThanAUnitKey() {
+        for context in allContexts {
+            let layout = KeyboardLayout.resolve(for: context)
+            let frames = layout.frames(width: context.width, padding: framePadding, spacing: frameSpacing)
+            var index = 0
+            for row in layout.rows {
+                let rowFrames = Array(frames[index..<(index + row.count)])
+                let unitWidths = zip(row, rowFrames)
+                    .filter { $0.0.width == .unit }
+                    .map { $0.1.width }
+                if let flexIndex = row.firstIndex(where: { $0.width == .flexible }),
+                   let widestUnit = unitWidths.max() {
+                    XCTAssertGreaterThanOrEqual(rowFrames[flexIndex].width, widestUnit, "\(context)")
+                }
+                index += row.count
+            }
+        }
+    }
+
+    /// Mirrors `CompactKeyboardView.intrinsicContentSize`'s formula — the
+    /// height it reports must actually cover every frame `frames(...)`
+    /// produces, or the bottom row would be clipped.
+    func testResolvedRowHeightCoversEveryFrame() {
+        for context in allContexts {
+            let layout = KeyboardLayout.resolve(for: context)
+            let frames = layout.frames(width: context.width, padding: framePadding, spacing: frameSpacing)
+            let maxY = frames.map { $0.y + $0.height }.max() ?? 0
+            let intrinsicHeight = layout.rowHeight * Double(layout.rows.count) + framePadding * 2
+            XCTAssertGreaterThanOrEqual(intrinsicHeight, maxY + framePadding, "\(context)")
+        }
+    }
+
+    // Hand-computed reference values (task-7 review) for two contexts, pinned
+    // exactly rather than only checked against the invariants above.
+
+    func testPhonePortraitSlotWidthsMatchHandComputedValues() {
+        let layout = KeyboardLayout.resolve(for: phonePortrait)
+        let frames = layout.frames(width: phonePortrait.width, padding: framePadding, spacing: frameSpacing)
+        let flat = layout.rows.flatMap { $0 }
+        func frame(where predicate: (KeyCap) -> Bool) -> KeyFrame {
+            frames[flat.firstIndex(where: predicate)!]
+        }
+
+        // Rows 0–2 (escape/digit, tab/letter, control/home rows): 12 unit
+        // caps each on a 393pt-wide screen.
+        XCTAssertEqual(frame { $0.primary == .key(.escape) }.width, 29.3333, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 29.3333, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 29.3333, accuracy: 0.001)
+        // Row 3 (bottom row): 13 caps including the flexible space bar, so
+        // the unit slot shrinks and the space bar absorbs two slots.
+        XCTAssertEqual(frame { $0.primary == .modifier(.option) }.width, 24.9286, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.width == .flexible }.width, 49.8571, accuracy: 0.001)
+    }
+
+    func testPadLandscapeSlotWidthsMatchHandComputedValues() {
+        let layout = KeyboardLayout.resolve(for: padLandscape)
+        let frames = layout.frames(width: padLandscape.width, padding: framePadding, spacing: frameSpacing)
+        let flat = layout.rows.flatMap { $0 }
+        func frame(where predicate: (KeyCap) -> Bool) -> KeyFrame {
+            frames[flat.firstIndex(where: predicate)!]
+        }
+
+        XCTAssertEqual(frame { $0.primary == .character("~") }.width, 59.5789, accuracy: 0.001) // symbol row
+        XCTAssertEqual(frame { $0.primary == .key(.escape) }.width, 92.24, accuracy: 0.01)       // digit row unit
+        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 138.36, accuracy: 0.01)   // digit row wide
+        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 96.0833, accuracy: 0.001)       // qwerty row
+        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 92.24, accuracy: 0.01) // home row unit
+        XCTAssertEqual(frame { $0.primary == .key(.return) }.width, 138.36, accuracy: 0.01)      // home row wide
+        XCTAssertEqual(frame { $0.primary == .modifier(.option) }.width, 71.5, accuracy: 0.01)   // bottom row unit
+        XCTAssertEqual(frame { $0.width == .flexible }.width, 143.0, accuracy: 0.01)             // bottom row space
+    }
 }
