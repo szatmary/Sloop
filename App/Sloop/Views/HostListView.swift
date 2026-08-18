@@ -5,10 +5,10 @@ import SwiftUI
 import SloopKit
 import UniformTypeIdentifiers
 
-/// Root screen: saved hosts plus a quick "local terminal" action. Opening a host
-/// or the local terminal adds a tab to the shared `SessionsModel` and pushes the
-/// tabbed terminal view; the `+` toolbar item adds a host, and each row's ⓘ
-/// button (or its context menu) edits an existing one.
+/// Root screen: the saved hosts. Opening one adds a tab to the shared
+/// `SessionsModel` and pushes the tabbed terminal view; the `+` toolbar item
+/// adds a host, and each row's ⓘ button (or its context menu) edits an
+/// existing one.
 struct HostListView: View {
     @StateObject private var model = HostListModel()
     @ObservedObject private var sessions = SessionsModel.shared
@@ -30,20 +30,20 @@ struct HostListView: View {
                         Button {
                             showingTerminal = true
                         } label: {
-                            Label("Terminals (\(sessions.count))", systemImage: "rectangle.on.rectangle")
+                            Label("^[\(sessions.count) session](inflect: true)",
+                                  systemImage: "rectangle.on.rectangle")
                         }
                     }
                 }
 
                 Section("Hosts") {
                     if model.hosts.isEmpty {
-                        Text("No hosts yet. Tap + to add one.")
-                            .foregroundStyle(.secondary)
+                        EmptyHosts()
                     }
                     ForEach(model.hosts) { host in
                         HStack {
                             Button { open(model.connect(host)) } label: {
-                                HostRow(host: host)
+                                HostRow(host: host, isUnderway: isUnderway(host))
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .contentShape(Rectangle())
                             }
@@ -157,6 +157,12 @@ struct HostListView: View {
         showingTerminal = true
     }
 
+    /// Whether a live session is already open for this host. Sessions are
+    /// titled with the host's alias, which is what the terminal tab shows.
+    private func isUnderway(_ host: SSHHost) -> Bool {
+        sessions.sessions.contains { $0.title == host.alias }
+    }
+
     /// Read the picked SSH config file and import its hosts. Returns a short
     /// user-facing result message.
     private func importConfig(from result: Result<URL, Error>) -> String {
@@ -205,20 +211,92 @@ private struct ConfigTextDocument: FileDocument {
 
 private struct HostRow: View {
     let host: SSHHost
+    var isUnderway: Bool = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Text(host.alias).font(.headline)
-                if host.useMosh {
-                    Text("mosh")
-                        .font(.caption2)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(.tint.opacity(0.2), in: Capsule())
+        HStack(spacing: 10) {
+            // A colour rail, not decoration: it's how you tell prod from
+            // staging at a glance, before typing something destructive into
+            // the wrong shell. Derived from the alias so it is stable without
+            // anyone having to configure it.
+            RoundedRectangle(cornerRadius: 2)
+                .fill(HostPalette.color(for: host.alias))
+                .frame(width: 4)
+                .frame(maxHeight: .infinity)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(host.alias).font(.headline)
+                    if host.useMosh {
+                        Text("mosh")
+                            .font(.caption2)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(.tint.opacity(0.2), in: Capsule())
+                    }
+                    if isUnderway {
+                        // Underway: this host already has a live session.
+                        Circle()
+                            .fill(.green)
+                            .frame(width: 7, height: 7)
+                            .accessibilityLabel("Underway")
+                    }
                 }
+                // Monospace, because this is a terminal address and should
+                // read like one.
+                Text(host.connectionSummary)
+                    .font(.system(.footnote, design: .monospaced))
+                    .foregroundStyle(.secondary)
             }
-            Text(host.connectionSummary)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
         }
+        .padding(.vertical, 2)
+    }
+}
+
+/// Stable per-host accent colours, picked by hashing the alias.
+///
+/// Chosen to stay legible on both light and dark backgrounds and to sit
+/// alongside the app's teal without clashing.
+private enum HostPalette {
+    private static let colors: [Color] = [
+        SloopStyle.deepTeal,                         // the house colour
+        Color(red: 0.36, green: 0.60, blue: 0.90),   // blue
+        Color(red: 0.60, green: 0.50, blue: 0.88),   // violet
+        Color(red: 0.90, green: 0.55, blue: 0.30),   // amber
+        Color(red: 0.87, green: 0.42, blue: 0.48),   // coral
+        Color(red: 0.45, green: 0.72, blue: 0.40),   // green
+    ]
+
+    static func color(for alias: String) -> Color {
+        // A deliberate, stable hash: Swift's `hashValue` is seeded per process
+        // and would repaint every host on each launch.
+        var hash: UInt64 = 5381
+        for byte in alias.utf8 { hash = (hash &* 33) &+ UInt64(byte) }
+        return colors[Int(hash % UInt64(colors.count))]
+    }
+}
+
+/// The empty state, and the one place the app's mark is allowed to show up.
+///
+/// The sail sits above a waterline of "command line" rules — the same idea as
+/// the app icon, where a terminal prompt doubles as the water the boat sits on.
+private struct EmptyHosts: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "sailboat")
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(SloopStyle.teal)
+
+            Waterline(width: 92)
+
+            Text("No hosts yet")
+                .font(.headline)
+            Text("Tap + to add one, or import your ~/.ssh/config.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+        .listRowSeparator(.hidden)
     }
 }
