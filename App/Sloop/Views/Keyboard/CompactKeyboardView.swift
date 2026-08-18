@@ -199,9 +199,6 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
                 }
                 clearArmedModifiers()
 
-            case .nextSession:
-                SessionsModel.shared.selectNext()
-                clearArmedModifiers()
             }
 
         case .blank:

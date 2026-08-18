@@ -365,7 +365,6 @@ public struct KeyboardLayout: Equatable, Sendable {
             // only by an edge swipe — a gesture nothing announces, and one
             // VoiceOver and Switch Control cannot perform at all.
             [.command(.copy, width: .wide(1.75)),
-             .command(.nextSession),
              .modifier(.shift, width: .flexible)]
                 + "zxcvbnm".map { KeyCap.character($0) }
                 + [.character(","), .character("."), .character("/"),

@@ -523,7 +523,9 @@ final class KeyboardLayoutTests: XCTestCase {
                        frame { $0.primary == .command(.copy) }.width, accuracy: 0.001)
         XCTAssertEqual(frame { $0.primary == .command(.paste) }.width, 84.3011, accuracy: 0.001)
         XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 51.1720, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 66.2151, accuracy: 0.001)
+        // Shift eats what the session key used to take, which is what a wide
+        // modifier is for.
+        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 117.3871, accuracy: 0.001)
         XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 87.3011, accuracy: 0.001)
         XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 264.9032, accuracy: 0.001)
     }

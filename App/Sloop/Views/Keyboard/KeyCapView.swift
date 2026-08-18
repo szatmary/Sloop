@@ -208,9 +208,6 @@ final class KeyCapView: UIControl {
         switch command {
         case .dismissKeyboard: return "keyboard.chevron.compact.down"
         case .paste, .copy: return nil
-        // The same mark the host list uses for open sessions. It was labelled
-        // "tab ›", which read as a second Tab key next to the real one.
-        case .nextSession: return "rectangle.on.rectangle"
         }
     }
 
@@ -228,7 +225,6 @@ final class KeyCapView: UIControl {
             case .dismissKeyboard:   return "⌨︎↓"
             case .paste:             return "paste"
             case .copy:              return "copy"
-            case .nextSession:       return ""   // drawn as a symbol; see symbolName
             }
         case .blank:
             return ""
@@ -304,7 +300,6 @@ final class KeyCapView: UIControl {
             case .dismissKeyboard: return "dismiss keyboard"
             case .paste:           return "paste"
             case .copy:            return "copy"
-            case .nextSession:     return "next session"
             }
         case .blank:
             return ""

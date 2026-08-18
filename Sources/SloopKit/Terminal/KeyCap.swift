@@ -49,10 +49,7 @@ public struct KeyCap: Equatable, Sendable {
         /// meant to copy, and copying the wrong thing silently is worse than
         /// copying nothing.
         case copy
-        /// Cycle to the next open session. Otherwise reachable only by an
-        /// edge swipe, which nothing announces and VoiceOver cannot perform.
-        /// One direction is enough to reach every session.
-        case nextSession
+
     }
 
     /// How much horizontal room a key takes, in grid slots.
