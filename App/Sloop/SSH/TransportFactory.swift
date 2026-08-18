@@ -1,3 +1,6 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
 import Foundation
 import SloopKit
 
@@ -22,8 +25,7 @@ enum TransportFactory {
         #else
         return MessageTransport(message:
             "SSH isn't built into this app yet.\r\n" +
-            "Add Vendor/libssh2.xcframework and rebuild — see Docs/SSH.md.\r\n\r\n" +
-            "The Local terminal on the home screen works now.\r\n")
+            "Add Vendor/libssh2.xcframework and rebuild — see Docs/SSH.md.\r\n")
         #endif
     }
 

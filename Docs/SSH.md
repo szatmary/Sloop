@@ -1,38 +1,52 @@
 # SSH: building and wiring libssh2
 
-Sloop uses [libssh2](https://libssh2.org) for SSH. It's C, so it must be built as
-a multi-slice `.xcframework` and linked into the app target. `LibSSH2Transport`
-is the Swift wrapper; today it reports `.notImplemented` until the binary and
-implementation land.
+Sloop uses [libssh2](https://libssh2.org) for SSH. It's C, so it is built as a
+multi-slice `.xcframework` and linked into the app target. `LibSSH2Transport`
+is the Swift wrapper.
 
 ## 1. Build the xcframework
 
-libssh2 needs a crypto backend. On Apple platforms the simplest is to build
-against a static OpenSSL (or use the system `Security`/`libssh2` if you prefer a
-smaller footprint). Roughly:
-
 ```sh
-# For each slice: ios-arm64, ios-arm64-simulator, macos-arm64, tvos-arm64,
-# tvos-arm64-simulator — configure with the right SDK + arch, build static libs.
-./configure --host=arm64-apple-darwin --with-crypto=openssl \
-            --disable-shared --enable-static ...
-make
-
-# Then package all slices:
-xcodebuild -create-xcframework \
-  -library build/ios-arm64/lib/libssh2.a        -headers include \
-  -library build/ios-sim-arm64/lib/libssh2.a    -headers include \
-  -library build/macos-arm64/lib/libssh2.a      -headers include \
-  -library build/tvos-arm64/lib/libssh2.a       -headers include \
-  -output Vendor/libssh2.xcframework
+Scripts/build-libssh2.sh                       # all slices
+SLICES="macos-arm64" Scripts/build-libssh2.sh  # one slice, for iteration
 ```
 
-Drop the result at `Vendor/libssh2.xcframework` (git-ignored) and add it to the
-app target in `project.yml` under `dependencies:` as a `framework:`.
+The script compiles everything from tagged source — nothing prebuilt enters the
+tree — and writes `Vendor/libssh2.xcframework` (git-ignored; CI publishes it as
+an artifact). Slices: `ios-arm64`, `ios-arm64-simulator`, `macos-arm64`, all
+arm64. It merges `libssh2.a` and `libcrypto.a` into one static library per
+slice so the xcframework is self-contained.
 
-> Prebuilt libssh2 xcframeworks and open-source build recipes exist if you'd
-> rather not build from scratch, but verify licensing and crypto export details
-> before shipping.
+### The crypto backend: OpenSSL 3, not mbedTLS
+
+libssh2 needs a crypto backend, and the choice is not cosmetic — it decides
+which SSH key types work. Sloop used **mbedTLS** until 2026-08 and it caused
+two real failures:
+
+- **No Ed25519.** mbedTLS cannot parse an `ssh-ed25519` private key at all
+  (`PK - Invalid key tag or value`), so the modern default key type was simply
+  unusable.
+- **No public-key derivation.** libssh2's mbedTLS backend cannot derive a
+  public key from a private key in memory, so
+  `libssh2_userauth_publickey_frommemory` fails unless the caller passes the
+  `.pub` blob explicitly. Because the failure surfaced as the server's generic
+  "Username/PublicKey combination invalid", it looked like a rejected key
+  rather than a missing argument, and *every* key authentication failed.
+
+**OpenSSL 3** handles Ed25519, ECDSA, and RSA (including `rsa-sha2-256/512`),
+and derives public keys from private ones. It is Apache-2.0, compatible with
+Sloop's GPL-3.0 (the old OpenSSL/GPL conflict was a 1.x licensing issue). It is
+disclosed in `THIRD-PARTY-NOTICES.md`.
+
+If you ever swap the backend again, re-run the key-type matrix in
+`Docs/HANDOFF.md` ("Key types — required before release"). A backend can pass
+every build and unit test while being unable to use half your keys.
+
+### No tvOS slices
+
+OpenSSL ships no tvOS `Configure` target, and the tvOS app is deferred anyway
+(SwiftTerm doesn't compile for tvOS — see `Docs/ROADMAP.md`). If tvOS is
+revived, tvOS slices need a custom OpenSSL configuration.
 
 ## 2. Make libssh2 importable as `CSSH`
 

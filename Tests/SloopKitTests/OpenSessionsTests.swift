@@ -1,10 +1,25 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
 import XCTest
 @testable import SloopKit
+
+/// A transport that does nothing. `OpenSessions` only tracks and orders
+/// sessions, so these tests need a `Transport` to exist, not to behave.
+private final class StubTransport: Transport {
+    var onData: ((ArraySlice<UInt8>) -> Void)?
+    var onOpen: (() -> Void)?
+    var onClose: ((Error?) -> Void)?
+    func start() {}
+    func send(_ bytes: ArraySlice<UInt8>) {}
+    func resize(cols: Int, rows: Int) {}
+    func close() {}
+}
 
 final class OpenSessionsTests: XCTestCase {
 
     private func session(_ title: String) -> TerminalSession {
-        TerminalSession(title: title, transport: EchoTransport())
+        TerminalSession(title: title, transport: StubTransport())
     }
 
     func testOpenAppendsAndSelects() {

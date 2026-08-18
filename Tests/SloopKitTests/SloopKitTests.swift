@@ -1,27 +1,10 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
 import XCTest
 @testable import SloopKit
 
 final class SloopKitTests: XCTestCase {
-
-    func testEchoTransportEchoesPrintableInput() {
-        let transport = EchoTransport()
-        var out: [UInt8] = []
-        transport.onData = { out.append(contentsOf: $0) }
-        transport.start()
-        out.removeAll()                       // drop the banner + first prompt
-
-        transport.send(ArraySlice(Array("hi".utf8)))
-        XCTAssertEqual(String(decoding: out, as: UTF8.self), "hi")
-    }
-
-    func testEchoTransportFiresOnOpen() {
-        let transport = EchoTransport()
-        var opened = false
-        transport.onOpen = { opened = true }
-        transport.onData = { _ in }
-        transport.start()
-        XCTAssertTrue(opened)
-    }
 
     func testConnectionStateLabelsAndFlags() {
         XCTAssertEqual(ConnectionState.connecting.label, "Connecting…")
@@ -34,17 +17,6 @@ final class SloopKitTests: XCTestCase {
         XCTAssertEqual(ConnectionState.disconnected(reason: nil).label, "Disconnected")
     }
 
-    func testEchoTransportReturnStartsNewPrompt() {
-        let transport = EchoTransport()
-        var out: [UInt8] = []
-        transport.onData = { out.append(contentsOf: $0) }
-        transport.start()
-        out.removeAll()
-
-        transport.send(ArraySlice([0x0d]))    // Return
-        XCTAssertEqual(String(decoding: out, as: UTF8.self), "\r\n$ ")
-    }
-
     func testMoshBootstrapParsesBanner() {
         let banner = "Some preamble\nMOSH CONNECT 60001 x9FkQ2Zt==\nbye\n"
         let boot = MoshBootstrap(serverBanner: banner)
@@ -53,6 +25,31 @@ final class SloopKitTests: XCTestCase {
 
     func testMoshBootstrapRejectsGarbage() {
         XCTAssertNil(MoshBootstrap(serverBanner: "no mosh line here\n"))
+    }
+
+    /// Host files written before `onConnectCommand` existed must still decode.
+    func testHostDecodesWithoutOnConnectCommand() throws {
+        let json = """
+        {"id":"8B9C0D1E-2F3A-4B5C-6D7E-8F9A0B1C2D3E","alias":"box",
+         "hostname":"example.com","port":22,"username":"matt",
+         "auth":{"password":{}},"useMosh":false}
+        """
+        let host = try JSONDecoder().decode(SSHHost.self, from: Data(json.utf8))
+        XCTAssertNil(host.onConnectCommand)
+        XCTAssertNil(host.trimmedOnConnectCommand)
+    }
+
+    /// Blank commands must read as "nothing to run", so no caller has to guess
+    /// whether whitespace counts.
+    func testTrimmedOnConnectCommand() {
+        func host(_ command: String?) -> SSHHost {
+            SSHHost(alias: "box", hostname: "example.com", username: "matt",
+                    onConnectCommand: command)
+        }
+        XCTAssertNil(host(nil).trimmedOnConnectCommand)
+        XCTAssertNil(host("").trimmedOnConnectCommand)
+        XCTAssertNil(host("  \n ").trimmedOnConnectCommand)
+        XCTAssertEqual(host("  tmux a\n").trimmedOnConnectCommand, "tmux a")
     }
 
     func testHostStoreRoundTrips() throws {

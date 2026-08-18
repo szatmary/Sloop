@@ -53,6 +53,7 @@
 #include "terminaldisplay.h"
 #include "terminalframebuffer.h"
 #include "parseraction.h"
+#include "timestamp.h"
 
 typedef Network::Transport<Network::UserStream, Terminal::Complete> MoshTransportType;
 
@@ -124,6 +125,19 @@ static void mosh_run_loop(MoshSession *s) {
     bool shutting_down = false;
 
     while (s->running.load()) {
+      // Advance Mosh's clock. Its timestamp() reads a *cached* value that only
+      // moves when freeze_timestamp() is called, and every send decision is a
+      // comparison against it: TransportSender::tick() sends nothing until
+      // now >= next_send_time. Without this call "now" is whatever it was when
+      // the session started, that deadline never arrives, and the client
+      // transmits exactly one packet for the life of the session — the
+      // handshake. Receiving still works, because that is driven by select()
+      // rather than the clock, so the session looks alive and renders the
+      // remote screen while every keystroke is silently stranded in the
+      // outgoing state. stmclient.cc calls this at the top of its loop for the
+      // same reason.
+      freeze_timestamp();
+
       // Drain queued user events into the transport's outgoing state.
       bool want_close = false;
       std::vector<PendingEvent> pending;

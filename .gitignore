@@ -21,5 +21,9 @@ xcuserdata/
 Vendor/**/*.xcframework
 Vendor/**/build/
 
+# Native dependency sources + build trees, cloned and compiled locally by the
+# scripts in Scripts/ (openssl, libssh2, ios-cmake). Hundreds of megabytes.
+.native/
+
 # Claude Code session state + worktrees
 .claude/

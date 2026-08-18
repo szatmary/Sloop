@@ -1,3 +1,6 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
 import Foundation
 
 /// The lifecycle of a terminal's underlying transport, surfaced to the UI so it

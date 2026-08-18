@@ -1,3 +1,6 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
 // Real libssh2-backed one-shot command runner (SSH *exec* channel).
 //
 // Like `LibSSH2Transport`, this whole file compiles only when the `CSSH`
@@ -209,20 +212,25 @@ final class LibSSH2CommandRunner: CommandRunner {
         let user = host.username
 
         if let key = credential.privateKeyPEM {
-            let rc = user.withCString { userPtr -> Int32 in
-                key.withCString { keyPtr in
-                    (credential.passphrase ?? "").withCString { passPtr in
-                        retry(session, sock) {
-                            libssh2_userauth_publickey_frommemory(
-                                session, userPtr, user.utf8.count,
-                                nil, 0,
-                                keyPtr, key.utf8.count,
-                                passPtr)
+            // See LibSSH2Transport.authenticate: supplied when known, derived
+            // by the backend otherwise.
+            let rc = withOptionalCString(credential.publicKey) { pubPtr, pubLen in
+                user.withCString { userPtr -> Int32 in
+                    key.withCString { keyPtr in
+                        (credential.passphrase ?? "").withCString { passPtr in
+                            retry(session, sock) {
+                                libssh2_userauth_publickey_frommemory(
+                                    session, userPtr, user.utf8.count,
+                                    pubPtr, pubLen,
+                                    keyPtr, key.utf8.count,
+                                    passPtr)
+                            }
                         }
                     }
                 }
             }
-            return rc == 0 ? nil : SSHError.authenticationFailed
+            return rc == 0 ? nil : SSHError.authenticationFailed(
+                "server rejected the private key for '\(user)' — \(libssh2LastError(session))")
         }
 
         if let password = credential.password {
@@ -235,10 +243,13 @@ final class LibSSH2CommandRunner: CommandRunner {
                     }
                 }
             }
-            return rc == 0 ? nil : SSHError.authenticationFailed
+            return rc == 0 ? nil : SSHError.authenticationFailed(
+                "server rejected the password for '\(user)' — \(libssh2LastError(session))")
         }
 
-        return SSHError.authenticationFailed
+        return SSHError.authenticationFailed(
+            "no password or private key is configured for this host — edit it and " +
+            "choose a key from the library, or enter a password")
     }
 
     // MARK: - libssh2 non-blocking helpers (mirror LibSSH2Transport)

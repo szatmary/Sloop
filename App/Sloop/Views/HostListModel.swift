@@ -1,3 +1,6 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
 import SwiftUI
 import SloopKit
 
@@ -8,25 +11,55 @@ import SloopKit
 final class HostListModel: ObservableObject {
     @Published private(set) var hosts: [SSHHost] = []
 
+    /// `UserDefaults` key marking that `KeyLibrary.migrate` has already run on
+    /// this device. `KeyLibrary.migrate` is pure and never overwrites an
+    /// existing library entry, which means it can't distinguish "never
+    /// migrated" from "migrated, then the user removed the key via `sloop
+    /// remove-key`" — running it again after a removal would silently
+    /// re-create the removed key. Gating it behind this once-per-device
+    /// marker is what makes `remove-key` an actual, lasting removal.
+    private static let migratedLegacyPEMsDefaultsKey = "sloop.keyLibrary.migratedLegacyPEMs"
+
     private let store = HostStore()
     private let knownHosts = KnownHostsStore()
     private let credentials: CredentialStore
     private let accessTokens: AccessTokenStore
+    private let keys: KeyStore
+    private let defaults: UserDefaults
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         #if canImport(Security)
         credentials = KeychainCredentialStore()
         accessTokens = KeychainAccessTokenStore()
+        keys = KeychainKeyStore()
         #else
         credentials = InMemoryCredentialStore()
         accessTokens = InMemoryAccessTokenStore()
+        keys = InMemoryKeyStore()
         #endif
         hosts = store.hosts
+        // Lift legacy per-host PEMs into the library, but only once per
+        // device: KeyLibrary.migrate is idempotent in the sense that it never
+        // overwrites an existing entry, but it has no way to know a name is
+        // missing *because the user removed it*. Running it unconditionally
+        // at every launch would resurrect keys removed via `sloop
+        // remove-key`. See migratedLegacyPEMsDefaultsKey.
+        if !defaults.bool(forKey: Self.migratedLegacyPEMsDefaultsKey) {
+            KeyLibrary.migrate(hosts: hosts, credentials: credentials, keys: keys)
+            defaults.set(true, forKey: Self.migratedLegacyPEMsDefaultsKey)
+        }
     }
 
     func newHost() -> SSHHost {
         SSHHost(alias: "new host", hostname: "", username: "")
     }
+
+    /// Library keys for the host editor's picker.
+    func libraryKeys() -> [NamedKey] { keys.keys() }
+
+    /// Store a pasted key into the shared library.
+    func saveLibraryKey(_ key: NamedKey) throws { try keys.setKey(key) }
 
     /// Save a host and, if a new secret was entered, its credential. A `nil`
     /// credential means "leave the stored secret untouched".
@@ -88,7 +121,8 @@ final class HostListModel: ObservableObject {
     /// shell (the Mosh UDP transport isn't wired yet, so today it always falls
     /// back — the terminal shows which mode it got).
     func connect(_ host: SSHHost) -> TerminalSession {
-        let credential = credentials.credential(for: host.id) ?? Credential()
+        let credential = KeyLibrary.credential(for: host, keys: keys, credentials: credentials)
+            ?? Credential()
         let knownHosts = self.knownHosts
         let accessTokens = self.accessTokens
 
@@ -102,7 +136,8 @@ final class HostListModel: ObservableObject {
                                  accessTokens: accessTokens)
         }
 
-        return TerminalSession(title: host.alias) {
+        return TerminalSession(title: host.alias,
+                               onConnectCommand: host.trimmedOnConnectCommand) {
             // Mosh needs UDP, which no tunnel method carries — tunneled hosts
             // are SSH-only regardless of the saved toggle.
             guard host.useMosh, host.connectionMethod == .direct else { return makeSSH() }

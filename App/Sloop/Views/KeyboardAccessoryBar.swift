@@ -1,3 +1,6 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
 #if os(iOS)
 import SwiftUI
 import SloopKit
@@ -6,7 +9,10 @@ import SloopKit
 /// SloopKit's `KeyEncoder` so they emit correct terminal sequences.
 ///
 /// - ⌃ and ⌥ are **sticky** modifiers: tap to arm (highlighted), and they apply
-///   to the next special key, then auto-disarm.
+///   to the next key — a special key from this bar *or* a character typed on
+///   the software keyboard — then auto-disarm. The armed state lives on
+///   `TerminalController` because typed characters bypass this view entirely;
+///   see `TerminalController.armedModifiers`.
 /// - A strip of one-tap common Ctrl combos (⌃C, ⌃D, …) covers the shortcuts you
 ///   reach for most without needing the letter keys.
 ///
@@ -17,22 +23,27 @@ struct KeyboardAccessoryBar: View {
     /// Read the terminal's live DECCKM state at press time (so arrows follow the
     /// mode set by full-screen apps).
     var applicationCursor: () -> Bool = { false }
+    /// The armed modifiers, owned by `TerminalController` so they also apply to
+    /// characters typed on the software keyboard.
+    @Binding var armed: KeyModifiers
+    /// Close the current tab. Lives at the far end of the strip because the
+    /// tab bar that used to carry a ✕ is gone on iOS, and ⌘W only exists with
+    /// a hardware keyboard — without this, sessions could never be closed by
+    /// touch. Deliberately last so it isn't mis-tapped next to ⌃.
+    var closeTab: () -> Void = {}
 
-    @State private var control = false
-    @State private var option = false
+    private var control: Bool { armed.contains(.control) }
+    private var option: Bool { armed.contains(.option) }
 
-    private var armed: KeyModifiers {
-        var m: KeyModifiers = []
-        if control { m.insert(.control) }
-        if option { m.insert(.option) }
-        return m
+    private func toggle(_ modifier: KeyModifiers) {
+        if armed.contains(modifier) { armed.remove(modifier) } else { armed.insert(modifier) }
     }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                modifier("⌃", isOn: control) { control.toggle() }
-                modifier("⌥", isOn: option) { option.toggle() }
+                modifier("⌃", isOn: control) { toggle(.control) }
+                modifier("⌥", isOn: option) { toggle(.option) }
                 divider
 
                 special("esc")  { emit(.escape) }
@@ -47,11 +58,15 @@ struct KeyboardAccessoryBar: View {
                 special("pgdn") { emit(.pageDown) }
                 divider
 
-                ForEach(Array("CDZLRAE"), id: \.self) { letter in
+                // B first: it's tmux's prefix, the most-reached-for combo for
+                // anyone running tmux over SSH.
+                ForEach(Array("BCDZLRAE"), id: \.self) { letter in
                     special("⌃\(letter)") {
                         send(KeyEncoder.bytes(for: letter, modifiers: .control)[...])
                     }
                 }
+                divider
+                special("✕ tab") { closeTab() }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -62,8 +77,7 @@ struct KeyboardAccessoryBar: View {
     /// Send a special key with the armed modifiers, then clear them (one-shot).
     private func emit(_ key: TerminalKey) {
         send(KeyEncoder.bytes(for: key, modifiers: armed, applicationCursor: applicationCursor())[...])
-        control = false
-        option = false
+        armed = []
     }
 
     private var divider: some View {

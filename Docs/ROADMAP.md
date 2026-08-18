@@ -81,9 +81,42 @@ top of a working SSH terminal rather than first.
 
 ## Nice-to-have
 
-- iCloud host sync (secrets stay in the keychain, not iCloud).
+- iCloud host sync (the host list itself is still local-only; key material
+  already syncs today via iCloud Keychain, E2E-encrypted, as part of the
+  shared key library below — the host list is what's not yet synced).
+- **Carry the typed error into `ConnectionState`** — `TerminalController.wire`
+  stringifies at the boundary (`error?.localizedDescription`) and stores prose
+  in `.disconnected(reason:)`, so nothing downstream can tell a rejected
+  credential from a dropped Wi-Fi link from a tunnel that wants a browser
+  login. Every recovery affordance needs that distinction: an auth failure
+  should offer to fix the host's credential, a Cloudflare Access session that
+  expired should re-present the login sheet, and a network drop should just
+  reconnect. Today all three render as the same grey text with a Reconnect
+  button. This is the same lesson as `SSHError.authenticationFailed(String)`
+  one layer up — a failure reported honestly but indistinguishably costs hours
+  to diagnose and cannot be recovered from automatically. It wants its own
+  piece of work: it changes `ConnectionState`, which both the terminal UI and
+  the tunnel work build on. (Found by the Cloudflare Access session, 2026-08.)
+- **On-connect command** — a per-host command run automatically once the shell
+  is up, so a host can drop you straight into a session rather than a bare
+  prompt. The motivating case is `tmux attach || tmux new` (or `tmux a`):
+  reconnecting to the same multiplexed session is the normal workflow on a
+  phone or tablet, where the network drops constantly. Worth deciding whether
+  it runs in the PTY (visible, and the user can Ctrl-C out of it) or as an
+  exec channel, and whether a failed command should leave the plain shell.
+- **Custom compact keyboard** — replace the system keyboard with a
+  terminal-shaped one via SwiftTerm's settable `inputView`, folding today's
+  smart-keys bar into the keyboard instead of stacking a row above it. The
+  software keyboard is the single largest consumer of screen space, so this is
+  the biggest remaining win for visible rows. iPadOS's own floating keyboard
+  (pinch to shrink) helps today but cannot be invoked programmatically — there
+  is no public API — so a real fix means owning the keyboard. Design work:
+  key sizes, symbol/digit layers, portrait vs landscape.
 - SFTP / file transfer.
 - Port forwarding.
+- ~~Key management~~ → DONE: shared key library synced via iCloud Keychain;
+  `sloop import-key` CLI on the Mac (embedded in the app binary). Spec:
+  `Docs/superpowers/specs/2026-08-11-key-library-design.md`.
 - `ssh-agent` / Secure Enclave keys.
 - **`CommandRunner`** — non-interactive SSH exec (`{stdout, stderr, exitStatus}`)
   for saved one-shot commands on iOS/Mac. Also the foundation for a watch app.

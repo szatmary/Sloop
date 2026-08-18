@@ -1,18 +1,33 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
 import SwiftUI
 
+/// CLI subcommands run before SwiftUI ever starts; a normal launch falls
+/// through to the GUI. See KeyCLI.
 @main
+enum SloopMain {
+    static func main() {
+        #if os(macOS)
+        if KeyCLI.run(arguments: CommandLine.arguments) { return }
+        #endif
+        SloopApp.main()
+    }
+}
+
 struct SloopApp: App {
     var body: some Scene {
         WindowGroup {
             HostListView()
+                // One accent everywhere, taken from the icon's foresail, so
+                // controls, badges and the mark all read as the same app.
+                .tint(SloopStyle.teal)
         }
         // Hardware-keyboard / menu-bar tab management (macOS menu bar + iPad
         // hardware keyboard). Commands live outside the view tree, so they drive
         // the shared SessionsModel.
         .commands {
             CommandMenu("Terminal") {
-                Button("New Local Terminal") { SessionsModel.shared.openLocal() }
-                    .keyboardShortcut("t", modifiers: .command)
                 Button("Close Tab") { SessionsModel.shared.closeSelected() }
                     .keyboardShortcut("w", modifiers: .command)
                 Divider()

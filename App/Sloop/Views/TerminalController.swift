@@ -1,3 +1,6 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
 import SwiftUI
 import SwiftTerm
 import SloopKit
@@ -24,16 +27,39 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     let terminalView: TerminalView
     @Published private(set) var state: ConnectionState = .connecting
 
+    /// Modifiers armed by the iOS smart-keys bar, applied to the **next typed
+    /// character** and then cleared.
+    ///
+    /// Lives here rather than in the bar because characters typed on the
+    /// software keyboard reach SwiftTerm directly and surface through
+    /// `send(source:data:)` — the bar never sees them. While the armed state
+    /// was private to the bar, ⌃ only affected the bar's own special keys, so
+    /// combinations like tmux's ⌃B prefix could not be typed at all.
+    @Published var armedModifiers: KeyModifiers = []
+
     private let makeTransport: () -> Transport
+    private let onConnectCommand: String?
     private var transport: Transport
 
     init(makeTransport: @escaping () -> Transport,
+         onConnectCommand: String? = nil,
          appearance: TerminalAppearance = .default) {
         self.makeTransport = makeTransport
+        self.onConnectCommand = onConnectCommand
         self.terminalView = TerminalView(frame: .zero)
         self.transport = makeTransport()
         super.init()
         terminalView.terminalDelegate = self
+        #if os(iOS)
+        // SwiftTerm installs its own TerminalAccessory (esc / ctrl / tab / …)
+        // as the input accessory view. Sloop ships `KeyboardAccessoryBar`,
+        // which covers the same keys plus arrows, paging and one-tap Ctrl
+        // combos, so leaving both in place stacked two bars — two Control
+        // buttons — above the keyboard and ate the screen. Ours wins because
+        // it stays visible with a hardware keyboard attached, when an input
+        // accessory view isn't shown at all.
+        terminalView.inputAccessoryView = nil
+        #endif
         apply(appearance)
         wire(transport)
         transport.start()
@@ -103,7 +129,11 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
 
     private func wire(_ transport: Transport) {
         transport.onOpen = { [weak self] in
-            DispatchQueue.main.async { self?.state = .connected }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.state = .connected
+                self.runOnConnectCommand(on: transport)
+            }
         }
         transport.onData = { [weak terminalView] bytes in
             DispatchQueue.main.async { terminalView?.feed(byteArray: bytes) }
@@ -117,6 +147,21 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
                 self?.state = .disconnected(reason: reason)
             }
         }
+    }
+
+    /// Type the host's on-connect command into the freshly opened shell.
+    ///
+    /// Sent as ordinary input rather than run on a separate exec channel, so
+    /// the command owns the interactive terminal — `tmux attach` has to, and
+    /// an exec channel would run it somewhere the user can't see or interrupt.
+    /// It is therefore also transport-agnostic: SSH and Mosh both just carry
+    /// the bytes. If the command fails, the shell reports it and the user is
+    /// left at a normal prompt, exactly as if they had typed it.
+    private func runOnConnectCommand(on transport: Transport) {
+        guard let command = onConnectCommand?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !command.isEmpty else { return }
+        transport.send(ArraySlice(Array((command + "\n").utf8)))
     }
 
     /// The terminal's current DECCKM (application-cursor-keys) state, so the
@@ -138,7 +183,21 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     // MARK: TerminalViewDelegate
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        transport.send(data)
+        guard !armedModifiers.isEmpty else {
+            transport.send(data)
+            return
+        }
+        let modifiers = armedModifiers
+        armedModifiers = []
+        // Only a single ASCII byte is a keystroke worth re-encoding. Pastes and
+        // multi-byte (IME, emoji) input pass through untouched rather than
+        // being mangled by a control mask.
+        guard data.count == 1, let byte = data.first, byte < 0x80 else {
+            transport.send(data)
+            return
+        }
+        let character = Character(UnicodeScalar(byte))
+        transport.send(KeyEncoder.bytes(for: character, modifiers: modifiers)[...])
     }
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         transport.resize(cols: newCols, rows: newRows)

@@ -1,3 +1,6 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
 // Tests/SloopKitTests/CloudflareAccessDialerTests.swift
 import XCTest
 @testable import SloopKit
