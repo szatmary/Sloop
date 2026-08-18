@@ -117,7 +117,8 @@ final class HostListModel: ObservableObject {
                                  hostKeyVerifier: HostKeyPrompter.shared)
         }
 
-        return TerminalSession(title: host.alias) {
+        return TerminalSession(title: host.alias,
+                               onConnectCommand: host.trimmedOnConnectCommand) {
             guard host.useMosh else { return makeSSH() }
             // The real Mosh UDP/SSP transport is only built into the Mosh variant
             // (project.mosh.yml, which defines SLOOP_MOSH); elsewhere

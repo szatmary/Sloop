@@ -27,6 +27,31 @@ final class SloopKitTests: XCTestCase {
         XCTAssertNil(MoshBootstrap(serverBanner: "no mosh line here\n"))
     }
 
+    /// Host files written before `onConnectCommand` existed must still decode.
+    func testHostDecodesWithoutOnConnectCommand() throws {
+        let json = """
+        {"id":"8B9C0D1E-2F3A-4B5C-6D7E-8F9A0B1C2D3E","alias":"box",
+         "hostname":"example.com","port":22,"username":"matt",
+         "auth":{"password":{}},"useMosh":false}
+        """
+        let host = try JSONDecoder().decode(SSHHost.self, from: Data(json.utf8))
+        XCTAssertNil(host.onConnectCommand)
+        XCTAssertNil(host.trimmedOnConnectCommand)
+    }
+
+    /// Blank commands must read as "nothing to run", so no caller has to guess
+    /// whether whitespace counts.
+    func testTrimmedOnConnectCommand() {
+        func host(_ command: String?) -> SSHHost {
+            SSHHost(alias: "box", hostname: "example.com", username: "matt",
+                    onConnectCommand: command)
+        }
+        XCTAssertNil(host(nil).trimmedOnConnectCommand)
+        XCTAssertNil(host("").trimmedOnConnectCommand)
+        XCTAssertNil(host("  \n ").trimmedOnConnectCommand)
+        XCTAssertEqual(host("  tmux a\n").trimmedOnConnectCommand, "tmux a")
+    }
+
     func testHostStoreRoundTrips() throws {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("sloop-test-\(UUID().uuidString).json")

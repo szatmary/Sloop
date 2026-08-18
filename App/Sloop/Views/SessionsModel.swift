@@ -32,6 +32,7 @@ final class SessionsModel: ObservableObject {
     func openSession(_ session: TerminalSession) {
         controllers[session.id] = TerminalController(
             makeTransport: session.newTransport,
+            onConnectCommand: session.onConnectCommand,
             appearance: AppearanceStore.shared.appearance)
         open.open(session)
     }

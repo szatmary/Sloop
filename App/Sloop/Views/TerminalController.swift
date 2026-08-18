@@ -38,11 +38,14 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     @Published var armedModifiers: KeyModifiers = []
 
     private let makeTransport: () -> Transport
+    private let onConnectCommand: String?
     private var transport: Transport
 
     init(makeTransport: @escaping () -> Transport,
+         onConnectCommand: String? = nil,
          appearance: TerminalAppearance = .default) {
         self.makeTransport = makeTransport
+        self.onConnectCommand = onConnectCommand
         self.terminalView = TerminalView(frame: .zero)
         self.transport = makeTransport()
         super.init()
@@ -126,7 +129,11 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
 
     private func wire(_ transport: Transport) {
         transport.onOpen = { [weak self] in
-            DispatchQueue.main.async { self?.state = .connected }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.state = .connected
+                self.runOnConnectCommand(on: transport)
+            }
         }
         transport.onData = { [weak terminalView] bytes in
             DispatchQueue.main.async { terminalView?.feed(byteArray: bytes) }
@@ -140,6 +147,21 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
                 self?.state = .disconnected(reason: reason)
             }
         }
+    }
+
+    /// Type the host's on-connect command into the freshly opened shell.
+    ///
+    /// Sent as ordinary input rather than run on a separate exec channel, so
+    /// the command owns the interactive terminal — `tmux attach` has to, and
+    /// an exec channel would run it somewhere the user can't see or interrupt.
+    /// It is therefore also transport-agnostic: SSH and Mosh both just carry
+    /// the bytes. If the command fails, the shell reports it and the user is
+    /// left at a normal prompt, exactly as if they had typed it.
+    private func runOnConnectCommand(on transport: Transport) {
+        guard let command = onConnectCommand?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !command.isEmpty else { return }
+        transport.send(ArraySlice(Array((command + "\n").utf8)))
     }
 
     /// The terminal's current DECCKM (application-cursor-keys) state, so the

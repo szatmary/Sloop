@@ -25,6 +25,56 @@ final class SloopAppTests: XCTestCase {
         func close() {}
     }
 
+    /// The host's on-connect command is typed into the shell once the
+    /// transport opens.
+    @MainActor
+    func testOnConnectCommandIsSentWhenTransportOpens() {
+        let probe = ProbeTransport()
+        let controller = TerminalController(makeTransport: { probe },
+                                            onConnectCommand: "tmux attach || tmux new")
+
+        XCTAssertTrue(probe.sent.isEmpty, "nothing should be sent before the link opens")
+        probe.onOpen?()
+        drainMainQueue()
+
+        XCTAssertEqual(String(decoding: probe.sent, as: UTF8.self),
+                       "tmux attach || tmux new\n")
+        withExtendedLifetime(controller) {}
+    }
+
+    /// It must run again on every reconnect — landing back in tmux after a
+    /// dropped link is the whole point of the feature.
+    @MainActor
+    func testOnConnectCommandRunsAgainAfterReconnect() {
+        let probe = ProbeTransport()
+        let controller = TerminalController(makeTransport: { probe },
+                                            onConnectCommand: "tmux a")
+        probe.onOpen?()
+        drainMainQueue()
+        probe.onClose?(nil)
+        drainMainQueue()          // reconnect() is a no-op until state is disconnected
+
+        controller.reconnect()
+        probe.onOpen?()
+        drainMainQueue()
+
+        XCTAssertEqual(String(decoding: probe.sent, as: UTF8.self), "tmux a\ntmux a\n")
+    }
+
+    /// A blank command must not send a bare newline, which would leave a stray
+    /// prompt at the top of every session.
+    @MainActor
+    func testBlankOnConnectCommandSendsNothing() {
+        let probe = ProbeTransport()
+        let controller = TerminalController(makeTransport: { probe },
+                                            onConnectCommand: "   ")
+        probe.onOpen?()
+        drainMainQueue()
+
+        XCTAssertTrue(probe.sent.isEmpty)
+        withExtendedLifetime(controller) {}
+    }
+
     /// The terminal controller must forward terminal keystrokes to the transport.
     @MainActor
     func testTerminalControllerForwardsKeystrokesToTransport() {

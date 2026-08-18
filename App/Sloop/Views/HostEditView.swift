@@ -121,6 +121,22 @@ struct HostEditView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section {
+                    TextField("tmux attach || tmux new",
+                              text: Binding(get: { host.onConnectCommand ?? "" },
+                                            set: { host.onConnectCommand = $0 }))
+                        .font(.system(.body, design: .monospaced))
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        #endif
+                } header: {
+                    Text("Run on connect")
+                } footer: {
+                    Text("Typed into the shell each time this host connects, "
+                         + "including after a dropped connection reconnects.")
+                }
+
                 Section("Options") {
                     HStack {
                         Toggle("Use Mosh", isOn: $host.useMosh)

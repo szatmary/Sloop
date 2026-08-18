@@ -13,18 +13,28 @@ import Foundation
 public final class TerminalSession: Identifiable, Hashable {
     public let id = UUID()
     public let title: String
+    /// Typed into the shell every time this session's transport opens — on
+    /// first connect and on every reconnect, which is the point: a dropped
+    /// link should land back in `tmux attach`, not at a bare prompt.
+    public let onConnectCommand: String?
     private let makeTransport: () -> Transport
 
-    public init(title: String, makeTransport: @escaping () -> Transport) {
+    public init(title: String,
+                onConnectCommand: String? = nil,
+                makeTransport: @escaping () -> Transport) {
         self.title = title
+        self.onConnectCommand = onConnectCommand
         self.makeTransport = makeTransport
     }
 
     /// Convenience for a single, pre-built transport. Reconnecting reuses the
-    /// same instance, so this suits local/echo transports and tests rather than
-    /// SSH (which should pass a factory that builds a fresh connection).
-    public convenience init(title: String, transport: Transport) {
-        self.init(title: title, makeTransport: { transport })
+    /// same instance, so this suits tests rather than SSH (which should pass a
+    /// factory that builds a fresh connection).
+    public convenience init(title: String,
+                            onConnectCommand: String? = nil,
+                            transport: Transport) {
+        self.init(title: title, onConnectCommand: onConnectCommand,
+                  makeTransport: { transport })
     }
 
     /// Build a fresh transport for this session — used on first connect and on
