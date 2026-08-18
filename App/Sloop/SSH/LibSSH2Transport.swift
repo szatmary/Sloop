@@ -235,7 +235,10 @@ final class LibSSH2Transport: Transport, SessionCommandRunner {
                 }
             }
             return rc == 0 ? nil : SSHError.authenticationFailed(
-                "server rejected the private key for '\(user)' — \(libssh2LastError(session))")
+                KeyAuthFailure.message(code: rc,
+                                       libssh2Message: libssh2LastError(session),
+                                       hasPassphrase: credential.passphrase?.isEmpty == false,
+                                       username: user))
         }
 
         if let password = credential.password {

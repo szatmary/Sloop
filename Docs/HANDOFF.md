@@ -191,6 +191,13 @@ RSA worked fine.
 
 - [x] **RSA** (`ssh-rsa` key file, `rsa-sha2-*` signature) — verified on iPad,
       2026-08-17.
+- [x] **Ed25519**, **ECDSA** (nistp256) and **passphrase-protected** keys —
+      verified 2026-08-18 against a live server through
+      `libssh2_userauth_publickey_frommemory`, the same call and argument order
+      `LibSSH2Transport` makes, with keys installed on the host for the purpose.
+      Ed25519 authenticates with or without a public-key blob, since OpenSSL 3
+      derives one. This is the crypto backend answered; what a device adds is
+      the paste-a-key-into-the-editor path, not the algorithms.
 - [ ] **Ed25519** (`ssh-ed25519`) — NOT yet verified. Needs a host that
       authorizes an Ed25519 key; under OpenSSL the key parses, but no live
       session has used one.
