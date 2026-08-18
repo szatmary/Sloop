@@ -25,8 +25,6 @@ struct SloopApp: App {
         // the shared SessionsModel.
         .commands {
             CommandMenu("Terminal") {
-                Button("New Local Terminal") { SessionsModel.shared.openLocal() }
-                    .keyboardShortcut("t", modifiers: .command)
                 Button("Close Tab") { SessionsModel.shared.closeSelected() }
                     .keyboardShortcut("w", modifiers: .command)
                 Divider()

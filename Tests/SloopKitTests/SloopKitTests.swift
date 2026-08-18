@@ -6,26 +6,6 @@ import XCTest
 
 final class SloopKitTests: XCTestCase {
 
-    func testEchoTransportEchoesPrintableInput() {
-        let transport = EchoTransport()
-        var out: [UInt8] = []
-        transport.onData = { out.append(contentsOf: $0) }
-        transport.start()
-        out.removeAll()                       // drop the banner + first prompt
-
-        transport.send(ArraySlice(Array("hi".utf8)))
-        XCTAssertEqual(String(decoding: out, as: UTF8.self), "hi")
-    }
-
-    func testEchoTransportFiresOnOpen() {
-        let transport = EchoTransport()
-        var opened = false
-        transport.onOpen = { opened = true }
-        transport.onData = { _ in }
-        transport.start()
-        XCTAssertTrue(opened)
-    }
-
     func testConnectionStateLabelsAndFlags() {
         XCTAssertEqual(ConnectionState.connecting.label, "Connecting…")
         XCTAssertTrue(ConnectionState.connected.isConnected)
@@ -35,17 +15,6 @@ final class SloopKitTests: XCTestCase {
         XCTAssertTrue(dropped.isDisconnected)
         XCTAssertEqual(dropped.label, "Disconnected — timeout")
         XCTAssertEqual(ConnectionState.disconnected(reason: nil).label, "Disconnected")
-    }
-
-    func testEchoTransportReturnStartsNewPrompt() {
-        let transport = EchoTransport()
-        var out: [UInt8] = []
-        transport.onData = { out.append(contentsOf: $0) }
-        transport.start()
-        out.removeAll()
-
-        transport.send(ArraySlice([0x0d]))    // Return
-        XCTAssertEqual(String(decoding: out, as: UTF8.self), "\r\n$ ")
     }
 
     func testMoshBootstrapParsesBanner() {

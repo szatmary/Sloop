@@ -40,8 +40,4 @@ public final class TerminalSession: Identifiable, Hashable {
         hasher.combine(id)
     }
 
-    /// A throwaway local session for the "Local terminal" quick action.
-    public static func localEcho() -> TerminalSession {
-        TerminalSession(title: "local") { EchoTransport() }
-    }
 }

@@ -35,14 +35,6 @@ struct HostListView: View {
                     }
                 }
 
-                Section("Quick") {
-                    Button {
-                        open(.localEcho())
-                    } label: {
-                        Label("Local terminal", systemImage: "terminal")
-                    }
-                }
-
                 Section("Hosts") {
                     if model.hosts.isEmpty {
                         Text("No hosts yet. Tap + to add one.")

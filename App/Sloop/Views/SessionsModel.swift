@@ -41,11 +41,6 @@ final class SessionsModel: ObservableObject {
         open.select(id)
     }
 
-    /// Open a fresh local (echo) terminal tab — the ⌘T action.
-    func openLocal() {
-        openSession(.localEcho())
-    }
-
     /// Close the active tab — the ⌘W action. No-op when nothing is open.
     func closeSelected() {
         if let id = open.selectedID { close(id) }
