@@ -26,12 +26,39 @@ struct HostListView: View {
         NavigationStack {
             List {
                 if !sessions.isEmpty {
+                    // One row per open session, not a count: with several tabs
+                    // open, "3 sessions" only gets you to whichever one happens
+                    // to be selected, and finding the right one means paging
+                    // through the terminal. Here you go straight to it.
                     Section("Open") {
-                        Button {
-                            showingTerminal = true
-                        } label: {
-                            Label("^[\(sessions.count) session](inflect: true)",
-                                  systemImage: "rectangle.on.rectangle")
+                        ForEach(sessions.sessions) { session in
+                            Button {
+                                sessions.select(session.id)
+                                showingTerminal = true
+                            } label: {
+                                if let controller = sessions.controller(for: session) {
+                                    SessionRow(session: session,
+                                               controller: controller,
+                                               isCurrent: session.id == sessions.selectedID)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .contentShape(Rectangle())
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    sessions.close(session.id)
+                                } label: {
+                                    Label("Close", systemImage: "xmark")
+                                }
+                            }
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    sessions.close(session.id)
+                                } label: {
+                                    Label("Close Session", systemImage: "xmark.circle")
+                                }
+                            }
                         }
                     }
                 }
@@ -206,6 +233,62 @@ private struct ConfigTextDocument: FileDocument {
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         FileWrapper(regularFileWithContents: Data(text.utf8))
+    }
+}
+
+/// One open session on the home screen. Reads as a live counterpart to
+/// `HostRow`: the same colour rail (keyed on the same name, so a session sits
+/// visually under the host it came from), with the address line replaced by
+/// what only a live session has — how the connection is doing.
+private struct SessionRow: View {
+    let session: TerminalSession
+    @ObservedObject var controller: TerminalController
+    /// The tab the terminal is showing right now. Marked by weight and a fully
+    /// lit rail rather than a word, so the list stays scannable.
+    let isCurrent: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(HostPalette.color(for: session.title))
+                .frame(width: 4)
+                .frame(maxHeight: .infinity)
+                .opacity(isCurrent ? 1 : 0.45)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 7, height: 7)
+                    Text(session.title)
+                        .font(.headline)
+                        .fontWeight(isCurrent ? .bold : .regular)
+                }
+                Text(statusText)
+                    .font(.system(.footnote, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(session.title), \(statusText)"
+                            + (isCurrent ? ", current tab" : ""))
+    }
+
+    private var statusColor: Color {
+        switch controller.state {
+        case .connecting: return .orange
+        case .connected: return .green
+        case .disconnected: return .secondary
+        }
+    }
+
+    private var statusText: String {
+        switch controller.state {
+        case .connecting: return "connecting…"
+        case .connected: return "connected"
+        case .disconnected(let reason): return reason ?? "disconnected"
+        }
     }
 }
 
