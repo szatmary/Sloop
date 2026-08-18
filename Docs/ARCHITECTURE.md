@@ -74,7 +74,11 @@ side never knows which dialer produced it.
   request header, binary frames carrying the raw SSH byte stream. A
   [`SocketPairRelay`](../Sources/SloopKit/Net/SocketPairRelay.swift) bridges
   that callback-shaped stream to one end of a `socketpair()` and hands the
-  other end out as the fd libssh2 runs over.
+  other end out as the fd libssh2 runs over. Note that a dropped WebSocket
+  reaches libssh2 as a *clean EOF* — the relay calls `finishInbound()`, so the
+  fd half-closes and `read()` returns 0. Any bug about libssh2 mishandling a
+  negative return (a TCP reset, a vanished network) is therefore a
+  direct-TCP-path problem; don't go looking for it in the relay.
 - `.tailscale` is a recognized `ConnectionMethod` but not yet a working
   dialer — `TransportFactory` returns `nil` for it today. Planned as a third
   dialer over an embedded tailnet node; see [`Docs/ROADMAP.md`](ROADMAP.md).
