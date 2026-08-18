@@ -227,10 +227,17 @@ signing without asking.
 
 ## Limitations, stated up front
 
-- **Mosh sessions cannot forward.** SSH is only the bootstrap that launches
-  `mosh-server`; the session that carries the terminal is not an SSH connection
-  and has no channel to forward over. The UI must not offer forwarding for a
-  Mosh host rather than offering it and silently doing nothing.
+- **A live Mosh session cannot forward**, but a host with Mosh enabled usually
+  can. SSH is only the bootstrap that launches `mosh-server`; the session
+  carrying the terminal is not an SSH connection and has no channel to forward
+  over. This originally read as "the UI must not offer forwarding for a Mosh
+  host" — which reading `HostListModel.connect(_:)` proved wrong.
+  `connect` falls back to a plain SSH shell whenever Mosh is unavailable, and
+  today it *always* falls back, because the Mosh UDP transport isn't wired yet.
+  So a `useMosh` host is normally running ordinary SSH and forwards fine.
+  Hiding the control, or clearing the selection when Mosh is toggled, would
+  destroy a setting that is doing real work. The UI states the limitation in
+  the footer instead; no behaviour changes.
 - **No round-trip test without a real host.** As with the Cloudflare Access
   work, unit tests prove the bytes and the signatures; they cannot prove a real
   `ssh` on a real remote accepts them. This needs an entry in

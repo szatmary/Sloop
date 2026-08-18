@@ -1631,9 +1631,21 @@ In `eventLoop`, after the shell drain and before the `waitSocket` decision:
 if let agent, agent.service() { readData = true }
 ```
 
-- [ ] **Step 5: Resolve forwarded keys in `TransportFactory.swift`**
+- [ ] **Step 5: Resolve forwarded keys at the call site**
 
-Beside the existing `Credential` resolution, resolve `KeyLibrary.forwardedKeys(for: host)` and pass the result into `LibSSH2Transport`. Pass an empty array when `host.useMosh` is true — Mosh cannot forward, and the transport should not be handed keys it will never use.
+The resolution happens in `HostListModel.connect(_:)` (`App/Sloop/Views/HostListModel.swift:199`), which already resolves the credential and holds the `keys` store — not inside `TransportFactory`, which is handed a resolved `Credential` rather than a store:
+
+```swift
+let credential = try KeyLibrary.credential(for: host, keys: keys, credentials: credentials)
+    ?? Credential()
+let forwardedKeys = try KeyLibrary.forwardedKeys(for: host, keys: keys)
+```
+
+Thread it through `TransportFactory.ssh(...)` — a new `forwardedKeys: [NamedKey]` parameter — into `LibSSH2Transport.init`. `TransportFactory.ssh` has exactly one caller, this one.
+
+**Do NOT gate this on `host.useMosh`.** An earlier draft of this plan said to pass an empty array for Mosh hosts, and reading the call site shows that is wrong. `HostListModel.connect` falls back to a plain SSH shell whenever Mosh isn't available — and per the comment at line 190, the Mosh UDP transport isn't wired yet, so **today it always falls back**. A `useMosh` host is therefore usually running an ordinary SSH session, which can forward perfectly well. Gating here would silently disable forwarding for those hosts with nothing to explain why.
+
+The correct division: pass the keys unconditionally, let `LibSSH2Transport` request forwarding only when the list is non-empty, and let `MoshTransport` simply never forward — which it does by construction, having no SSH channel to forward over.
 
 - [ ] **Step 6: Run the tests and confirm they pass**
 
@@ -1663,19 +1675,26 @@ git commit -m "SSH: serve a forwarded agent alongside the shell channel"
 
 A "Forward agent" section listing every library key with a checkmark toggle bound to membership in `host.forwardedKeys`. Below it, footer text stating that a forwarded key can be used by anyone with root on that host, and that each use asks first.
 
-Hide the section entirely when `host.useMosh` is on, with footer text on the Mosh row explaining that Mosh sessions cannot forward an agent. Per the spec: do not offer a control that silently does nothing.
+**Do NOT hide the section for Mosh hosts, and do NOT clear the selection when Mosh is enabled.** An earlier draft said to do both; reading `HostListModel.connect(_:)` shows it is wrong. A `useMosh` host falls back to a plain SSH shell whenever Mosh is unavailable — and today that is always, since the Mosh UDP transport isn't wired yet. Those sessions forward perfectly well. Hiding the control, or silently emptying the user's selection when they toggle Mosh, would destroy a setting that is doing real work.
+
+Instead, when `host.useMosh` is on, add a line to the section's footer: forwarding applies to SSH sessions, including the SSH fallback a Mosh host uses when `mosh-server` isn't reachable. That is the honest statement, and it needs no behavior change.
 
 When the library is empty, show "No keys in the library" rather than an empty box.
 
-- [ ] **Step 2: Add a test for the Mosh interaction**
+- [ ] **Step 2: Add a test pinning that Mosh does not disturb the selection**
 
 ```swift
-/// Turning on Mosh must not leave a host claiming to forward an agent that
-/// its transport cannot serve.
-func testEnablingMoshClearsForwardedKeys() { /* ... */ }
+/// A Mosh host still forwards over its SSH fallback, so enabling Mosh must
+/// leave the selection alone. Clearing it here would silently discard a
+/// setting that is doing real work on every fallback session.
+func testEnablingMoshLeavesForwardedKeysIntact() throws {
+    var host = SSHHost(alias: "a", hostname: "h", username: "u")
+    host.forwardedKeys = ["id_ed25519"]
+    host.useMosh = true
+    XCTAssertEqual(host.forwardedKeys, ["id_ed25519"])
+    XCTAssertTrue(host.forwardsAgent)
+}
 ```
-
-Implement whichever behavior the test asserts in the model, not the view, so it holds regardless of which screen sets `useMosh`.
 
 - [ ] **Step 3: Run all tests**
 
