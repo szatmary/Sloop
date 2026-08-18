@@ -298,18 +298,17 @@ struct HostEditView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text("""
-                As you type, Sloop offers the word that usually comes next — \
-                learnt from the commands you run on this host, and from the \
+                As you type, Sloop offers the word that usually comes next, \
+                taken from the commands you've run on this host and from the \
                 host's own shell history, which it reads once when you connect. \
                 Tap a suggestion to use it.
 
-                What it learns stays on this device. It isn't synced to iCloud, \
-                it isn't shared with your other devices, and it is never sent to \
-                a server or to anyone else. There's no account and nothing to \
+                That list of commands stays on this device. It isn't synced to \
+                iCloud, isn't shared with your other devices, and is never sent \
+                to a server or to anyone else. There's no account and nothing to \
                 opt out of, because there is nowhere for it to go.
 
-                You can clear what it has learned whenever you like, in Terminal \
-                settings.
+                You can clear the list whenever you like, in Terminal settings.
                 """)
             }
             .alert("What is Mosh?", isPresented: $showingMoshHelp) {

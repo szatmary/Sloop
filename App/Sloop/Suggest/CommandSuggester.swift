@@ -94,8 +94,8 @@ final class CommandSuggester {
                 // does nothing — as this did on every Mosh host — looks exactly
                 // like one that works.
                 report(learned > 0
-                       ? "[sloop] suggestions: learned \(learned) commands from this host's shell history\r\n"
-                       : "[sloop] suggestions: no shell history found on this host — learning as you type\r\n")
+                       ? "[sloop] suggestions: read \(learned) commands from this host's shell history\r\n"
+                       : "[sloop] suggestions: no shell history on this host — building the list as you type\r\n")
             }
         }
     }

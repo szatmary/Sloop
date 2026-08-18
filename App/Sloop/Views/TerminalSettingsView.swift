@@ -59,8 +59,8 @@ struct TerminalSettingsView: View {
 
                 Section("Suggestions") {
                     Text("""
-                    As you type, Sloop offers the word that usually comes next — \
-                    learnt from the commands you run on a host, and from that \
+                    As you type, Sloop offers the word that usually comes next, \
+                    taken from the commands you've run on a host and from that \
                     host's own shell history, which it reads once when you \
                     connect. Each host has its own switch, in that host's \
                     settings beside Use Mosh.
@@ -69,11 +69,11 @@ struct TerminalSettingsView: View {
                         .foregroundStyle(.secondary)
 
                     Label("""
-                    What Sloop learns stays on this device. It isn't synced to \
-                    iCloud, it isn't shared with your other devices, and it is \
-                    never sent to a server or to anyone else. There's no account \
-                    and nothing to opt out of, because there is nowhere for it \
-                    to go.
+                    Those lists of commands stay on this device. They aren't \
+                    synced to iCloud, aren't shared with your other devices, and \
+                    are never sent to a server or to anyone else. There's no \
+                    account and nothing to opt out of, because there is nowhere \
+                    for them to go.
                     """, systemImage: "lock")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -116,9 +116,9 @@ struct TerminalSettingsView: View {
                 Button("Clear History", role: .destructive) { clearHistory() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Deletes everything Sloop has learned about the commands you run, "
-                   + "on every host. Suggestions start again from your hosts' own shell "
-                   + "history the next time you connect.")
+                Text("Deletes the commands Sloop has remembered, on every host. "
+                   + "Suggestions start again from each host's own shell history the "
+                   + "next time you connect.")
             }
             .alert("Couldn't Clear History", isPresented: Binding(
                 get: { clearingFailed != nil },
