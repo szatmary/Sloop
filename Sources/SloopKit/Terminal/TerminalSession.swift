@@ -25,15 +25,21 @@ public final class TerminalSession: Identifiable, Hashable {
     /// host — which would offer each the other's commands, and each of those is
     /// a record of what someone did on a particular machine.
     public let hostID: UUID?
+
+    /// Whether this host wants command suggestions, decided on the host and
+    /// carried here so the session doesn't have to go looking for it.
+    public let suggestsCommands: Bool
     private let makeTransport: () -> Transport
 
     public init(title: String,
                 onConnectCommand: String? = nil,
                 hostID: UUID? = nil,
+                suggestsCommands: Bool = true,
                 makeTransport: @escaping () -> Transport) {
         self.title = title
         self.onConnectCommand = onConnectCommand
         self.hostID = hostID
+        self.suggestsCommands = suggestsCommands
         self.makeTransport = makeTransport
     }
 
@@ -43,9 +49,10 @@ public final class TerminalSession: Identifiable, Hashable {
     public convenience init(title: String,
                             onConnectCommand: String? = nil,
                             hostID: UUID? = nil,
+                            suggestsCommands: Bool = true,
                             transport: Transport) {
         self.init(title: title, onConnectCommand: onConnectCommand, hostID: hostID,
-                  makeTransport: { transport })
+                  suggestsCommands: suggestsCommands, makeTransport: { transport })
     }
 
     /// Build a fresh transport for this session — used on first connect and on

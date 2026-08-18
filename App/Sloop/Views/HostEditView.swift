@@ -217,6 +217,13 @@ struct HostEditView: View {
                 }
 
                 Section("Options") {
+                    Toggle("Suggest commands", isOn: $host.suggestions)
+                    Text("Learns the commands you run on this host and offers the "
+                       + "word that usually comes next. Kept on this device, for this "
+                       + "host alone, and never sent anywhere. Off records nothing.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
                     HStack {
                         Toggle("Use Mosh", isOn: $host.useMosh)
                             .disabled(host.connectionMethod == .cloudflareAccess)

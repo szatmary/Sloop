@@ -58,16 +58,15 @@ struct TerminalSettingsView: View {
                 }
 
                 Section("Suggestions") {
-                    Toggle("Suggest commands", isOn: $store.appearance.suggestions)
-
                     Text("""
                     As you type, Sloop offers the word that usually comes next — \
                     ranked by how often and how recently it followed what you've \
                     already typed on this host. Tap a suggestion to use it.
 
-                    It learns from the commands you run here, and reads the \
+                    It learns from the commands you run there, and reads the \
                     host's own shell history once per connection to be useful \
-                    before you've typed anything.
+                    before you've typed anything. Each host decides for itself — \
+                    the switch is in that host's settings, beside Use Mosh.
                     """)
                         .font(.footnote)
                         .foregroundStyle(.secondary)

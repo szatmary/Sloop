@@ -55,7 +55,7 @@ final class SessionsModel: ObservableObject {
             makeTransport: session.newTransport,
             onConnectCommand: session.onConnectCommand,
             appearance: AppearanceStore.shared.appearance,
-            suggestionsFor: session.hostID)
+            suggestionsFor: session.suggestsCommands ? session.hostID : nil)
         open.open(session)
     }
 

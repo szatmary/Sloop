@@ -130,7 +130,9 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         // No host, no suggestions: a session with nowhere to keep a history
         // has nothing to suggest from, and inventing a shared one would offer
         // each host the other's commands.
-        if appearance.suggestions, let hostID {
+        // The host decides, and passes its decision in as a nil hostID when it
+        // says no — one switch, on the thing it governs.
+        if let hostID {
             self.suggester = CommandSuggester(hostID: hostID, store: historyStore)
         }
         self.terminalView = TerminalView(frame: .zero)

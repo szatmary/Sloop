@@ -28,10 +28,12 @@ final class SuggestionWiringTests: XCTestCase {
         super.tearDown()
     }
 
+    /// The host decides whether it wants suggestions, and says no by giving
+    /// the session no host to keep a history for.
     private func makeController(suggestions: Bool = true) -> TerminalController {
         TerminalController(makeTransport: { MessageTransport(message: "") },
-                           appearance: TerminalAppearance(suggestions: suggestions),
-                           suggestionsFor: host,
+                           appearance: .default,
+                           suggestionsFor: suggestions ? host : nil,
                            historyStore: store)
     }
 
@@ -94,8 +96,9 @@ final class SuggestionWiringTests: XCTestCase {
         XCTAssertEqual(controller.typedLine, "terraform plan")
     }
 
-    /// Off means off: nothing tracked, nothing suggested, nothing written.
-    func testTheSettingStopsTrackingEntirely() throws {
+    /// A host with suggestions off tracks nothing, suggests nothing, and
+    /// writes nothing — the switch governs the recording, not just the display.
+    func testAHostWithSuggestionsOffTracksNothing() throws {
         var history = CommandHistory()
         history.record("kubectl get pods")
         try store.save(history, for: host)

@@ -18,24 +18,15 @@ public struct TerminalAppearance: Codable, Equatable, Sendable {
     public var cursor: CursorStyle
     public var keyboard: KeyboardStyle
 
-    /// Whether Sloop suggests commands from what you've typed before.
-    ///
-    /// Off is a real off: no bar, and nothing recorded. A switch that only hid
-    /// the suggestions while still keeping every command line in a file would
-    /// be the more dishonest of the two things it could mean, and the file is
-    /// the part worth having a choice about — command lines carry tokens,
-    /// passwords and the names of machines people would rather not write down.
-    public var suggestions: Bool
-
     private enum CodingKeys: String, CodingKey {
-        case fontSize, theme, cursor, keyboard, suggestions
+        case fontSize, theme, cursor, keyboard
     }
 
     /// Allowed font sizes, in points. Values are clamped into this range.
     public static let fontSizeRange: ClosedRange<Double> = 8...32
 
     public static let `default` = TerminalAppearance(fontSize: 13, theme: .system, cursor: .block,
-                                                     keyboard: .standard, suggestions: true)
+                                                     keyboard: .standard)
 
     /// Which colors the terminal draws with.
     public enum Theme: String, Codable, CaseIterable, Sendable {
@@ -71,12 +62,11 @@ public struct TerminalAppearance: Codable, Equatable, Sendable {
     /// Creates an appearance, clamping `fontSize` into `fontSizeRange` so an
     /// out-of-range persisted or user value can never produce an unusable grid.
     public init(fontSize: Double = 13, theme: Theme = .system, cursor: CursorStyle = .block,
-                keyboard: KeyboardStyle = .standard, suggestions: Bool = true) {
+                keyboard: KeyboardStyle = .standard) {
         self.fontSize = TerminalAppearance.clampFontSize(fontSize)
         self.theme = theme
         self.cursor = cursor
         self.keyboard = keyboard
-        self.suggestions = suggestions
     }
 
     /// Decoding goes through the same clamping, so a hand-edited or corrupt
@@ -88,7 +78,6 @@ public struct TerminalAppearance: Codable, Equatable, Sendable {
         self.theme = try c.decodeIfPresent(Theme.self, forKey: .theme) ?? .system
         self.cursor = try c.decodeIfPresent(CursorStyle.self, forKey: .cursor) ?? .block
         self.keyboard = try c.decodeIfPresent(KeyboardStyle.self, forKey: .keyboard) ?? .standard
-        self.suggestions = try c.decodeIfPresent(Bool.self, forKey: .suggestions) ?? true
     }
 
     /// Bump the font size by `delta` points, staying within range.
