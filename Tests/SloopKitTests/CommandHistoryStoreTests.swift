@@ -28,7 +28,7 @@ final class CommandHistoryStoreTests: XCTestCase {
 
         let reopened = CommandHistoryStore(directory: directory)
         XCTAssertEqual(reopened.history(for: host).suggestions(for: "tail", limit: 1),
-                       ["tail -f /var/log/syslog"])
+                       ["tail -f"])
     }
 
     /// One host's commands must never be offered on another. They are a record

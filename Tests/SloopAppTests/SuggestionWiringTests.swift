@@ -54,7 +54,9 @@ final class SuggestionWiringTests: XCTestCase {
         for byte in Array("git st".utf8) {
             controller.send(source: controller.terminalView, data: ArraySlice([byte]))
         }
-        XCTAssertEqual(controller.suggestions, ["git status --short"])
+        // A word at a time: `git st` proposes the word it completes to, and
+        // accepting again would propose `--short` after it.
+        XCTAssertEqual(controller.suggestions, ["git status"])
     }
 
     /// Accepting clears the line and types the whole command, so it lands

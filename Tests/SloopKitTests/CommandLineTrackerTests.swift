@@ -96,21 +96,23 @@ final class CommandLineTrackerTests: XCTestCase {
 
     func testTrustIsRestoredAfterTheLineEnds() {
         var tracker = CommandLineTracker()
+        _ = type("cd /usr/lo", into: &tracker)
         _ = tracker.consume([0x09])
         XCTAssertFalse(tracker.isCertain)
         _ = type("\r", into: &tracker)
         XCTAssertTrue(tracker.isCertain)
     }
 
-    /// One character is not a prefix worth completing, and a line ending in a
-    /// space is asking for the *next* word, which history-by-prefix can't
-    /// answer.
-    func testShortAndTrailingSpaceLinesAreNotSuggestable() {
+    /// An empty line has nothing to rank against; everything else does,
+    /// including a line ending in a space — "what comes after `zpool `" is the
+    /// question a next-word model answers best.
+    func testAnythingTypedIsSuggestableButNothingIsNot() {
         var tracker = CommandLineTracker()
+        XCTAssertFalse(tracker.isSuggestable)
         _ = type("l", into: &tracker)
-        XCTAssertFalse(tracker.isSuggestable)
+        XCTAssertTrue(tracker.isSuggestable)
         _ = type("s ", into: &tracker)
-        XCTAssertFalse(tracker.isSuggestable)
+        XCTAssertTrue(tracker.isSuggestable)
     }
 
     func testInvalidateDropsTrustWithoutLosingTheLine() {
@@ -119,5 +121,69 @@ final class CommandLineTrackerTests: XCTestCase {
         tracker.invalidate()
         XCTAssertEqual(tracker.line, "top")
         XCTAssertFalse(tracker.isSuggestable)
+    }
+}
+
+extension CommandLineTrackerTests {
+    /// A terminal answers the host's queries — device attributes, cursor
+    /// position — through the same path as typing, and those answers are escape
+    /// sequences. They arrive before anyone has touched a key, so treating them
+    /// as "something happened we can't model" wrote the line off as
+    /// untrustworthy for the rest of the session. This is what stopped the
+    /// suggestion bar ever appearing.
+    func testTerminalRepliesBeforeTypingDoNotPoisonTheLine() {
+        var tracker = CommandLineTracker()
+        tracker.consume(ArraySlice([0x1b, 0x5b, 0x3f, 0x31, 0x3b, 0x32, 0x63]))  // ESC[?1;2c
+        tracker.consume(ArraySlice([0x1b, 0x5b, 0x32, 0x34, 0x3b, 0x38, 0x30, 0x52])) // ESC[24;80R
+        _ = tracker.consume(ArraySlice(Array("zpool status".utf8)))
+        XCTAssertTrue(tracker.isCertain)
+        XCTAssertTrue(tracker.isSuggestable)
+        XCTAssertEqual(tracker.line, "zpool status")
+    }
+
+    /// The exception is only for an empty line: once there is text, an
+    /// unmodelled key really can leave us describing something that isn't on
+    /// screen.
+    func testAnUnmodelledKeyStillPoisonsALineWithTextOnIt() {
+        var tracker = CommandLineTracker()
+        _ = tracker.consume(ArraySlice(Array("zpool".utf8)))
+        tracker.consume(ArraySlice([0x1b, 0x5b, 0x44]))   // left arrow
+        XCTAssertFalse(tracker.isCertain)
+    }
+}
+
+extension CommandLineTrackerTests {
+    /// The shell asks the terminal questions while you type — where is the
+    /// cursor, what are you, did focus change — and the answers leave through
+    /// the same channel as typing. Treating them as unmodelled keys made the
+    /// suggestion bar appear and vanish a moment later, over and over.
+    func testTerminalRepliesDoNotDisturbALineBeingTyped() {
+        var tracker = CommandLineTracker()
+        _ = type("zpool sta", into: &tracker)
+        tracker.consume(ArraySlice([0x1b, 0x5b, 0x32, 0x34, 0x3b, 0x31, 0x30, 0x52])) // ESC[24;10R
+        tracker.consume(ArraySlice([0x1b, 0x5b, 0x49]))                                // ESC[I focus
+        tracker.consume(ArraySlice([0x1b, 0x5b, 0x3f, 0x36, 0x32, 0x3b, 0x63]))        // ESC[?62;c
+        XCTAssertTrue(tracker.isCertain)
+        XCTAssertEqual(tracker.line, "zpool sta")
+        _ = type("tus", into: &tracker)
+        XCTAssertEqual(tracker.line, "zpool status")
+    }
+
+    /// A reply arriving mid-sequence must not swallow what follows it.
+    func testTypingContinuesAfterAReplyInTheSameWrite() {
+        var tracker = CommandLineTracker()
+        _ = tracker.consume(ArraySlice([0x1b, 0x5b, 0x49] + Array("ls -la".utf8)))
+        XCTAssertEqual(tracker.line, "ls -la")
+        XCTAssertTrue(tracker.isCertain)
+    }
+}
+
+extension CommandLineTrackerTests {
+    /// The first keystroke is a real prefix, and on a host where only one
+    /// command starts with `z` it is the most useful moment there is.
+    func testASingleCharacterIsSuggestable() {
+        var tracker = CommandLineTracker()
+        _ = type("z", into: &tracker)
+        XCTAssertTrue(tracker.isSuggestable)
     }
 }

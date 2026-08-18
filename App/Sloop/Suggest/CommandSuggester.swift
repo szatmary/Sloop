@@ -26,6 +26,8 @@ final class CommandSuggester {
         self.history = store.history(for: hostID)
     }
 
+    var isSuggestable: Bool { tracker.isSuggestable }
+
     /// Feed the bytes being sent to the host. Commands the user finishes are
     /// recorded, so the next session knows them.
     func observe(_ bytes: ArraySlice<UInt8>) {

@@ -42,10 +42,17 @@ public struct CommandLineTracker: Equatable, Sendable {
         isCertain = true
     }
 
-    /// Whether the line is worth suggesting against: known-good, and long
-    /// enough that a prefix means something.
+    /// Whether the line is worth suggesting against: known-good, and not empty.
+    ///
+    /// One character is enough. It was two, on the theory that a single letter
+    /// is too vague to rank — but the ranking is what decides that, and `z`
+    /// narrowing to `zpool` on a host where that is the only `z` command is
+    /// precisely the moment a suggestion saves the most typing.
+    ///
+    /// A trailing space counts too, and used not to: "what comes after
+    /// `zpool `" is the question a next-word model answers best.
     public var isSuggestable: Bool {
-        isCertain && line.count >= 2 && !line.hasSuffix(" ")
+        isCertain && !line.isEmpty
     }
 
     /// Feed the bytes being sent to the host. Returns any command the user
@@ -90,8 +97,10 @@ public struct CommandLineTracker: Equatable, Sendable {
                 case .down:
                     recallDepth = max(0, recallDepth - 1)
                     line = ""
+                case .reply:
+                    break   // the terminal answering the host, not a keystroke
                 case .other:
-                    isCertain = false
+                    loseCertainty()
                 }
 
             case 0x20...0x7e:                    // printable ASCII
@@ -101,7 +110,7 @@ public struct CommandLineTracker: Equatable, Sendable {
                 // ⌃A, ⌃E, ⌃K, ⌃R and the rest all move or rewrite the line in
                 // ways this doesn't track. Tab is here too: the *host* decides
                 // what a completion expands to, and we never see it.
-                isCertain = false
+                loseCertainty()
             }
         }
         return finished
@@ -121,31 +130,71 @@ public struct CommandLineTracker: Equatable, Sendable {
         recallDepth = 0
     }
 
-    private enum EscapeSequence { case up, down, other }
+    private enum EscapeSequence {
+        /// History recall — the caller can fill the line in from its own copy.
+        case up, down
+        /// The terminal answering a question the host asked it: cursor
+        /// position, device attributes, focus. Not a keystroke, and not
+        /// something that changes the line.
+        case reply
+        /// A key that moves or edits the line somewhere we aren't watching.
+        case other
+    }
 
-    /// Consume the rest of an escape sequence, reporting whether it was a
-    /// history recall. Arrows arrive as `ESC [ A` or, in application-cursor
-    /// mode, `ESC O A` — a terminal in the second mode is the normal case
-    /// inside readline, so both spellings have to count.
+    /// Consume the rest of an escape sequence and say what kind it was.
+    ///
+    /// The distinction that matters is keystroke versus reply. A terminal
+    /// answers the host constantly — `ESC[…R` for cursor position, `ESC[?…c`
+    /// for device attributes, `ESC[I`/`ESC[O` when focus moves — and those
+    /// answers leave through the same channel as typing. Treating them as
+    /// unmodelled keys meant the suggestion bar appeared and then vanished a
+    /// moment later, every time the shell asked the terminal a question.
+    ///
+    /// Arrows arrive as `ESC [ A` or, in application-cursor mode, `ESC O A`;
+    /// readline puts the terminal in the second mode, so both spellings count.
     private func escapeSequence(_ bytes: ArraySlice<UInt8>,
                                 from index: inout ArraySlice<UInt8>.Index) -> EscapeSequence {
         guard index < bytes.endIndex else { return .other }
         let introducer = bytes[index]
+        index = bytes.index(after: index)
+
         guard introducer == 0x5b || introducer == 0x4f else {   // '[' or 'O'
+            // OSC and the rest: skip to the end and assume the worst.
             index = bytes.endIndex
             return .other
         }
-        index = bytes.index(after: index)
-        guard index < bytes.endIndex else { return .other }
-        let final = bytes[index]
-        index = bytes.index(after: index)
+
+        // Parameters and intermediates, then a final byte in 0x40…0x7e.
+        var final: UInt8?
+        while index < bytes.endIndex {
+            let byte = bytes[index]
+            index = bytes.index(after: index)
+            if (0x40...0x7e).contains(byte) { final = byte; break }
+        }
+        guard let final else { return .other }
+
         switch final {
-        case 0x41: return .up      // 'A'
-        case 0x42: return .down    // 'B'
+        case 0x41: return .up                       // A
+        case 0x42: return .down                     // B
+        case 0x52, 0x63, 0x6e, 0x74, 0x49, 0x4f:    // R, c, n, t, I, O
+            return .reply
         default:
-            index = bytes.endIndex
             return .other
         }
+    }
+
+    /// Stop trusting the line — unless there is no line yet.
+    ///
+    /// Uncertainty is only ever *about* accumulated text: with an empty line
+    /// there is nothing to be wrong about, and a keystroke we can't model has
+    /// nothing to corrupt. Without this exception the feature never worked at
+    /// all, because a terminal answers the host's queries — device attributes,
+    /// cursor position — through the very same channel as typing, and those
+    /// replies are escape sequences. Every session opened with a handful of
+    /// them, so the line was written off as untrustworthy before the user had
+    /// touched a key, and stayed that way until the first Enter.
+    private mutating func loseCertainty() {
+        isCertain = line.isEmpty
     }
 
     private mutating func killWordBackwards() {

@@ -5,10 +5,13 @@ import Foundation
 
 /// The commands a host has seen, and what to suggest from them.
 ///
-/// Ranked by frecency — how often a command is used, weighted by how recently —
-/// which is what makes the list feel like it knows you rather than like a log.
-/// `git status` typed forty times last month should lose to `git rebase -i`
-/// typed twice this morning, and a plain frequency count gets that backwards.
+/// Ranked a word at a time: given the words already typed, which word follows
+/// them most often and most recently? Frecency still decides — how often,
+/// weighted by how recently — but it is applied to the *next word* rather than
+/// to whole command lines, because a whole-line score cannot know that `status`
+/// follows `zpool` almost always while `destroy` followed it once, on a Tuesday.
+/// Suggesting `zpool destroy` first is the kind of mistake that only has to
+/// happen once.
 ///
 /// Two sources feed it: the commands typed in Sloop, and the host's own shell
 /// history, read once per connect. The second is what makes it useful on the
@@ -68,24 +71,58 @@ public struct CommandHistory: Codable, Equatable, Sendable {
 
     /// The best completions for what's typed so far, most likely first.
     ///
-    /// Returns whole commands, not the remaining text: the caller decides
-    /// whether to show them, and `completion(of:for:)` works out what to send.
+    /// Ranked a word at a time, in context: of the commands that begin the way
+    /// this line begins, which word comes next most often and most recently?
+    /// Whole-line frecency — the first version — ranked `zpool destroy` above
+    /// `zpool status` because it was typed once, recently, and nothing about a
+    /// whole-line score knows that `status` is what follows `zpool` nearly
+    /// every time. A next-word model does, and it is also the model that
+    /// generalises: a command typed for the first time still gets a useful
+    /// suggestion for its second word.
+    ///
+    /// Returns the settled words plus the proposed one, so the bar shows a
+    /// command fragment that reads, and accepting builds the line up a word at
+    /// a time.
     public func suggestions(for prefix: String, limit: Int = 3,
                             now: Date = Date()) -> [String] {
-        let prefix = String(prefix.drop(while: { $0 == " " }))
-        guard !prefix.isEmpty else { return [] }
-        return entries.values
-            .filter { $0.command.hasPrefix(prefix) && $0.command != prefix }
-            .sorted {
-                let left = score($0, now: now), right = score($1, now: now)
-                if left != right { return left > right }
-                return (order[$0.command] ?? 0) > (order[$1.command] ?? 0)
+        let (settled, partial) = CommandTokenizer.context(prefix)
+        guard !settled.isEmpty || !partial.isEmpty else { return [] }
+
+        var scores: [String: Double] = [:]
+        var suggestion: [String: [String]] = [:]
+
+        for entry in entries.values {
+            let words = CommandTokenizer.tokens(entry.command)
+            guard words.count > settled.count,
+                  Array(words.prefix(settled.count)) == settled else { continue }
+
+            let candidate = words[settled.count]
+            if candidate == partial {
+                // The word is complete. Offer what follows it, so a finished
+                // word doesn't blank the bar until a space is typed.
+                if words.count > settled.count + 1 {
+                    let next = words[settled.count + 1]
+                    let key = "\(settled.count + 1)\u{0}\(next)"
+                    scores[key, default: 0] += score(entry, now: now)
+                    suggestion[key] = settled + [candidate, next]
+                }
+            } else if candidate.hasPrefix(partial) {
+                let key = "\(settled.count)\u{0}\(candidate)"
+                scores[key, default: 0] += score(entry, now: now)
+                suggestion[key] = settled + [candidate]
             }
+        }
+
+        let typed = prefix.trimmingCharacters(in: .whitespaces)
+        return scores
+            .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+            .compactMap { suggestion[$0.key]?.joined(separator: " ") }
+            .filter { $0 != typed }
             .prefix(limit)
-            .map(\.command)
+            .map { $0 }
     }
 
-    /// The most recently recorded commands, newest first — what the shell's own
+    /// The most recently recorded commands, newest first    /// The most recently recorded commands, newest first    /// The most recently recorded commands, newest first — what the shell's own
     /// up arrow is walking back through, as far as we know it.
     public func recent(limit: Int) -> [String] {
         entries.values

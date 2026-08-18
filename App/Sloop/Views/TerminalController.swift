@@ -348,8 +348,8 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     /// was ever run — and a suggestion is only ever *offered*. Nothing is sent
     /// until it's tapped.
     private func observeTyping(_ bytes: ArraySlice<UInt8>) {
-        guard suggester != nil else { return }
-        suggester?.observe(bytes)
+        guard let suggester else { return }
+        suggester.observe(bytes)
         refreshSuggestions(hostRedrew: false)
     }
 

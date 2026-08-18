@@ -10,13 +10,32 @@ final class CommandHistoryTests: XCTestCase {
         now.addingTimeInterval(-weeks * 7 * 24 * 3600)
     }
 
-    func testSuggestsCommandsSharingThePrefix() {
+    /// A word at a time, in context: after `git`, which word follows it?
+    func testSuggestsTheNextWordInContext() {
         var history = CommandHistory()
         history.record("git status", at: now)
         history.record("git rebase -i main", at: now)
         history.record("docker ps", at: now)
-        XCTAssertEqual(Set(history.suggestions(for: "git", now: now)),
-                       ["git status", "git rebase -i main"])
+        XCTAssertEqual(Set(history.suggestions(for: "git ", now: now)),
+                       ["git status", "git rebase"])
+    }
+
+    /// `zpool destroy` outranking `zpool status` is the mistake that has to
+    /// only happen once. Whole-line frecency made it, because nothing about a
+    /// line's score knows which word usually follows `zpool`.
+    func testTheUsualNextWordBeatsTheRareOne() {
+        var history = CommandHistory()
+        for _ in 0..<8 { history.record("zpool status", at: now) }
+        history.record("zpool destroy tank/old", at: now)
+        XCTAssertEqual(history.suggestions(for: "zpool ", limit: 1, now: now), ["zpool status"])
+    }
+
+    /// A finished word should offer what comes after it, rather than blanking
+    /// the bar until a space arrives.
+    func testACompleteWordOffersTheOneAfterIt() {
+        var history = CommandHistory()
+        history.record("tail -f /var/log/syslog", at: now)
+        XCTAssertEqual(history.suggestions(for: "tail", limit: 1, now: now), ["tail -f"])
     }
 
     func testNeverSuggestsWhatIsAlreadyTyped() {
@@ -33,7 +52,7 @@ final class CommandHistoryTests: XCTestCase {
         for _ in 0..<40 { history.record("git status", at: weeksAgo(4)) }
         history.record("git rebase -i main", at: now)
         history.record("git rebase -i main", at: now)
-        XCTAssertEqual(history.suggestions(for: "git", limit: 1, now: now), ["git rebase -i main"])
+        XCTAssertEqual(history.suggestions(for: "git ", limit: 1, now: now), ["git rebase"])
     }
 
     /// Same recency, so the count decides.
@@ -41,14 +60,15 @@ final class CommandHistoryTests: XCTestCase {
         var history = CommandHistory()
         history.record("npm run build", at: now)
         for _ in 0..<3 { history.record("npm run test", at: now) }
-        XCTAssertEqual(history.suggestions(for: "npm", limit: 1, now: now), ["npm run test"])
+        // Both begin `npm run`, so the tie is settled at the word after it.
+        XCTAssertEqual(history.suggestions(for: "npm run ", limit: 1, now: now), ["npm run test"])
     }
 
     func testImportedHistoryIsUsableImmediately() {
         var history = CommandHistory()
         history.importLines(["kubectl get pods", "kubectl logs -f api"], at: weeksAgo(1))
         XCTAssertEqual(history.suggestions(for: "kubectl l", limit: 1, now: now),
-                       ["kubectl logs -f api"])
+                       ["kubectl logs"])
     }
 
     /// A line already typed here carries a real count and a real timestamp;
@@ -61,14 +81,14 @@ final class CommandHistoryTests: XCTestCase {
         XCTAssertEqual(history.suggestions(for: "ssh z", limit: 1, now: now), ["ssh zbox"])
         // Still the five uses from today, not one from ten weeks ago.
         for _ in 0..<4 { history.record("ssh other", at: now) }
-        XCTAssertEqual(history.suggestions(for: "ssh", limit: 1, now: now), ["ssh zbox"])
+        XCTAssertEqual(history.suggestions(for: "ssh ", limit: 1, now: now), ["ssh zbox"])
     }
 
     func testNewerImportedLinesOutrankOlderOnesAtTheSameScore() {
         var history = CommandHistory()
         // Shell history files are oldest-first, so the last line is the newest.
         history.importLines(["terraform plan", "terraform apply"], at: weeksAgo(1))
-        XCTAssertEqual(history.suggestions(for: "terraform", limit: 1, now: now),
+        XCTAssertEqual(history.suggestions(for: "terraform ", limit: 1, now: now),
                        ["terraform apply"])
     }
 
@@ -90,7 +110,6 @@ final class CommandHistoryTests: XCTestCase {
         history.record("git push --force-with-lease", at: now)
         let restored = try JSONDecoder().decode(
             CommandHistory.self, from: JSONEncoder().encode(history))
-        XCTAssertEqual(restored.suggestions(for: "git p", now: now),
-                       ["git push --force-with-lease"])
+        XCTAssertEqual(restored.suggestions(for: "git p", now: now), ["git push"])
     }
 }
