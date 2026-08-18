@@ -328,12 +328,25 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     /// The host sees typing, so its own line editing, history and completion all
     /// behave exactly as they would have.
     func acceptSuggestion(_ suggestion: String) {
-        guard let suggester,
-              let completion = suggester.completion(for: suggestion) else { return }
-        send(ArraySlice(Array(completion.utf8)))
+        guard let suggester else { return }
+        send(ArraySlice(suggester.acceptance(of: suggestion)))
     }
 
     /// Feed everything sent to the tracker, and refresh what's on offer.
+    /// Why there is no "don't suggest in full-screen apps" rule here.
+    ///
+    /// There was one, keyed on the alternate screen buffer, meant to keep the
+    /// bar out of vim and htop. tmux uses the alternate buffer too — for the
+    /// whole session — so the rule silenced suggestions inside the very
+    /// workflow this app pushes hardest, `tmux attach` on connect, and the
+    /// feature looked broken on exactly the hosts set up most carefully.
+    ///
+    /// What remains is the tracker's own honesty: a suggestion is offered only
+    /// when the typed line is one it can vouch for, and it stops vouching the
+    /// moment anything it can't model happens. In vim that usually means no
+    /// suggestions anyway, since what gets typed rarely prefixes a command that
+    /// was ever run — and a suggestion is only ever *offered*. Nothing is sent
+    /// until it's tapped.
     private func observeTyping(_ bytes: ArraySlice<UInt8>) {
         guard suggester != nil else { return }
         suggester?.observe(bytes)
@@ -342,12 +355,6 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
 
     private func refreshSuggestions(hostRedrew: Bool) {
         guard let suggester else { return }
-        if hostRedrew, terminalView.getTerminal().isCurrentBufferAlternate {
-            // vim, htop, tmux's copy mode: keystrokes are not a command line
-            // there, and a completion bar over one is noise at best.
-            suggestions = []
-            return
-        }
         suggestions = suggester.suggestions()
     }
 

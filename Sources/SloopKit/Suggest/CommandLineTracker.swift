@@ -25,6 +25,23 @@ public struct CommandLineTracker: Equatable, Sendable {
 
     public init() {}
 
+    /// How far back through the shell's history the user has walked with the
+    /// up arrow, minus any downs. Zero means they're typing a fresh line.
+    ///
+    /// The shell owns its history and we never see what a recall put on the
+    /// line — but it is almost always the same command *we* recorded last, so
+    /// the caller can fill the line in from its own history. Wrong occasionally
+    /// (commands run outside Sloop, a ⌃R search); harmless when wrong, because
+    /// accepting a suggestion clears the line first rather than appending to
+    /// whatever is really there.
+    public private(set) var recallDepth: Int = 0
+
+    /// Replace the line with what the caller believes the shell just recalled.
+    public mutating func setLine(_ line: String) {
+        self.line = line
+        isCertain = true
+    }
+
     /// Whether the line is worth suggesting against: known-good, and long
     /// enough that a prefix means something.
     public var isSuggestable: Bool {
@@ -63,10 +80,19 @@ public struct CommandLineTracker: Equatable, Sendable {
                 killWordBackwards()
 
             case 0x1b:                           // ESC — arrows, meta, anything
-                // Skip the rest of the sequence: whatever it did, we didn't
-                // follow it.
-                index = bytes.endIndex
-                isCertain = false
+                // Up and down are history recall, and the caller can fill in
+                // what they landed on. Every other sequence moves the cursor or
+                // edits the line somewhere we aren't watching.
+                switch escapeSequence(bytes, from: &index) {
+                case .up:
+                    recallDepth += 1
+                    line = ""
+                case .down:
+                    recallDepth = max(0, recallDepth - 1)
+                    line = ""
+                case .other:
+                    isCertain = false
+                }
 
             case 0x20...0x7e:                    // printable ASCII
                 line.append(Character(UnicodeScalar(byte)))
@@ -92,6 +118,34 @@ public struct CommandLineTracker: Equatable, Sendable {
     public mutating func reset() {
         line = ""
         isCertain = true
+        recallDepth = 0
+    }
+
+    private enum EscapeSequence { case up, down, other }
+
+    /// Consume the rest of an escape sequence, reporting whether it was a
+    /// history recall. Arrows arrive as `ESC [ A` or, in application-cursor
+    /// mode, `ESC O A` — a terminal in the second mode is the normal case
+    /// inside readline, so both spellings have to count.
+    private func escapeSequence(_ bytes: ArraySlice<UInt8>,
+                                from index: inout ArraySlice<UInt8>.Index) -> EscapeSequence {
+        guard index < bytes.endIndex else { return .other }
+        let introducer = bytes[index]
+        guard introducer == 0x5b || introducer == 0x4f else {   // '[' or 'O'
+            index = bytes.endIndex
+            return .other
+        }
+        index = bytes.index(after: index)
+        guard index < bytes.endIndex else { return .other }
+        let final = bytes[index]
+        index = bytes.index(after: index)
+        switch final {
+        case 0x41: return .up      // 'A'
+        case 0x42: return .down    // 'B'
+        default:
+            index = bytes.endIndex
+            return .other
+        }
     }
 
     private mutating func killWordBackwards() {

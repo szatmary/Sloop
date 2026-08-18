@@ -57,9 +57,11 @@ final class SuggestionWiringTests: XCTestCase {
         XCTAssertEqual(controller.suggestions, ["git status --short"])
     }
 
-    /// Accepting sends only the part not yet typed — the host must see the
-    /// same keystrokes it would have got from a person finishing the line.
-    func testAcceptingASuggestionSendsOnlyTheRemainder() throws {
+    /// Accepting clears the line and types the whole command, so it lands
+    /// correctly even when our model of what's on screen was wrong — which it
+    /// can be after a history recall, where the line is inferred rather than
+    /// observed.
+    func testAcceptingASuggestionClearsTheLineFirst() throws {
         var history = CommandHistory()
         history.record("docker compose up -d")
         try store.save(history, for: host)
@@ -70,6 +72,24 @@ final class SuggestionWiringTests: XCTestCase {
         }
         controller.acceptSuggestion("docker compose up -d")
         XCTAssertEqual(controller.typedLine, "docker compose up -d")
+    }
+
+    /// Pressing up recalls a command in the shell, and the shell never says
+    /// which. Our own history is the same list in the same order, so the line
+    /// is filled in from it and suggestions keep working while the recalled
+    /// command is edited.
+    func testPressingUpFillsTheLineFromHistory() throws {
+        var history = CommandHistory()
+        history.record("terraform plan")
+        history.record("terraform apply -auto-approve")
+        try store.save(history, for: host)
+
+        let controller = makeController()
+        controller.send(source: controller.terminalView, data: ArraySlice([0x1b, 0x5b, 0x41]))
+        XCTAssertEqual(controller.typedLine, "terraform apply -auto-approve")
+
+        controller.send(source: controller.terminalView, data: ArraySlice([0x1b, 0x5b, 0x41]))
+        XCTAssertEqual(controller.typedLine, "terraform plan")
     }
 
     /// Off means off: nothing tracked, nothing suggested, nothing written.

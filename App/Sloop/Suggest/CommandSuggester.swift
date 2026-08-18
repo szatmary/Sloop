@@ -33,6 +33,21 @@ final class CommandSuggester {
             history.record(command)
             persist()
         }
+        fillInRecalledLine()
+    }
+
+    /// The up arrow put *something* on the line, and the shell won't tell us
+    /// what. Our own history is the best available guess: it is the same list,
+    /// in the same order, minus anything run outside Sloop. Filling it in is
+    /// what lets suggestions keep working while someone walks back through
+    /// history and then edits what they find — which is how a shell is
+    /// actually used.
+    private func fillInRecalledLine() {
+        let depth = tracker.recallDepth
+        guard depth > 0 else { return }
+        let recent = history.recent(limit: depth)
+        guard recent.count == depth, let recalled = recent.last else { return }
+        tracker.setLine(recalled)
     }
 
     /// What we believe is on the command line right now.
@@ -45,10 +60,17 @@ final class CommandSuggester {
         return history.suggestions(for: tracker.line, limit: limit)
     }
 
-    /// What still has to be typed to reach `suggestion`.
-    func completion(for suggestion: String) -> String? {
-        guard tracker.isSuggestable else { return nil }
-        return CommandHistory.completion(of: suggestion, for: tracker.line)
+    /// The keystrokes that make the line read exactly `suggestion`: kill what's
+    /// there, then type the whole thing.
+    ///
+    /// Not "the part not yet typed", which was the first version. That is right
+    /// only while our model of the line is right, and after a history recall it
+    /// is a guess — a good one, but a guess. Clearing first makes acceptance
+    /// correct even when the guess was wrong: ⌃U is what every shell binds to
+    /// discard the line, so the result is the command the user tapped and
+    /// nothing else, whatever was really on screen.
+    func acceptance(of suggestion: String) -> [UInt8] {
+        [0x15] + Array(suggestion.utf8)   // ⌃U, then the command
     }
 
     /// Read the host's own shell history over the connection that is already

@@ -85,6 +85,15 @@ public struct CommandHistory: Codable, Equatable, Sendable {
             .map(\.command)
     }
 
+    /// The most recently recorded commands, newest first — what the shell's own
+    /// up arrow is walking back through, as far as we know it.
+    public func recent(limit: Int) -> [String] {
+        entries.values
+            .sorted { (order[$0.command] ?? 0) > (order[$1.command] ?? 0) }
+            .prefix(limit)
+            .map(\.command)
+    }
+
     /// What still has to be typed to turn `prefix` into `suggestion`, or nil if
     /// the suggestion doesn't extend it.
     public static func completion(of suggestion: String, for prefix: String) -> String? {
