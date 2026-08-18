@@ -130,15 +130,19 @@ public struct KeyboardLayout: Equatable, Sendable {
     /// that match each other, not a keyboard shrunk to its densest row. A row
     /// too crowded for this unit gets its own smaller one instead (see
     /// `frames`), which is what the symbol row has always effectively used.
-    private func letterUnit(content: Double, spacing: Double, keypadUnit: Double) -> Double {
-        // Main blocks only: the number pad lives in the slack the letter rows
-        // leave, so its columns must not drag the letter unit down. But the
-        // width it occupies does reduce what's left for them, which is what
-        // `keypadUnit` accounts for.
+    private func letterUnit(content: Double, spacing: Double) -> Double {
+        // Solved for directly rather than estimated. Every block on a row —
+        // letters, the navigation cluster, the number pad — is drawn at one
+        // unit, so a row that carries all three fits when
         //
-        // Alphabetic, not merely "a character key": the symbol row is nothing
-        // but character keys, and letting it qualify is what made the alphabet
-        // shrink to fit twenty symbols.
+        //     u × (all slots) + (all gaps) + (the gap between blocks) ≤ content
+        //
+        // The first version guessed instead: it sized the letters as though the
+        // cluster weren't there, sized the cluster at *that* unit, then squeezed
+        // the letters into what was left. The cluster was then drawn at the
+        // squeezed unit, so it never used the room it had been charged for, and
+        // some 250pt of the screen sat empty beside the letters — the visible
+        // symptom being a keyboard adrift in white space.
         var smallest: Double?
         for (row, columns) in zip(rows, keypadColumns) {
             let main = Array(row.dropLast(columns))
@@ -149,9 +153,12 @@ public struct KeyboardLayout: Equatable, Sendable {
                 return false
             }
             guard carriesLetters else { continue }
-            let region = regionForMainBlock(row: row, columns: columns, content: content,
-                                            spacing: spacing, keypadUnit: keypadUnit)
-            let unit = maximumUnit(in: main, content: region, spacing: spacing)
+
+            let slots = fixedSlots(in: row)
+                + (row.contains { $0.width == .flexible } ? 2 : 0)
+            let gaps = spacing * Double(max(row.count - 1, 0))
+                + (columns > 0 ? spacing : 0)   // the gap between the blocks
+            let unit = slots > 0 ? (content - gaps) / slots : content
             smallest = min(smallest ?? unit, unit)
         }
         return smallest ?? content
@@ -204,14 +211,9 @@ public struct KeyboardLayout: Equatable, Sendable {
     /// `layoutSubviews`.
     public func frames(width: Double, padding: Double, spacing: Double) -> [KeyFrame] {
         let content = width - padding * 2
-        // Letter and pad widths depend on each other: the pad is drawn at the
-        // letter unit, and the letters have less room because of it. Size them
-        // as though there were no pad, then again against the pad that width
-        // implies. The second pass only shrinks, and the result is stable —
-        // sizing the pad from the *first* pass keeps the region a touch
-        // conservative rather than oscillating.
-        let withoutPad = letterUnit(content: content, spacing: spacing, keypadUnit: 0)
-        let letters = letterUnit(content: content, spacing: spacing, keypadUnit: withoutPad)
+        // One unit for letters, cluster and pad alike, sized so the busiest
+        // letter row fits all three.
+        let letters = letterUnit(content: content, spacing: spacing)
         let keypad = letters
 
         var result: [KeyFrame] = []
@@ -267,68 +269,70 @@ public struct KeyboardLayout: Equatable, Sendable {
     // MARK: iPad — five rows, symbols visible
 
     private static func pad(_ context: Context) -> KeyboardLayout {
-        // Shaped like the keyboard the hands already know: letters in the
-        // middle, then a navigation and arrow cluster, then the number pad down
-        // the edge, and a bottom row of modifiers and space.
+        // The US layout, in its physical positions: the bracket and quote keys
+        // beside the letters they sit next to on a real keyboard, the number
+        // pad down the edge, a navigation cluster between them, and modifiers
+        // where the hands expect to find them.
         //
-        // No number row. The pad carries the digits, and a second copy bought
-        // nothing but a row's worth of height and narrower keys everywhere —
-        // shifted digits still produce !@#$… from the pad, since the shift rule
-        // is in `KeyEncoder` and applies wherever the digit is typed. Escape
-        // takes the top-left corner it occupies on a real keyboard.
-        let symbolRow: [KeyCap] = [.key(.escape)]
-            + symbols.map { KeyCap.character($0) } + [KeyCap.character("\"")]
-
+        // Everything else comes from shift, exactly as it does on hardware —
+        // `{` is shift-`[`, `:` is shift-`;`, `~` is shift-`` ` ``, `*` is
+        // shift-`8`. That is what removed the twenty-key symbol bar along the
+        // top and a whole row of height with it: those keys were spelling out
+        // by hand what the shift key already means.
         let mainRows: [[KeyCap]] = [
-            symbolRow,
-            [.key(.tab)]
+            // ANSI rows, in their ANSI order. Tab left of Q, `[ ] \` after P,
+            // `; '` after L, `, . /` after M, shift at both ends of that row,
+            // control in the caps-lock position — which is where anyone who
+            // uses a terminal puts it anyway.
+            [.key(.escape), .key(.tab)]
                 + "qwertyuiop".map { KeyCap.character($0) }
-                + [.key(.backspace, width: .wide(1.5), repeats: true)],
-            "asdfghjkl".map { KeyCap.character($0) }
-                + [.key(.return, width: .wide(1.5))],
-            "zxcvbnm".map { KeyCap.character($0) }
-                + [.character(","), .character(".")],
-            // All three modifiers together on the bottom row, where the thumbs
-            // are, rather than scattered down the left-hand edge. The space bar
-            // gives up the width — it had far more than it needed once the
-            // arrows moved into the cluster.
-            [.modifier(.control), .modifier(.option), .modifier(.shift),
-             .character(" ", width: .flexible),
-             .command(.dismissKeyboard)],
+                + [.character("["), .character("]"), .character("\\"),
+                   .key(.backspace, width: .wide(1.5), repeats: true)],
+            [.modifier(.control, width: .wide(1.75))]
+                + "asdfghjkl".map { KeyCap.character($0) }
+                + [.character(";"), .character("'"),
+                   .key(.return, width: .wide(2.25))],
+            [.modifier(.shift, width: .wide(2.25))]
+                + "zxcvbnm".map { KeyCap.character($0) }
+                + [.character(","), .character("."), .character("/"),
+                   .modifier(.shift, width: .wide(2.25))],
+            // The modifier row, then space. `` ` `` sits beside it because the
+            // number row it belongs to is the row this keyboard gives up to the
+            // number pad; everything else that row carried — the digits, and
+            // `- =` — is on the pad.
+            [.modifier(.control), .modifier(.option), .character("`"),
+             .character(" ", width: .wide(6)),
+             .modifier(.option), .command(.dismissKeyboard)],
         ]
 
-        // Navigation and arrows, three columns, laid out as they are on a full
-        // keyboard: the paging keys as a block, and the arrows in an inverted T
-        // so ↑ sits directly above ↓ with ← and → either side. The blanks are
-        // what make that shape possible — a T needs the holes as much as the
-        // keys, and the empty space above the arrows is exactly what a physical
-        // keyboard has there too.
+        // Navigation and arrows, three columns, as on a full keyboard: paging
+        // keys as a block, arrows in an inverted T so ↑ sits directly above ↓
+        // with ← and → either side. The blanks are what make that shape
+        // possible — a T needs its holes as much as its keys.
         let navigationRows: [[KeyCap]] = [
             [.key(.delete), .key(.home), .key(.pageUp)],
             [.blank, .key(.end), .key(.pageDown)],
-            [.blank, .blank, .blank],
             [.blank, .key(.up, repeats: true), .blank],
             [.key(.left, repeats: true), .key(.down, repeats: true),
              .key(.right, repeats: true)],
         ]
 
-        // 789 / 456 / 123 / 0 . — the arrangement fingers already know, with
-        // the operators above it.
+        // A numeric keypad, in the shape every one of them has: digits in the
+        // 789/456/123/0 block with the operator column down the right.
         let keypadRows: [[KeyCap]] = [
-            [.character("/"), .character("*"), .character("-")],
-            [.character("7"), .character("8"), .character("9")],
-            [.character("4"), .character("5"), .character("6")],
-            [.character("1"), .character("2"), .character("3")],
-            [.character("0"), .character("."), .character("=")],
+            [.character("7"), .character("8"), .character("9"), .character("/")],
+            [.character("4"), .character("5"), .character("6"), .character("*")],
+            [.character("1"), .character("2"), .character("3"), .character("-")],
+            [.character("0"), .character("."), .character("="), .blank],
         ]
 
         let trailing = zip(navigationRows, keypadRows).map { $0 + $1 }
         return KeyboardLayout(
             rows: zip(mainRows, trailing).map { $0 + $1 },
             keypadColumns: trailing.map(\.count),
-            // iPad keys are wide, so they can be short without becoming hard
-            // to hit — which is the whole point, since height is what a
-            // terminal wants back.
+            // iPad keys are wide, so they can be short without becoming hard to
+            // hit — which is the whole point, since height is what a terminal
+            // wants back.
             rowHeight: context.orientation == .landscape ? 38 : 40)
     }
 

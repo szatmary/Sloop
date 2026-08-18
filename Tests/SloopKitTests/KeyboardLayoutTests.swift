@@ -24,9 +24,18 @@ final class KeyboardLayoutTests: XCTestCase {
 
     // MARK: Shape
 
-    func testPadGetsFiveRowsIncludingADedicatedSymbolRow() {
-        XCTAssertEqual(KeyboardLayout.resolve(for: padLandscape).rows.count, 5)
-        XCTAssertEqual(KeyboardLayout.resolve(for: padPortrait).rows.count, 5)
+    /// Four rows on iPad, and none of them a symbol bar. The bar spelled out
+    /// by hand what shift already means — `{` is shift-`[`, `~` is shift-`` ` ``
+    /// — and cost a row of height for it, which is the thing a terminal wants
+    /// back most.
+    func testPadGetsFourRowsAndNoSymbolBar() {
+        for context in [padLandscape, padPortrait] {
+            let layout = KeyboardLayout.resolve(for: context)
+            XCTAssertEqual(layout.rows.count, 4, "\(context)")
+            // The top row is the qwerty row, not a bar of symbols above it.
+            XCTAssertTrue(layout.rows[0].contains { $0.primary == .character("q") },
+                          "\(context): the top row should be the letters")
+        }
     }
 
     func testPhoneDropsTheSymbolRow() {
@@ -48,23 +57,27 @@ final class KeyboardLayoutTests: XCTestCase {
 
     // MARK: The invariant that keeps the two tables honest
 
+    /// Every character a layout can type: by tap, by drag, or by holding
+    /// shift. Shift belongs in the count — it is how a real keyboard reaches
+    /// `{`, `:`, `~` and `?`, and it is why this keyboard needs no symbol bar
+    /// spelling them out by hand.
+    private func typeableCharacters(_ context: KeyboardLayout.Context) -> Set<Character> {
+        let direct = KeyboardLayout.resolve(for: context).rows
+            .flatMap { $0 }
+            .reduce(into: Set<Character>()) { $0.formUnion($1.reachableCharacters) }
+        return direct.union(direct.map { KeyboardLayout.shifted($0) })
+    }
+
     func testPhoneAndPadReachTheSameCharacters() {
-        func characters(_ context: KeyboardLayout.Context) -> Set<Character> {
-            KeyboardLayout.resolve(for: context).rows
-                .flatMap { $0 }
-                .reduce(into: Set<Character>()) { $0.formUnion($1.reachableCharacters) }
-        }
-        XCTAssertEqual(characters(phonePortrait), characters(padLandscape),
-                       "Dropping the symbol row must not drop any character")
+        XCTAssertEqual(typeableCharacters(phonePortrait), typeableCharacters(padLandscape),
+                       "The two layouts must type the same set")
     }
 
     func testEveryShellCharacterIsReachable() {
         // The characters a shell actually needs, beyond letters and digits.
         let required: Set<Character> = Set("~`|\\/[]{}<>-_=+;:'\",.")
         for context in [padLandscape, padPortrait, phonePortrait, phoneLandscape] {
-            let reachable = KeyboardLayout.resolve(for: context).rows
-                .flatMap { $0 }
-                .reduce(into: Set<Character>()) { $0.formUnion($1.reachableCharacters) }
+            let reachable = typeableCharacters(context)
             XCTAssertTrue(required.isSubset(of: reachable),
                           "missing \(required.subtracting(reachable)) in \(context)")
         }
@@ -73,10 +86,7 @@ final class KeyboardLayoutTests: XCTestCase {
     func testLettersAndDigitsAreReachableEverywhere() {
         let required = Set("abcdefghijklmnopqrstuvwxyz0123456789")
         for context in [padLandscape, padPortrait, phonePortrait, phoneLandscape] {
-            let reachable = KeyboardLayout.resolve(for: context).rows
-                .flatMap { $0 }
-                .reduce(into: Set<Character>()) { $0.formUnion($1.reachableCharacters) }
-            XCTAssertTrue(required.isSubset(of: reachable))
+            XCTAssertTrue(required.isSubset(of: typeableCharacters(context)))
         }
     }
 
@@ -473,25 +483,20 @@ final class KeyboardLayoutTests: XCTestCase {
             frames[flat.firstIndex(where: predicate)!]
         }
 
-        // Letters are 46.5248. The navigation and arrow cluster costs three
-        // columns on every row — an inverted T needs three, and the blanks
-        // holding its shape are slots like any other — so letters gave up
-        // 62.1165 for it. That is the trade the cluster is worth or isn't;
-        // it is not hidden in the layout, it is this number.
-        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 46.5248, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 46.5248, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 46.5248, accuracy: 0.001)
-        // The pad and the cluster are drawn at the letter unit too, so the
-        // keyboard has one key size, not three.
-        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 46.5248, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.up) }.width, 46.5248, accuracy: 0.001)
-        // Wide caps stay a multiple of it: 1.5 × 46.5248.
-        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 69.7872, accuracy: 0.001)
-        // The symbol row is the one row too crowded for the letter unit, so it
-        // takes the largest that fits — 20 caps of symbols plus escape.
-        XCTAssertEqual(frame { $0.primary == .character("~") }.width, 39.4691, accuracy: 0.001)
-        // The bottom row is three modifiers and space, so space absorbs what
-        // the arrows and punctuation used to take.
-        XCTAssertEqual(frame { $0.width == .flexible }.width, 690.752, accuracy: 0.001)
+        // One unit, 47.5319, shared by the letters, the navigation cluster and
+        // the number pad — the keyboard has one key size, not three. It is
+        // solved for directly: the busiest letter row has to fit all three
+        // blocks plus the gap between them, and that equation sets it.
+        XCTAssertEqual(frame { $0.primary == .character("q") }.width, 47.5319, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 47.5319, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 47.5319, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.up) }.width, 47.5319, accuracy: 0.001)
+        // ANSI widths, as multiples of that unit: 1.75 for control at caps
+        // lock, 2.25 for shift, 1.5 for backspace.
+        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 83.1809, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 106.9468, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 71.2979, accuracy: 0.001)
+        // Six units of space bar, not the 690pt runway `.flexible` gave it.
+        XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 285.1915, accuracy: 0.001)
     }
 }
