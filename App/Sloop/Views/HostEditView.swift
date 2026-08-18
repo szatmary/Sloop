@@ -19,6 +19,7 @@ struct HostEditView: View {
     @State private var pastedPassphrase: String = ""
     @State private var saveError: String?
     @State private var showingMoshHelp = false
+    @State private var showingSuggestionsHelp = false
     @FocusState private var commandFocused: Bool
 
     /// Ready-made on-connect commands. Reattaching to a multiplexer is why
@@ -217,13 +218,16 @@ struct HostEditView: View {
                 }
 
                 Section("Options") {
-                    Toggle("Suggest commands", isOn: $host.suggestions)
-                    Text("Learns the commands you run on this host and offers the "
-                       + "word that usually comes next. Kept on this device, for this "
-                       + "host alone, and never sent anywhere. Switching it off also "
-                       + "stops Sloop keeping a record of what you type here.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    HStack {
+                        Toggle("Suggest commands", isOn: $host.suggestions)
+                        Button {
+                            showingSuggestionsHelp = true
+                        } label: {
+                            Image(systemName: "info.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("About command suggestions")
+                    }
 
                     HStack {
                         Toggle("Use Mosh", isOn: $host.useMosh)
@@ -290,6 +294,28 @@ struct HostEditView: View {
                 }
             }
             #endif
+            .alert("Command Suggestions", isPresented: $showingSuggestionsHelp) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("""
+                As you type, Sloop offers the word that usually comes next, \
+                ranked by how often and how recently it followed what you have \
+                already typed on this host. Tap a suggestion to use it.
+
+                It learns from the commands you run here, and reads this host's \
+                own shell history once per connection so it is useful before \
+                you have typed anything.
+
+                Nothing leaves this device. The history is stored here, for this \
+                host alone. It is never synced — not to iCloud, not to another \
+                device you own — and never sent to a server, to Sloop's author, \
+                or to anyone else, for any reason. There is no analytics, no \
+                telemetry and no account.
+
+                With this switched off, Sloop keeps no record of what you type \
+                on this host.
+                """)
+            }
             .alert("What is Mosh?", isPresented: $showingMoshHelp) {
                 Button("OK", role: .cancel) {}
             } message: {
