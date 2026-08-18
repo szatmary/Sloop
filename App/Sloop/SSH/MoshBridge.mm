@@ -229,12 +229,18 @@ static void mosh_run_loop(MoshSession *s) {
       if (network.counterparty_shutdown_ack_sent()) {
         break;
       }
-      // Give up if the server has gone silent for too long.
-      if (network.get_remote_state_num() != 0 &&
-          Network::timestamp() - network.get_latest_remote_state().timestamp > 15000) {
-        if (close_reason.empty()) close_reason = "Mosh session timed out";
-        break;
-      }
+      // Deliberately no "server went quiet" timeout. Outlasting silence is
+      // the entire point of Mosh: the link drops in a lift, the device
+      // suspends, Wi-Fi hands over to cellular, and the session is expected
+      // to still be there afterwards. Upstream mosh-client kills nothing on
+      // its own — it reports "last contact N seconds ago" and waits.
+      //
+      // A 15s kill used to live here. It could never fire while the clock was
+      // frozen (see freeze_timestamp above), so it went unnoticed; once the
+      // clock advanced it would have ended a session after fifteen quiet
+      // seconds — below even mosh's own SERVER_ASSOCIATION_TIMEOUT of 40s,
+      // and triggered precisely by the suspend/resume and network-change
+      // cases the roaming support exists to handle.
     }
   } catch (const Network::NetworkException &e) {
     close_reason = std::string("network: ") + e.what();
