@@ -6,7 +6,6 @@ import Foundation
 /// Message type numbers from draft-miller-ssh-agent. Fixed by the wire.
 enum AgentMessage {
     static let failure: UInt8 = 5
-    static let success: UInt8 = 6
     static let requestIdentities: UInt8 = 11
     static let identitiesAnswer: UInt8 = 12
     static let signRequest: UInt8 = 13
@@ -27,6 +26,10 @@ public enum AgentProtocolError: Error, Equatable {
     case frameTooLarge(UInt32)
     /// A frame header of zero: there is no message without a type byte.
     case emptyFrame
+    /// A well-formed message's fields were fully read, but bytes remain in
+    /// the payload. The message is not what it claims to be, so it is
+    /// refused rather than partially honoured.
+    case trailingBytes
 }
 
 /// Accumulates bytes off the agent channel and hands back one complete
@@ -83,13 +86,17 @@ public enum AgentRequest: Equatable {
 
         switch type {
         case AgentMessage.requestIdentities:
+            guard reader.isAtEnd else { throw AgentProtocolError.trailingBytes }
             return .requestIdentities
         case AgentMessage.signRequest:
             let blob = try reader.readString()
             let data = try reader.readString()
             let flags = try reader.readUInt32()
+            guard reader.isAtEnd else { throw AgentProtocolError.trailingBytes }
             return .sign(keyBlob: blob, data: data, flags: flags)
         default:
+            // An unimplemented message type is not malformed; its payload is
+            // not ours to validate.
             return .unsupported(type: type)
         }
     }

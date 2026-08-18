@@ -74,6 +74,20 @@ final class AgentProtocolTests: XCTestCase {
         XCTAssertThrowsError(try AgentRequest.parse([13, 0x00, 0x00]))
     }
 
+    func testRequestIdentitiesWithTrailingByteThrows() {
+        XCTAssertThrowsError(try AgentRequest.parse([11, 0x00]))
+    }
+
+    func testSignRequestWithTrailingByteThrows() {
+        var writer = SSHWireWriter()
+        writer.writeByte(13)
+        writer.writeString(ed25519Blob)
+        writer.writeString(Array("challenge".utf8))
+        writer.writeUInt32(4)
+
+        XCTAssertThrowsError(try AgentRequest.parse(writer.bytes + [0x00]))
+    }
+
     // MARK: Response building
 
     func testIdentitiesAnswerListsEachKey() throws {
