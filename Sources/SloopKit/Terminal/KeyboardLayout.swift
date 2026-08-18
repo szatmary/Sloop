@@ -111,24 +111,44 @@ public struct KeyboardLayout: Equatable, Sendable {
             .character("k", secondary: .character("'")),
             .character("l", secondary: .character("\"")),
         ]
+        // `,` and `.` ride as secondaries on `n`/`m`, mirroring where they sit
+        // on a physical keyboard, rather than as plain keys in the bottom row.
+        // That row already carries both modifiers, the arrows, space, and
+        // dismiss; two more plain keys there is what pushed it to 17 caps
+        // (~18.7pt wide on a 393pt screen) against the digit row's 12
+        // (~29.3pt) — see CompactKeyboardView's slot algorithm. Moving `up`/
+        // `down` up to the rows above (mirroring the iPad table, which spreads
+        // them into the tab and control rows) and `,`/`.` onto secondaries
+        // brings the bottom row to 13 caps (~24.9pt).
+        let bottomLetters: [KeyCap] = [
+            .character("z"), .character("x"), .character("c"), .character("v"),
+            .character("b"),
+            .character("n", secondary: .character(",")),
+            .character("m", secondary: .character(".")),
+        ]
 
         return KeyboardLayout(
             rows: [
                 [.key(.escape)] + digits
                     + [.key(.backspace, repeats: true)],
-                [.key(.tab)] + "qwertyuiop".map { KeyCap.character($0) },
-                [.modifier(.control)] + homeRow + [.key(.return)],
+                [.key(.tab)] + "qwertyuiop".map { KeyCap.character($0) }
+                    + [.key(.up, repeats: true)],
+                [.modifier(.control)] + homeRow
+                    + [.key(.return), .key(.down, repeats: true)],
                 [.modifier(.option), .modifier(.shift)]
-                    + "zxcvbnm".map { KeyCap.character($0) }
-                    + [.character(","), .character("."),
-                       .character(" ", width: .flexible),
-                       .key(.left, repeats: true), .key(.down, repeats: true),
-                       .key(.up, repeats: true), .key(.right, repeats: true),
+                    + bottomLetters
+                    + [.character(" ", width: .flexible),
+                       .key(.left, repeats: true), .key(.right, repeats: true),
                        .command(.dismissKeyboard)],
             ],
-            // Portrait keys are ~39pt wide on a 393pt screen and need height to
-            // stay hittable. Landscape has to give some of it back: four rows
-            // at portrait height would eat over half a ~393pt-tall screen.
+            // Per CompactKeyboardView's slot algorithm (padding 4, spacing 3),
+            // a 393pt-wide portrait screen renders the digit/tab/control rows
+            // (12 unit-width caps each) at ~29.3pt, and the modifier-bearing
+            // bottom row (13 caps, one flexible) at ~24.9pt — both narrower
+            // than Apple's own ~32pt keys, and both needing height to stay
+            // hittable. Landscape has to give some of that height back: four
+            // rows at the portrait row height would eat over half a ~393pt-
+            // tall screen.
             rowHeight: context.orientation == .portrait ? 52 : 40)
     }
 

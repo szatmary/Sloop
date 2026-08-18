@@ -147,8 +147,11 @@ value types. It holds the layout tables and the rule that distinguishes them:
   mapping is worth more than an optimal one.
 
 `resolve` also returns a row height, which varies by context rather than being
-fixed: iPhone portrait keys are narrow (~39pt on a 393pt screen) and want height
-to compensate, while iPad landscape keys are wide and can afford to be short.
+fixed: iPhone portrait keys are narrow (per `CompactKeyboardView`'s slot
+algorithm — padding 4, spacing 3 — a 393pt screen renders the 12-unit-cap
+digit/tab/control rows at ~29.3pt, and the modifier-bearing bottom row at
+~24.9pt, both under Apple's own ~32pt key width) and want height to compensate,
+while iPad landscape keys are wide and can afford to be short.
 **iPhone landscape is the hard case** — the screen is only ~393pt tall, so a
 four-row keyboard must use short rows or it consumes more than half the display.
 Treat iPhone landscape as the layout most likely to need its own row height, and

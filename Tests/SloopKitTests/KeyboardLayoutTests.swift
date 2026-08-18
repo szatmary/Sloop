@@ -115,6 +115,42 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
+    // MARK: Coverage of the caps that never appear in a `reachableCharacters`
+    // set — losing one of these is silent to every test above.
+
+    func testEveryLayoutCarriesEssentialModifiersAndKeys() {
+        // `KeyCap.Value` is Equatable but not Hashable, so `contains(where:)`
+        // rather than a Set.
+        let required: [KeyCap.Value] = [
+            .modifier(.shift), .modifier(.control), .modifier(.option),
+            .key(.escape), .key(.tab), .key(.return),
+        ]
+        for context in [padLandscape, padPortrait, phonePortrait, phoneLandscape] {
+            let caps = KeyboardLayout.resolve(for: context).rows.flatMap { $0 }
+            for value in required {
+                XCTAssertTrue(caps.contains { $0.primary == value },
+                              "\(value) missing from \(context)")
+            }
+        }
+    }
+
+    func testDirectAndShiftedCharactersCoverPrintableASCII() {
+        // Neither `testEveryShellCharacterIsReachable` nor
+        // `testShiftedDigitsFollowUSQWERTY` alone proves a shifted symbol like
+        // `$` or `?` is actually reachable on a given layout: one checks
+        // direct characters, the other checks `shifted()` in isolation. This
+        // joins them.
+        let printableASCII = Set((0x20...0x7e).map { Character(UnicodeScalar($0)!) })
+        for context in [padLandscape, padPortrait, phonePortrait, phoneLandscape] {
+            let direct = KeyboardLayout.resolve(for: context).rows
+                .flatMap { $0 }
+                .reduce(into: Set<Character>()) { $0.formUnion($1.reachableCharacters) }
+            let reachable = direct.union(direct.map(KeyboardLayout.shifted))
+            XCTAssertTrue(printableASCII.isSubset(of: reachable),
+                          "missing \(printableASCII.subtracting(reachable)) in \(context)")
+        }
+    }
+
     // MARK: Row height
 
     func testRowHeightIsShorterOnPadThanPhonePortrait() {
