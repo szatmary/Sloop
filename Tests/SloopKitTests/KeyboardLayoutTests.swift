@@ -141,18 +141,6 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    func testEveryLayoutCanCloseItsTab() {
-        // `KeyboardAccessoryBar`'s ✕ is the only touch-reachable way to close
-        // a session when the software keyboard is up; compact mode replaces
-        // that bar entirely, so every layout must carry its own way to close
-        // the tab or a session opened in compact mode is unclosable by touch.
-        for context in [padLandscape, padPortrait, phonePortrait, phoneLandscape] {
-            let caps = KeyboardLayout.resolve(for: context).rows.flatMap { $0 }
-            XCTAssertTrue(caps.contains { $0.primary == .command(.closeTab) },
-                          "no way to close the tab in \(context)")
-        }
-    }
-
     func testBackspaceAndArrowsRepeat() {
         for context in [padLandscape, phonePortrait] {
             let caps = KeyboardLayout.resolve(for: context).rows.flatMap { $0 }
@@ -464,18 +452,17 @@ final class KeyboardLayoutTests: XCTestCase {
         }
 
         // Every row draws at the letter unit, which is whatever the tightest
-        // letter row can afford. That's the bottom row: 14 caps, 13 fixed slots
-        // plus two reserved for the space bar, so (385 - 13×3) / 15 = 23.0667.
-        // The digit and qwerty rows could afford 29.3333 on their own and are
-        // centred at 23.0667 instead — letters that change width between rows
-        // is what this gives up 6pt to avoid.
-        XCTAssertEqual(frame { $0.primary == .key(.escape) }.width, 23.0667, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 23.0667, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 23.0667, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.option) }.width, 23.0667, accuracy: 0.001)
-        // The space bar takes its row's slack: 385 - 13×3 - 13×23.0667, which
-        // is exactly its two-unit floor here.
-        XCTAssertEqual(frame { $0.width == .flexible }.width, 46.1333, accuracy: 0.001)
+        // letter row can afford — the bottom row, at 24.9286 now that the
+        // close-tab key is gone from it. The digit and qwerty rows could
+        // afford 29.3333 on their own and are centred at the shared unit
+        // instead: letters that change width between rows is what that avoids.
+        XCTAssertEqual(frame { $0.primary == .key(.escape) }.width, 24.9286, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 24.9286, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 24.9286, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.option) }.width, 24.9286, accuracy: 0.001)
+        // The space bar takes its row's slack, which here is exactly its
+        // two-unit floor.
+        XCTAssertEqual(frame { $0.width == .flexible }.width, 49.8571, accuracy: 0.001)
     }
 
     func testPadLandscapeSlotWidthsMatchHandComputedValues() {
@@ -486,24 +473,25 @@ final class KeyboardLayoutTests: XCTestCase {
             frames[flat.firstIndex(where: predicate)!]
         }
 
-        // Letters are 62.1167 now. They were 54.7439 when a number row sat
-        // above the letters duplicating the pad, and 67.1176 before the pad
-        // existed at all — dropping the duplicate row bought most of the
-        // difference back, and the navigation keys moved into the space
-        // uniform letters leave beside them rather than being crushed onto the
-        // end of the symbol row.
-        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 62.1165, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 62.1165, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 62.1165, accuracy: 0.001)
-        // The pad is drawn at the letter unit, so it isn't a second size.
-        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 62.1165, accuracy: 0.001)
-        // Wide caps stay a multiple of it: 1.5 × 62.1165.
-        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 93.1748, accuracy: 0.001)
+        // Letters are 46.5248. The navigation and arrow cluster costs three
+        // columns on every row — an inverted T needs three, and the blanks
+        // holding its shape are slots like any other — so letters gave up
+        // 62.1165 for it. That is the trade the cluster is worth or isn't;
+        // it is not hidden in the layout, it is this number.
+        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 46.5248, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 46.5248, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 46.5248, accuracy: 0.001)
+        // The pad and the cluster are drawn at the letter unit too, so the
+        // keyboard has one key size, not three.
+        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 46.5248, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.up) }.width, 46.5248, accuracy: 0.001)
+        // Wide caps stay a multiple of it: 1.5 × 46.5248.
+        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 69.7872, accuracy: 0.001)
         // The symbol row is the one row too crowded for the letter unit, so it
         // takes the largest that fits — 20 caps of symbols plus escape.
-        XCTAssertEqual(frame { $0.primary == .character("~") }.width, 44.3167, accuracy: 0.001)
-        // The bottom row is modifiers and space now, so the space bar is what
-        // absorbs the room the old bottom row spent on arrows and punctuation.
-        XCTAssertEqual(frame { $0.width == .flexible }.width, 599.9512, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character("~") }.width, 39.4691, accuracy: 0.001)
+        // The bottom row is three modifiers and space, so space absorbs what
+        // the arrows and punctuation used to take.
+        XCTAssertEqual(frame { $0.width == .flexible }.width, 690.752, accuracy: 0.001)
     }
 }

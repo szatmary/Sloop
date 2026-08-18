@@ -170,23 +170,10 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
                 // typed via a reattached keyboard would still be modified.
                 clearArmedModifiers()
                 controller.dismissKeyboard()
-            case .closeTab:
-                // Routed through the controller rather than handled here,
-                // because closing a tab needs a confirmation dialog — a
-                // mis-tap must not drop a live SSH session — and that dialog
-                // lives in TerminalPane's SwiftUI `@State`. This view only
-                // holds a weak reference to `controller`, not to the pane, so
-                // `controller.onCloseTabRequested` is the bridge: TerminalPane
-                // sets it once (in `onAppear`) to raise its own confirmation,
-                // the same way `KeyboardAccessoryBar`'s ✕ already does.
-                //
-                // Cleared first, as the ⌃-letter keys and ⌨︎↓ do: the dialog
-                // this raises can be cancelled, and an armed modifier left
-                // over from before it would then modify the next character
-                // typed, with nothing on screen still claiming to be armed.
-                clearArmedModifiers()
-                controller.onCloseTabRequested()
             }
+
+        case .blank:
+            break   // a hole in the grid; nothing to send, nothing to arm
 
         case .character, .key:
             // The character/key dispatch and the shift-before-encoding rule

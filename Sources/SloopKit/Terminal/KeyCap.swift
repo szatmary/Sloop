@@ -21,12 +21,16 @@ public struct KeyCap: Equatable, Sendable {
         case modifier(KeyModifiers)
         /// An app-level action. Emits nothing to the remote.
         case command(Command)
+        /// A hole in the grid: draws nothing, does nothing, occupies a slot.
+        /// The arrow cluster's inverted T is three columns wide and only has
+        /// keys in two of its rows; without a way to say "nothing here", the
+        /// row below can't sit under the row above.
+        case blank
     }
 
     /// Actions the keyboard asks the app to take, rather than sending onward.
     public enum Command: Equatable, Sendable {
         case dismissKeyboard
-        case closeTab
     }
 
     /// How much horizontal room a key takes, in grid slots.
@@ -81,6 +85,9 @@ public struct KeyCap: Equatable, Sendable {
                                width: Width = .unit) -> Self {
         Self(primary: .command(command), width: width)
     }
+
+    /// An empty slot, for holding a shape.
+    public static let blank = Self(primary: .blank)
 
     /// Every character this cap can produce, by tap or by drag. Used by the
     /// layout parity test to prove the phone and tablet tables reach the same

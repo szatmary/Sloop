@@ -61,6 +61,15 @@ final class KeyCapView: UIControl {
     // MARK: Appearance
 
     private func buildUI() {
+        // A blank holds a slot in the grid so the arrow cluster keeps its
+        // shape; it is not a key. No fill, no label, and no touches — a
+        // transparent target that swallowed taps beside the arrows would be
+        // worse than no key at all.
+        if case .blank = cap.primary {
+            isUserInteractionEnabled = false
+            isAccessibilityElement = false
+            return
+        }
         backgroundColor = .secondarySystemFill
         layer.cornerRadius = 5
         isMultipleTouchEnabled = false
@@ -101,8 +110,9 @@ final class KeyCapView: UIControl {
         case .command(let command):
             switch command {
             case .dismissKeyboard: return "⌨︎↓"
-            case .closeTab:        return "✕"
             }
+        case .blank:
+            return ""
         }
     }
 
@@ -140,6 +150,12 @@ final class KeyCapView: UIControl {
     /// small secondary label's position as a hint. So this is a parallel
     /// vocabulary, not a reuse of `label(for:)`.
     private func configureAccessibility() {
+        // A blank is a gap, not a key: VoiceOver should walk straight past it
+        // rather than announce an unlabelled keyboard key between the arrows.
+        if case .blank = cap.primary {
+            isAccessibilityElement = false
+            return
+        }
         isAccessibilityElement = true
         accessibilityTraits = .keyboardKey
         accessibilityLabel = Self.accessibilityLabel(for: cap)
@@ -159,8 +175,9 @@ final class KeyCapView: UIControl {
         case .command(let command):
             switch command {
             case .dismissKeyboard: return "dismiss keyboard"
-            case .closeTab:        return "close tab"
             }
+        case .blank:
+            return ""
         }
     }
 

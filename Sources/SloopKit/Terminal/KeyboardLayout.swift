@@ -268,49 +268,48 @@ public struct KeyboardLayout: Equatable, Sendable {
 
     private static func pad(_ context: Context) -> KeyboardLayout {
         // Shaped like the keyboard the hands already know: letters in the
-        // middle, a navigation cluster to their right, a number pad down the
-        // edge, and a bottom row that is modifiers and space rather than a
-        // dumping ground.
+        // middle, then a navigation and arrow cluster, then the number pad down
+        // the edge, and a bottom row of modifiers and space.
         //
         // No number row. The pad carries the digits, and a second copy bought
         // nothing but a row's worth of height and narrower keys everywhere —
-        // shifted digits still produce !@#$… from the pad, since the shift
-        // rule is in `KeyEncoder` and applies wherever the digit is typed.
-        // Escape moves to the top-left corner it occupies on a real keyboard.
+        // shifted digits still produce !@#$… from the pad, since the shift rule
+        // is in `KeyEncoder` and applies wherever the digit is typed. Escape
+        // takes the top-left corner it occupies on a real keyboard.
         let symbolRow: [KeyCap] = [.key(.escape)]
             + symbols.map { KeyCap.character($0) } + [KeyCap.character("\"")]
 
-        // Home/End/PgUp/PgDn used to be squeezed onto the end of the symbol
-        // row, at two-thirds the width of everything else. They sit beside the
-        // letters now, in the space uniform letter widths leave over — which is
-        // both where a physical keyboard puts them and the space that was going
-        // to waste.
         let mainRows: [[KeyCap]] = [
             symbolRow,
             [.key(.tab)]
                 + "qwertyuiop".map { KeyCap.character($0) }
-                + [.key(.backspace, width: .wide(1.5), repeats: true),
-                   .key(.home), .key(.pageUp)],
-            // Control sits where caps lock does. It is the most-typed modifier
-            // in a terminal and that is the easiest key on the board to reach.
-            [.modifier(.control)]
-                + "asdfghjkl".map { KeyCap.character($0) }
-                + [.key(.return, width: .wide(1.5)),
-                   .key(.end), .key(.pageDown)],
-            // Shift at the left of the bottom letter row, where it belongs.
-            [.modifier(.shift)]
-                + "zxcvbnm".map { KeyCap.character($0) }
-                + [.character(","), .character("."),
-                   .key(.delete), .key(.up, repeats: true)],
-            [.modifier(.option), .character(" ", width: .flexible),
-             .key(.left, repeats: true), .key(.down, repeats: true),
-             .key(.right, repeats: true),
-             .command(.dismissKeyboard),
-             // Last, and alone: the same reasoning `KeyboardAccessoryBar`
-             // states for its own ✕ — closing a tab drops a live SSH session,
-             // so it belongs where a mis-tap while reaching for space or the
-             // arrows can't reach it.
-             .command(.closeTab)],
+                + [.key(.backspace, width: .wide(1.5), repeats: true)],
+            "asdfghjkl".map { KeyCap.character($0) }
+                + [.key(.return, width: .wide(1.5))],
+            "zxcvbnm".map { KeyCap.character($0) }
+                + [.character(","), .character(".")],
+            // All three modifiers together on the bottom row, where the thumbs
+            // are, rather than scattered down the left-hand edge. The space bar
+            // gives up the width — it had far more than it needed once the
+            // arrows moved into the cluster.
+            [.modifier(.control), .modifier(.option), .modifier(.shift),
+             .character(" ", width: .flexible),
+             .command(.dismissKeyboard)],
+        ]
+
+        // Navigation and arrows, three columns, laid out as they are on a full
+        // keyboard: the paging keys as a block, and the arrows in an inverted T
+        // so ↑ sits directly above ↓ with ← and → either side. The blanks are
+        // what make that shape possible — a T needs the holes as much as the
+        // keys, and the empty space above the arrows is exactly what a physical
+        // keyboard has there too.
+        let navigationRows: [[KeyCap]] = [
+            [.key(.delete), .key(.home), .key(.pageUp)],
+            [.blank, .key(.end), .key(.pageDown)],
+            [.blank, .blank, .blank],
+            [.blank, .key(.up, repeats: true), .blank],
+            [.key(.left, repeats: true), .key(.down, repeats: true),
+             .key(.right, repeats: true)],
         ]
 
         // 789 / 456 / 123 / 0 . — the arrangement fingers already know, with
@@ -323,9 +322,10 @@ public struct KeyboardLayout: Equatable, Sendable {
             [.character("0"), .character("."), .character("=")],
         ]
 
+        let trailing = zip(navigationRows, keypadRows).map { $0 + $1 }
         return KeyboardLayout(
-            rows: zip(mainRows, keypadRows).map { $0 + $1 },
-            keypadColumns: keypadRows.map(\.count),
+            rows: zip(mainRows, trailing).map { $0 + $1 },
+            keypadColumns: trailing.map(\.count),
             // iPad keys are wide, so they can be short without becoming hard
             // to hit — which is the whole point, since height is what a
             // terminal wants back.
@@ -405,10 +405,7 @@ public struct KeyboardLayout: Equatable, Sendable {
                        // deliver one.
                        .key(.left, secondary: .key(.home), repeats: true),
                        .key(.right, secondary: .key(.end), repeats: true),
-                       .command(.dismissKeyboard),
-                       // Last, and alone — see the matching comment on the
-                       // iPad table.
-                       .command(.closeTab)],
+                       .command(.dismissKeyboard)],
             ],
             // Per CompactKeyboardView's slot algorithm (padding 4, spacing 3),
             // a 393pt-wide portrait screen renders the digit/tab/control rows

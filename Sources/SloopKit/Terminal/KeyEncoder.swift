@@ -96,10 +96,11 @@ public enum KeyEncoder {
     /// a terminal receives `A`, never shift+`a`, so `.shift` must never reach
     /// that overload for a character.
     ///
-    /// Returns `nil` for `.modifier` and `.command`: neither emits anything
-    /// to the remote end. Both are the software keyboard's own affordances —
-    /// arming a sticky modifier, dismissing the keyboard — handled by the
-    /// caller, not here.
+    /// Returns `nil` for `.modifier`, `.command` and `.blank`: none emits
+    /// anything to the remote end. The first two are the software keyboard's
+    /// own affordances — arming a sticky modifier, dismissing the keyboard —
+    /// handled by the caller, and the third is a hole in the grid that holds
+    /// the arrow cluster's shape.
     public static func bytes(for value: KeyCap.Value,
                              armedModifiers: KeyModifiers,
                              applicationCursor: Bool) -> [UInt8]? {
@@ -111,7 +112,7 @@ public enum KeyEncoder {
             return bytes(for: resolved, modifiers: armedModifiers.subtracting(.shift))
         case .key(let terminalKey):
             return bytes(for: terminalKey, modifiers: armedModifiers, applicationCursor: applicationCursor)
-        case .modifier, .command:
+        case .modifier, .command, .blank:
             return nil
         }
     }
