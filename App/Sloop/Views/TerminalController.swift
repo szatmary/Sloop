@@ -10,6 +10,7 @@ private typealias PlatformFont = NSFont
 private typealias PlatformColor = NSColor
 #else
 import UIKit
+import GameController
 private typealias PlatformFont = UIFont
 private typealias PlatformColor = UIColor
 #endif
@@ -37,6 +38,20 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     /// combinations like tmux's ⌃B prefix could not be typed at all.
     @Published var armedModifiers: KeyModifiers = []
 
+    #if os(iOS)
+    /// Whether the software keyboard is currently on screen.
+    ///
+    /// Driven by the system's show/hide notifications rather than by tracking our
+    /// own `dismissKeyboard()` calls, so a keyboard dismissed by the system — a
+    /// hardware keyboard being attached, say — is observed too.
+    @Published private(set) var keyboardVisible = false
+
+    /// Whether a hardware keyboard is attached. When one is, no software keyboard
+    /// appears and no show/hide notification ever fires, so `keyboardVisible`
+    /// stays false and must not be read as "there is room to reclaim".
+    var hardwareKeyboardAttached: Bool { GCKeyboard.coalesced != nil }
+    #endif
+
     private let makeTransport: () -> Transport
     private var transport: Transport
 
@@ -56,6 +71,15 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         // it stays visible with a hardware keyboard attached, when an input
         // accessory view isn't shown at all.
         terminalView.inputAccessoryView = nil
+        let center = NotificationCenter.default
+        center.addObserver(forName: UIResponder.keyboardWillShowNotification,
+                           object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.keyboardVisible = true }
+        }
+        center.addObserver(forName: UIResponder.keyboardWillHideNotification,
+                           object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.keyboardVisible = false }
+        }
         #endif
         apply(appearance)
         wire(transport)
@@ -152,6 +176,17 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     func send(_ bytes: ArraySlice<UInt8>) {
         transport.send(bytes)
     }
+
+    #if os(iOS)
+    /// Put the software keyboard away, giving its height back to the terminal.
+    ///
+    /// There is no matching `showKeyboard()`: SwiftTerm's own single-tap handler
+    /// already calls `becomeFirstResponder()`, so tapping the terminal brings it
+    /// back.
+    func dismissKeyboard() {
+        _ = terminalView.resignFirstResponder()
+    }
+    #endif
 
     /// Tear down the connection — called when the session's tab is closed.
     func close() {
