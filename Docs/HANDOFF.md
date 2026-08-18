@@ -44,8 +44,8 @@ key types below, and Mosh roaming across a network change.
 
 ### NOT done / not verifiable here
 
-- **Runtime validation** — SSH (RSA key), Mosh, and a Cloudflare Access tunnel
-  all verified on an iPad.
+- **Runtime validation** — SSH (RSA key), Mosh, a Cloudflare Access tunnel, and
+  Sloop's own embedded tailnet node all verified on an iPad.
   Not yet exercised: Ed25519/ECDSA/passphrase-protected keys, Mosh roaming
   across Wi-Fi→cellular, and the host-key mismatch path.
 - **Code signing / distribution** — the app is unsigned.

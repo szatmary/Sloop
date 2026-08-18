@@ -52,6 +52,39 @@ jobs:
       - name: Test macOS
         run: xcodebuild test -project Sloop.xcodeproj -scheme Sloop_macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -quiet
 
+  # The only job needing a Go toolchain. Kept green because the Tailscale
+  # variant is the one build that can't fall back to anything: an embedded
+  # tailnet node either compiles or the feature is gone.
+  tailscale-app:
+    name: Build app with Tailscale (iOS · macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build libtailscale xcframework
+        run: Scripts/build-libtailscale.sh
+      - name: Download libssh2 xcframework
+        uses: actions/download-artifact@v4
+        with:
+          name: libssh2-xcframework
+          path: Vendor/libssh2.xcframework
+      - name: Download mosh xcframework
+        uses: actions/download-artifact@v4
+        with:
+          name: mosh-xcframework
+          path: Vendor/mosh.xcframework
+      - name: Generate project
+        run: xcodegen generate --spec project.tailscale.yml
+      - name: Build iOS
+        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_iOS -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO -quiet
+      - name: Build macOS
+        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -quiet
+    needs: [libssh2-xcframework, mosh-xcframework]
+
   libssh2-xcframework:
     name: Build libssh2 xcframework
     runs-on: macos-14
