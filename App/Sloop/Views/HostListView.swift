@@ -16,6 +16,20 @@ struct HostListView: View {
     @ObservedObject private var appearance = AppearanceStore.shared
     @State private var editing: SSHHost?
     @State private var accessLogin: SSHHost?
+    /// What to do once the Access login sheet has actually finished closing.
+    ///
+    /// Acting the moment the sheet reports its outcome doesn't work: setting an
+    /// alert or pushing the terminal while a sheet is mid-dismissal gets dropped
+    /// by SwiftUI, so a sign-in that failed looked exactly like nothing at all
+    /// happening — the sheet flashed and vanished with no explanation. Held here
+    /// and run from the sheet's `onDismiss` instead, where the presentation is
+    /// free again.
+    @State private var accessFollowUp: AccessFollowUp?
+
+    private enum AccessFollowUp {
+        case connect(SSHHost)
+        case failed(String)
+    }
     @State private var showingSupport = false
     @State private var showingSettings = false
     @State private var showingTerminal = false
@@ -152,23 +166,26 @@ struct HostListView: View {
                              onSaveKey: { try model.saveLibraryKey($0) },
                              onSave: { try model.save($0, credential: $1) })
             }
-            .sheet(item: $accessLogin) { host in
+            .sheet(item: $accessLogin, onDismiss: runAccessFollowUp) { host in
                 AccessLoginView(hostname: host.hostname) { outcome in
                     switch outcome {
                     case .token(let token):
+                        // The keychain write is safe to do now; connecting is
+                        // not, because it pushes the terminal.
                         do {
                             try model.storeAccessToken(token, for: host)
-                            open(try model.connect(host))
+                            accessFollowUp = .connect(host)
                         } catch {
-                            importResult = "Couldn't store the Access token: \(error.localizedDescription)"
+                            accessFollowUp = .failed(
+                                "Couldn't store the Access token: \(error.localizedDescription)")
                         }
                     case .cancelled:
                         // The user closed the sheet. They know; telling them
                         // so in an alert is the app arguing with a button
                         // they pressed on purpose.
-                        break
+                        accessFollowUp = nil
                     case .failed(let message):
-                        importResult = message
+                        accessFollowUp = .failed(message)
                     }
                 }
             }
@@ -201,7 +218,7 @@ struct HostListView: View {
             } message: {
                 Text(importResult ?? "")
             }
-            .alert("Keychain Error", isPresented: Binding(
+            .alert("Couldn't Connect", isPresented: Binding(
                 get: { actionError != nil },
                 set: { if !$0 { actionError = nil } })
             ) {
@@ -224,6 +241,20 @@ struct HostListView: View {
 
     private func delete(_ host: SSHHost) {
         run { try model.delete(host) }
+    }
+
+    /// Act on the Access login's outcome, now that its sheet is gone.
+    private func runAccessFollowUp() {
+        let followUp = accessFollowUp
+        accessFollowUp = nil
+        switch followUp {
+        case .connect(let host):
+            run { open(try model.connect(host)) }
+        case .failed(let message):
+            actionError = message
+        case nil:
+            break
+        }
     }
 
     /// Run a store operation, showing why it failed rather than dropping it.
