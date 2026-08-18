@@ -31,12 +31,16 @@ final class KeyCapView: UIControl {
     private let secondaryLabel = UILabel()
     private var repeatTimer: Timer?
     private var didDrag = false
+    /// Where the touch began, in this view's coordinates — the drag distance
+    /// is measured from here, not from one tracking callback to the next.
+    private var dragOrigin: CGPoint = .zero
 
     init(cap: KeyCap, delegate: KeyCapViewDelegate) {
         self.cap = cap
         self.delegate = delegate
         super.init(frame: .zero)
         buildUI()
+        configureAccessibility()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -121,10 +125,69 @@ final class KeyCapView: UIControl {
         return "?"
     }
 
+    // MARK: Accessibility
+
+    /// VoiceOver has different needs than the glyph on the key: a bare "⌫"
+    /// or "⇥" is spoken poorly or not at all, and a symbol reached only by
+    /// dragging is otherwise invisible to VoiceOver, which cannot see the
+    /// small secondary label's position as a hint. So this is a parallel
+    /// vocabulary, not a reuse of `label(for:)`.
+    private func configureAccessibility() {
+        isAccessibilityElement = true
+        accessibilityTraits = .keyboardKey
+        accessibilityLabel = Self.accessibilityLabel(for: cap)
+    }
+
+    private static func accessibilityLabel(for cap: KeyCap) -> String {
+        let primary = accessibilityLabel(for: cap.primary)
+        guard let secondary = cap.secondary else { return primary }
+        return "\(primary), drag up for \(accessibilityLabel(for: secondary))"
+    }
+
+    private static func accessibilityLabel(for value: KeyCap.Value) -> String {
+        switch value {
+        case .character(let c):        return c == " " ? "space" : String(c)
+        case .key(let key):            return accessibilityLabel(for: key)
+        case .modifier(let modifiers): return accessibilityLabel(for: modifiers)
+        case .command(let command):
+            switch command {
+            case .dismissKeyboard: return "dismiss keyboard"
+            case .closeTab:        return "close tab"
+            }
+        }
+    }
+
+    private static func accessibilityLabel(for key: TerminalKey) -> String {
+        switch key {
+        case .escape:      return "escape"
+        case .tab:         return "tab"
+        case .return:      return "return"
+        case .backspace:   return "backspace"
+        case .delete:      return "delete"
+        case .up:          return "up arrow"
+        case .down:        return "down arrow"
+        case .left:        return "left arrow"
+        case .right:       return "right arrow"
+        case .home:        return "home"
+        case .end:         return "end"
+        case .pageUp:      return "page up"
+        case .pageDown:    return "page down"
+        case .function(let n): return "F\(n)"
+        }
+    }
+
+    private static func accessibilityLabel(for modifiers: KeyModifiers) -> String {
+        if modifiers.contains(.control) { return "control" }
+        if modifiers.contains(.option)  { return "option" }
+        if modifiers.contains(.shift)   { return "shift" }
+        return "modifier"
+    }
+
     // MARK: Touch handling
 
     override func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
         didDrag = false
+        dragOrigin = touch.location(in: self)
         alpha = 0.6
         UIDevice.current.playInputClick()
         if cap.repeats { startRepeating() }
@@ -133,7 +196,12 @@ final class KeyCapView: UIControl {
 
     override func continueTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
         guard cap.secondary != nil else { return true }
-        let rise = touch.previousLocation(in: self).y - touch.location(in: self).y
+        // Cumulative from touch-down, not from the previous callback — UIKit
+        // delivers touchesMoved at 60-120Hz, so a slow drag arrives as many
+        // sub-threshold deltas and `previousLocation` would never trip.
+        // Once past the threshold this stays true for the rest of the touch:
+        // a finger that overshoots and drifts back down still commits.
+        let rise = dragOrigin.y - touch.location(in: self).y
         if rise > Self.dragThreshold { didDrag = true }
         return true
     }
