@@ -13,6 +13,9 @@
 # ⚠️ Blind cross-compile; expect a fix-up pass on first CI run.
 set -euo pipefail
 
+# Shared dependency plumbing: the pinned ios-cmake tag, apply_patches, install_file.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/vendor.sh"
+
 PROTOBUF_TAG="v21.12"          # protobuf 3.21.12, pre-abseil
 IOS_TARGET="17.0"
 TVOS_TARGET="17.0"
@@ -28,7 +31,7 @@ mkdir -p "$WORK" "$OUT"
 cd "$WORK"
 
 echo "==> Fetching sources"
-git clone --depth 1 https://github.com/leetal/ios-cmake.git
+git clone --depth 1 --branch "$IOS_CMAKE_TAG" https://github.com/leetal/ios-cmake.git
 git clone --depth 1 --branch "$PROTOBUF_TAG" https://github.com/protocolbuffers/protobuf.git
 
 # protobuf 3.21 keeps its CMake project under cmake/.

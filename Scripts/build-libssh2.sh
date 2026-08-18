@@ -25,12 +25,15 @@
 # Iterate on a single slice with:  SLICES="macos-arm64" Scripts/build-libssh2.sh
 set -euo pipefail
 
+# Shared dependency plumbing: the pinned ios-cmake tag, apply_patches, install_file.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/vendor.sh"
+
 OPENSSL_TAG="openssl-3.5.1"
 LIBSSH2_TAG="libssh2-1.11.1"
-# Pinned: ios.toolchain.cmake is executed CMake code that picks the compiler,
-# sysroot and deployment flags for the crypto we ship. Tracking its default
-# branch would let an upstream commit silently change the shipped binary.
-IOS_CMAKE_TAG="4.6.0"
+# IOS_CMAKE_TAG is pinned in Scripts/lib/vendor.sh, shared with the other
+# scripts that clone ios-cmake — it is executed CMake code that picks the
+# compiler, sysroot and deployment flags for everything we ship, and it used to
+# be pinned here and nowhere else.
 IOS_TARGET="17.0"
 MACOS_TARGET="14.0"
 
@@ -113,17 +116,11 @@ build_libssh2 () {
      "$prefix/include/libssh2_sftp.h" "$OUT/$name/include/"
 
   # Ship a module map inside the framework headers so Swift can `import CSSH`
-  # once the xcframework is linked — no separate include path needed.
-  cat > "$OUT/$name/include/module.modulemap" <<'MODMAP'
-module CSSH {
-    header "libssh2.h"
-    // libssh2.h does not include the SFTP API; without this header the whole
-    // of libssh2_sftp_* — and LIBSSH2_SFTP_ATTRIBUTES with it — is invisible to
-    // Swift, which is what the Files.app integration is built on.
-    header "libssh2_sftp.h"
-    export *
-}
-MODMAP
+  # once the xcframework is linked — no separate include path needed. The map
+  # is a checked-in file (Scripts/deps/libssh2/files/) rather than a heredoc,
+  # because it is the only copy of something Sloop authored and the built
+  # xcframework it lands in is gitignored.
+  install_file libssh2 module.modulemap "$OUT/$name/include/module.modulemap"
 }
 
 build_slice () {

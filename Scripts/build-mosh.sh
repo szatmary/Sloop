@@ -13,6 +13,9 @@
 # diagnostics to keep iterations fast; it fans out to all slices once green.
 set -euo pipefail
 
+# Shared dependency plumbing: the pinned ios-cmake tag, apply_patches, install_file.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/vendor.sh"
+
 MOSH_TAG="mosh-1.4.0"
 PROTOBUF_TAG="v21.12"
 IOS_TARGET="17.0"
@@ -43,7 +46,7 @@ done
 export LIBTOOLIZE=glibtoolize
 
 echo "==> Fetching sources"
-git clone --depth 1 https://github.com/leetal/ios-cmake.git
+git clone --depth 1 --branch "$IOS_CMAKE_TAG" https://github.com/leetal/ios-cmake.git
 git clone --depth 1 --branch "$PROTOBUF_TAG" https://github.com/protocolbuffers/protobuf.git
 git clone https://github.com/mobile-shell/mosh.git
 git -C mosh checkout --quiet "$MOSH_TAG"
@@ -52,39 +55,11 @@ git -C mosh checkout --quiet "$MOSH_TAG"
 # lacks it, so provide it.
 echo "mosh ${MOSH_TAG#mosh-}" > mosh/VERSION
 
-# One session per *thread*, not per process.
-#
-# mosh-client is one session in one process, so upstream can keep session state
-# in process-wide statics. Sloop runs every session on its own thread inside one
-# app, and two of these statics then get shared by sessions that know nothing
-# about each other:
-#
-#   * Network::get_compressor() hands out a single Compressor holding a 4 MiB
-#     scratch buffer, used for both compress_str and uncompress_str. Two
-#     sessions compressing outgoing state and decompressing incoming state
-#     through one buffer corrupt each other's payloads, and mosh reports the
-#     wreckage as an attack: "Illegal counterparty input (possible denial of
-#     service) ... failed test: message.text.size() >= 2 * sizeof( uint16_t )".
-#     Measured on the shipped 1.4.0 build: of 600 concurrent round-trips across
-#     two threads, 520 threw and 11 more returned data that wasn't what went in.
-#
-#   * timestamp.cc caches the frozen clock in `millis_cache`. Each session
-#     freezes the clock at the top of its own loop, so with two running, each
-#     one reads whatever instant the other froze — and mosh's RTT/RTO estimates
-#     and timestamp echoes are computed from it.
-#
-# thread_local is the whole fix: each session thread gets its own copy, with no
-# lock and no contention, which is exactly the isolation upstream gets for free
-# by being one session per process. It costs 4 MiB per live session.
-sed -i.bak 's|^  static Compressor the_compressor;|  static thread_local Compressor the_compressor;|' \
-  mosh/src/network/compressor.cc
-sed -i.bak 's|^static uint64_t millis_cache = -1;|static thread_local uint64_t millis_cache = -1;|' \
-  mosh/src/util/timestamp.cc
-grep -q "thread_local Compressor" mosh/src/network/compressor.cc \
-  || { echo "compressor patch did not apply — upstream moved"; exit 1; }
-grep -q "thread_local uint64_t millis_cache" mosh/src/util/timestamp.cc \
-  || { echo "timestamp patch did not apply — upstream moved"; exit 1; }
-rm -f mosh/src/network/compressor.cc.bak mosh/src/util/timestamp.cc.bak
+# One session per *thread*, not per process — mosh keeps session state in
+# process-wide statics, which is safe for a one-session process and is not safe
+# for Sloop's tabs. Each patch carries its own account of what breaks without
+# it; see Scripts/deps/mosh/patches/.
+apply_patches mosh mosh
 
 echo "==> Building HOST protoc (native, protobuf $PROTOBUF_TAG)"
 PB_CMAKE_SRC="protobuf/cmake"; test -f "$PB_CMAKE_SRC/CMakeLists.txt" || PB_CMAKE_SRC="protobuf"
@@ -136,36 +111,9 @@ build_slice () {
   done
   rm -f "$cfg.bak"
 
-  # Curses/terminfo only enters through terminaldisplayinit.cc, which holds the
-  # single function `Display::Display(bool use_environment)` — deliberately kept
-  # in its own TU by upstream "because otherwise the ncurses #defines alias our
-  # own variable names." Everything else in terminaldisplay.cc (notably
-  # `Display::new_frame`, the Framebuffer→ANSI renderer) has NO curses
-  # dependency. Sloop's Mosh bridge reuses `new_frame` to render the remote
-  # framebuffer into SwiftTerm, and `Terminal::Complete` embeds a `Display`, so
-  # both files must stay linkable.
-  #
-  # So: keep terminaldisplay.cc verbatim, and replace ONLY the init TU with a
-  # curses-free constructor. iOS has no terminfo database anyway, and Sloop
-  # always constructs `Display(false)`, so the terminfo probing the real
-  # constructor does under `use_environment` is dead code here — the stub just
-  # sets the same conservative capability defaults the real ctor starts from.
-  cat > "$bdir/src/terminal/terminaldisplayinit.cc" <<'EOF'
-/* Sloop: curses-free replacement for mosh's Display constructor.
-   The upstream constructor probes terminfo when use_environment is true; iOS
-   has no terminfo and Sloop always passes false, so we skip curses entirely and
-   keep the conservative capability defaults (ECH/BCE/title on, no alt-screen).
-   The rest of Display (new_frame etc.) is compiled from terminaldisplay.cc. */
-#include "terminaldisplay.h"
-
-using namespace Terminal;
-
-Display::Display( bool use_environment )
-  : has_ech( true ), has_bce( true ), has_title( true ), smcup( NULL ), rmcup( NULL )
-{
-  (void)use_environment;
-}
-EOF
+  # Replace ONLY the init TU with a curses-free constructor, keeping
+  # terminaldisplay.cc verbatim — the file explains why in its own header.
+  install_file mosh terminaldisplayinit.cc "$bdir/src/terminal/terminaldisplayinit.cc"
 
   # Build the convenience libraries only (the frontend binaries won't link for
   # iOS; that's fine — we just want the .a's). Keep going past a failed binary.

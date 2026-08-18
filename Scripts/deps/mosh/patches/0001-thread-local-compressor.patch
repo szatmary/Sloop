@@ -1,0 +1,33 @@
+One session per *thread*, not per process: the compressor.
+
+mosh-client is one session in one process, so upstream can keep session state in
+a process-wide static. Sloop runs every session on its own thread inside one
+app, and this static is then shared by sessions that know nothing about each
+other. `Network::get_compressor()` hands out a single Compressor holding a 4 MiB
+scratch buffer, used for both compress_str and uncompress_str. Two sessions
+compressing outgoing state and decompressing incoming state through one buffer
+corrupt each other's payloads, and mosh reports the wreckage as an attack:
+
+    Illegal counterparty input (possible denial of service) ... failed test:
+    message.text.size() >= 2 * sizeof( uint16_t )
+
+Measured on the shipped 1.4.0 build: of 600 concurrent round-trips across two
+threads, 520 threw and 11 more returned data that wasn't what went in.
+
+thread_local is the whole fix — each session thread gets its own copy, with no
+lock and no contention, which is exactly the isolation upstream gets for free by
+being one session per process. It costs 4 MiB per live session.
+
+Applies to mosh-1.4.0. See also 0002-thread-local-millis-cache.patch, the same
+bug in the clock.
+
+--- a/src/network/compressor.cc
++++ b/src/network/compressor.cc
+@@ -59,6 +59,6 @@
+ /* construct on first use */
+ Compressor & Network::get_compressor( void )
+ {
+-  static Compressor the_compressor;
++  static thread_local Compressor the_compressor;
+   return the_compressor;
+ }
