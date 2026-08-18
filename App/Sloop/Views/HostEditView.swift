@@ -19,10 +19,15 @@ struct HostEditView: View {
     @State private var pastedPassphrase: String = ""
     @State private var saveError: String?
     @State private var showingMoshHelp = false
+    @FocusState private var commandFocused: Bool
 
-    /// Attach to an existing tmux session, or start one if there isn't a
-    /// session yet — the reason most people want a command on connect at all.
-    private static let tmuxSuggestion = "tmux attach || tmux new"
+    /// Ready-made on-connect commands. Reattaching to a multiplexer is why
+    /// this feature exists, so the list covers the two people actually use;
+    /// anything else is typed by hand.
+    private static let suggestions: [(title: String, command: String)] = [
+        ("Reattach to tmux, or start it", "tmux attach || tmux new"),
+        ("Reattach to GNU screen, or start it", "screen -RD"),
+    ]
     private let libraryKeys: [NamedKey]
     private let onSaveKey: (NamedKey) throws -> Void
     private let onSave: (SSHHost, Credential?) -> Void
@@ -126,37 +131,40 @@ struct HostEditView: View {
                 }
 
                 Section {
-                    TextField("No command",
-                              text: Binding(get: { host.onConnectCommand ?? "" },
-                                            set: { host.onConnectCommand = $0 }))
-                        .font(.system(.body, design: .monospaced))
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        #endif
+                    HStack {
+                        TextField("No command",
+                                  text: Binding(get: { host.onConnectCommand ?? "" },
+                                                set: { host.onConnectCommand = $0 }))
+                            .font(.system(.body, design: .monospaced))
+                            .focused($commandFocused)
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            #endif
 
-                    // The tmux line used to live in the placeholder, where it
-                    // read as a value that was already set but did nothing
-                    // until retyped by hand. A suggestion you can only accept
-                    // by copying it out is not a suggestion.
-                    if host.trimmedOnConnectCommand == nil {
-                        Button {
-                            host.onConnectCommand = Self.tmuxSuggestion
-                        } label: {
-                            HStack {
-                                Text(Self.tmuxSuggestion)
-                                    .font(.system(.footnote, design: .monospaced))
-                                Spacer()
-                                Image(systemName: "arrow.up.left.circle")
+                        // macOS has no keyboard accessory to hang the
+                        // suggestions off, so they live in a menu beside the
+                        // field instead.
+                        #if os(macOS)
+                        Menu {
+                            ForEach(Self.suggestions, id: \.command) { suggestion in
+                                Button(suggestion.command) {
+                                    host.onConnectCommand = suggestion.command
+                                }
                             }
+                        } label: {
+                            Image(systemName: "list.bullet")
                         }
-                        .accessibilityLabel("Use \(Self.tmuxSuggestion)")
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                        .help("Common commands")
+                        #endif
                     }
+
                 } header: {
                     Text("Run on connect")
                 } footer: {
-                    Text("Typed into the shell each time this host connects, "
-                         + "including after a dropped connection reconnects.")
+                    Text("Typed into the shell on every connect, including reconnects.")
                 }
 
                 Section("Options") {
@@ -184,6 +192,33 @@ struct HostEditView: View {
             } message: {
                 Text(saveError ?? "")
             }
+            // Suggestions ride directly above the keyboard rather than sitting
+            // in the form. On a tablet the keyboard covers most of the screen,
+            // so anything below the field has to be scrolled to — which defeats
+            // a suggestion you are meant to take while typing. Here they cannot
+            // be scrolled away, and they cost the form no height at all.
+            #if os(iOS)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    if commandFocused {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(Self.suggestions, id: \.command) { suggestion in
+                                    Button(suggestion.command) {
+                                        host.onConnectCommand = suggestion.command
+                                        commandFocused = false
+                                    }
+                                    .font(.system(.footnote, design: .monospaced))
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                        }
+                        Spacer()
+                        Button("Done") { commandFocused = false }
+                    }
+                }
+            }
+            #endif
             .alert("What is Mosh?", isPresented: $showingMoshHelp) {
                 Button("OK", role: .cancel) {}
             } message: {
