@@ -1631,9 +1631,37 @@ Expected: FAIL — `cannot find 'ForwardedAgent' in scope`.
 
 - [ ] **Step 4: Wire the callback and the loop in `LibSSH2Transport.swift`**
 
-Four changes:
+First, the pieces the changes below refer to. `LibSSH2Transport.init` (line 39) gains two defaulted parameters, so no existing caller breaks:
 
-1. `libssh2_session_init_ex(nil, nil, nil, nil)` becomes a call passing an abstract pointer to `self` (`Unmanaged.passUnretained(self).toOpaque()`), so the C callback can find the transport.
+```swift
+         hostKeyVerifier: HostKeyVerifier = AutoAcceptHostKeyVerifier(),
+         forwardedKeys: [NamedKey] = [],
+         signConfirmer: AgentSignConfirming = AgentSignPrompter.shared) {
+```
+
+and a stored property for the agent, since the C callback has to find it:
+
+```swift
+    /// Non-nil only while a forwarded agent is running. Touched solely on the
+    /// SSH thread — the callback that sets it is invoked by libssh2 from inside
+    /// packet processing, which happens on that same thread.
+    private var forwardedAgent: ForwardedAgent?
+```
+
+The agent is constructed in `run()` AFTER authentication succeeds (the session must exist and be usable before `AgentSigner` can derive identities from it) and BEFORE `openShell`, because `openShell` is where forwarding is requested:
+
+```swift
+        if !forwardedKeys.isEmpty {
+            forwardedAgent = ForwardedAgent(
+                signer: AgentSigner(session: session, keys: forwardedKeys),
+                confirming: signConfirmer,
+                endpoint: "\(host.hostname):\(host.port)")
+        }
+```
+
+Then four changes:
+
+1. `libssh2_session_init_ex(nil, nil, nil, nil)` (line 90) passes an abstract pointer to `self` as its fourth argument: `Unmanaged.passUnretained(self).toOpaque()`. That parameter is a `void *` value; the callback receives `void **`, so it reads `abstract.pointee` to get it back. `passUnretained` is correct rather than a leak-forever `passRetained` because the session is freed by `run()`'s own `defer` before the transport can go away — `run()` is a method executing on `self`, so `self` is alive for the whole session lifetime.
 2. Register the callback after the session is created and before the handshake. The vendored header (`libssh2.h:656`) declares:
    ```c
    typedef void (libssh2_cb_generic)(void);
