@@ -53,29 +53,41 @@ final class TailscaleNode: @unchecked Sendable {
     ///
     /// Blocking on purpose: it's called from the SSH worker thread, where the
     /// dial it precedes blocks too.
+    ///
+    /// Deliberately *not* built on `tailscale_up`. That call blocks until the
+    /// node is usable, which for an unauthorized device means until the user
+    /// finishes a login it never told them about — the authorization URL only
+    /// reaches us on the log, and nothing reads the log while a thread sits
+    /// inside `up`. So: start (which returns immediately), then watch for
+    /// whichever arrives first, an address or a URL to go and get one.
     func connect(timeout: TimeInterval = 30) throws {
         lock.lock()
         defer { lock.unlock() }
 
         if !started { try startLocked() }
 
-        // `tailscale_up` blocks until the node is usable, which for an
-        // unauthorized device means until the user finishes the login in a
-        // browser. Poll for the auth URL alongside it so the user is told what
-        // to do rather than watching a spinner: the URL arrives on the log
-        // within a second or so of the first start.
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if tailscale_up(handle) == 0 { return }
+            if hasTailnetAddressLocked() { return }
             if let raw = pendingAuthURL, let url = URL(string: raw) {
                 throw NodeError.needsAuthorization(url)
             }
+            lock.unlock()
             Thread.sleep(forTimeInterval: 0.25)
+            lock.lock()
         }
         if let raw = pendingAuthURL, let url = URL(string: raw) {
             throw NodeError.needsAuthorization(url)
         }
-        throw NodeError.tailscale("Timed out bringing Sloop's tailnet node up: \(errorMessageLocked())")
+        throw NodeError.tailscale("Sloop's tailnet node didn't come up: \(errorMessageLocked())")
+    }
+
+    /// Whether the node holds a tailnet address yet — the readiness test that
+    /// doesn't block. Caller holds the lock.
+    private func hasTailnetAddressLocked() -> Bool {
+        var buffer = [CChar](repeating: 0, count: 256)
+        guard tailscale_getips(handle, &buffer, buffer.count) == 0 else { return false }
+        return !String(cString: buffer).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// A connected socket to `host:port` over the tailnet.

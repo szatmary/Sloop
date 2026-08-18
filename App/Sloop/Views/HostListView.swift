@@ -13,6 +13,9 @@ struct HostListView: View {
     @StateObject private var model = HostListModel()
     @ObservedObject private var sessions = SessionsModel.shared
     @ObservedObject private var hostKeyPrompter = HostKeyPrompter.shared
+    #if SLOOP_TAILSCALE
+    @ObservedObject private var tailscaleAuth = TailscaleAuthPrompter.shared
+    #endif
     @ObservedObject private var appearance = AppearanceStore.shared
     @State private var editing: SSHHost?
     @State private var accessLogin: SSHHost?
@@ -198,6 +201,11 @@ struct HostListView: View {
             .sheet(item: $hostKeyPrompter.prompt) { prompt in
                 HostKeyPromptView(prompt: prompt)
             }
+            #if SLOOP_TAILSCALE
+            .sheet(item: $tailscaleAuth.url) { pending in
+                TailscaleAuthView(url: pending.url)
+            }
+            #endif
             .fileImporter(isPresented: $showingImport,
                           allowedContentTypes: [.text, .plainText, .data]) { result in
                 importResult = importConfig(from: result)

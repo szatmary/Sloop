@@ -25,7 +25,17 @@ final class TailscaleDialer: Dialer {
         // with no tailnet hosts should never pay for a WireGuard node, and one
         // who has them expects the first connect to be where "authorize this
         // device" turns up.
-        try TailscaleNode.shared.connect()
+        do {
+            try TailscaleNode.shared.connect()
+        } catch let error as TailscaleNode.NodeError {
+            // An authorization URL is useless as terminal text — it can't be
+            // tapped there. Raise the sheet, and still throw so the terminal
+            // says why the connection stopped.
+            if case .needsAuthorization(let url) = error {
+                TailscaleAuthPrompter.shared.request(url)
+            }
+            throw error
+        }
         return try TailscaleNode.shared.dial(host: host, port: port)
     }
 }
