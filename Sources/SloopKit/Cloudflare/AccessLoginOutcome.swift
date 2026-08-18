@@ -2,6 +2,26 @@
 // GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
 
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+
+/// Whether a `WKNavigationDelegate` failure means the sign-in failed, or just
+/// that a navigation was replaced by another one.
+///
+/// `NSURLErrorCancelled` (-999) is what a web view reports when a load in
+/// flight is superseded — a page's `window.location` assignment, a
+/// `<meta http-equiv="refresh">`, a form POST that starts before the previous
+/// provisional load finished. An identity provider's redirect chain is made of
+/// exactly those, so treating -999 as fatal aborted ordinary, working sign-ins
+/// and reported a failure the user could do nothing about. Nothing is lost by
+/// ignoring it: the navigation that replaced it either finishes (and
+/// `didFinish` looks for the cookie) or fails on its own terms with a real
+/// error.
+public func isCancelledNavigationError(_ error: Error) -> Bool {
+    let error = error as NSError
+    return error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled
+}
 
 /// Guards the terminal outcome of a browser SSO sheet (see `AccessLoginView`
 /// in the app target) so exactly one of several racing exits — success, an

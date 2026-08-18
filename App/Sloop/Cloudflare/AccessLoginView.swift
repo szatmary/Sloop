@@ -155,16 +155,19 @@ private struct AccessWebView {
         }
 
         /// The initial load of `https://<hostname>` itself failed — DNS,
-        /// TLS, connection refused, and the like.
+        /// TLS, connection refused, and the like. A cancellation is not one
+        /// of those; see `isCancelledNavigationError`.
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            guard !delivered else { return }
+            guard !delivered, !isCancelledNavigationError(error) else { return }
             onFailure("Couldn't reach \(hostname): \(error.localizedDescription)")
         }
 
         /// A later navigation — somewhere in the IdP redirect chain — failed
-        /// after the initial load succeeded.
+        /// after the initial load succeeded. Same cancellation rule: an IdP
+        /// chain replaces its own navigations constantly, and each of those
+        /// arrives here as a -999.
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            guard !delivered else { return }
+            guard !delivered, !isCancelledNavigationError(error) else { return }
             onFailure("Sign-in to \(hostname) failed: \(error.localizedDescription)")
         }
     }

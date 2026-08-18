@@ -71,3 +71,34 @@ final class AccessLoginOutcomeGateTests: XCTestCase {
         XCTAssertFalse(AccessLoginOutcomeGate().isFinished)
     }
 }
+
+/// The other half of "don't report a failure that isn't one": a web view
+/// reports every superseded navigation as `NSURLErrorCancelled`, and an IdP
+/// redirect chain is made of superseded navigations. Treating those as fatal
+/// aborted sign-ins that were working.
+final class CancelledNavigationErrorTests: XCTestCase {
+    func testCancelledNavigationIsRecognized() {
+        let error = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+        XCTAssertTrue(isCancelledNavigationError(error))
+        XCTAssertEqual(NSURLErrorCancelled, -999, "the code WebKit actually reports")
+    }
+
+    /// Real reachability failures must still be reported — they are the whole
+    /// reason the delegate methods exist.
+    func testGenuineNavigationFailuresAreNotCancellations() {
+        for code in [NSURLErrorNotConnectedToInternet,
+                     NSURLErrorCannotFindHost,
+                     NSURLErrorSecureConnectionFailed,
+                     NSURLErrorTimedOut] {
+            XCTAssertFalse(isCancelledNavigationError(
+                NSError(domain: NSURLErrorDomain, code: code)), "code \(code)")
+        }
+    }
+
+    /// -999 in some other domain is some other error; only URL loading's own
+    /// cancellation is routine.
+    func testSameCodeInAnotherDomainIsNotACancellation() {
+        XCTAssertFalse(isCancelledNavigationError(
+            NSError(domain: "org.szatmary.sloop.test", code: NSURLErrorCancelled)))
+    }
+}
