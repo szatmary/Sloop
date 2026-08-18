@@ -31,8 +31,19 @@ final class HostListModel: ObservableObject {
     /// marker is what makes `remove-key` an actual, lasting removal.
     private static let migratedLegacyPEMsDefaultsKey = "sloop.keyLibrary.migratedLegacyPEMs"
 
-    private let store = HostStore()
-    private let knownHosts = KnownHostsStore()
+    /// Why the shared container couldn't be opened, if it couldn't. Shown
+    /// instead of a host list: an empty list is what a fresh install looks
+    /// like, and telling someone whose hosts are sitting in the App Group
+    /// container that they have none is the same mistake `libraryError` exists
+    /// to avoid one layer up.
+    @Published private(set) var storageError: String?
+
+    /// Nil when the shared container couldn't be opened — see `storageError`.
+    /// Optional rather than defaulted to a private location: a store pointing
+    /// somewhere the extension can't see is worse than no store, because it
+    /// accepts writes and looks like it worked.
+    private let store: HostStore?
+    private let knownHosts: KnownHostsStore?
     private let credentials: CredentialStore
     private let accessTokens: AccessTokenStore
     private let keys: KeyStore
@@ -49,7 +60,33 @@ final class HostListModel: ObservableObject {
         accessTokens = InMemoryAccessTokenStore()
         keys = InMemoryKeyStore()
         #endif
-        hosts = store.hosts
+
+        // The host list and known-hosts database move into the App Group
+        // container so the File Provider extension — a separate process, alive
+        // when the app is not — reads the same files the app writes. Existing
+        // installs have them in the app's private Application Support; they are
+        // copied across once, byte for byte. See SloopStorage.migrateLegacyFile
+        // for why a copy rather than a decode/re-encode.
+        do {
+            let shared = try SloopStorage.sharedDirectory()
+            let legacy = try? SloopStorage.legacyApplicationSupportDirectory()
+            if let legacy {
+                try SloopStorage.migrateLegacyFile(
+                    from: legacy.appendingPathComponent("sloop-hosts.json"),
+                    to: SloopStorage.hostsFile(in: shared))
+                try SloopStorage.migrateLegacyFile(
+                    from: legacy.appendingPathComponent("sloop-known-hosts.json"),
+                    to: SloopStorage.knownHostsFile(in: shared))
+            }
+            store = HostStore(fileURL: SloopStorage.hostsFile(in: shared))
+            knownHosts = KnownHostsStore(fileURL: SloopStorage.knownHostsFile(in: shared))
+        } catch {
+            store = nil
+            knownHosts = nil
+            storageError = error.localizedDescription
+        }
+
+        hosts = store?.hosts ?? []
         // Lift legacy per-host PEMs into the library, but only once per
         // device: KeyLibrary.migrate is idempotent in the sense that it never
         // overwrites an existing entry, but it has no way to know a name is
@@ -68,6 +105,19 @@ final class HostListModel: ObservableObject {
             }
         }
         refreshLibraryKeys()
+    }
+
+    /// The host store, or the reason there isn't one.
+    ///
+    /// Every mutation goes through this rather than silently doing nothing when
+    /// the container is unreachable: a save that quietly no-ops is
+    /// indistinguishable from a save that worked until the user relaunches and
+    /// finds the host gone.
+    private func requireStore() throws -> HostStore {
+        guard let store else {
+            throw SloopStorage.StorageError.appGroupUnavailable(SloopStorage.appGroupIdentifier)
+        }
+        return store
     }
 
     /// Re-read the key library, capturing why if it can't be read.
@@ -98,6 +148,7 @@ final class HostListModel: ObservableObject {
     /// disk and dropped its password on the floor, so the save looked like it
     /// worked and every later connect failed to authenticate.
     func save(_ host: SSHHost, credential: Credential?) throws {
+        let store = try requireStore()
         store.upsert(host)
         hosts = store.hosts
         if let credential {
@@ -109,7 +160,8 @@ final class HostListModel: ObservableObject {
     /// exist. Secrets aren't in the config, so imported hosts use password auth
     /// until the user edits them. Returns the number of new hosts added.
     @discardableResult
-    func importConfig(_ text: String) -> Int {
+    func importConfig(_ text: String) throws -> Int {
+        let store = try requireStore()
         let existing = Set(hosts.map(\.alias))
         var added = 0
         for host in SSHConfigParser.parse(text) where !existing.contains(host.alias) {
@@ -132,6 +184,7 @@ final class HostListModel: ObservableObject {
     /// host — leaving a password in the keychain for a host that no longer
     /// exists, with nothing in the UI that could ever remove it.
     func delete(_ host: SSHHost) throws {
+        let store = try requireStore()
         store.remove(host)
         hosts = store.hosts
         try credentials.removeCredential(for: host.id)
@@ -198,7 +251,11 @@ final class HostListModel: ObservableObject {
     func connect(_ host: SSHHost) throws -> TerminalSession {
         let credential = try KeyLibrary.credential(for: host, keys: keys, credentials: credentials)
             ?? Credential()
-        let knownHosts = self.knownHosts
+        // Without the known-hosts database there is nothing to check a host key
+        // against, and connecting anyway would mean trusting whatever answered.
+        guard let knownHosts else {
+            throw SloopStorage.StorageError.appGroupUnavailable(SloopStorage.appGroupIdentifier)
+        }
         let accessTokens = self.accessTokens
 
         // Resolves the Access token at call time, so a reconnect after a fresh

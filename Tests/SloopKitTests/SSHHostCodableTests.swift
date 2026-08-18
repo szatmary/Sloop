@@ -19,6 +19,46 @@ final class SSHHostCodableTests: XCTestCase {
         XCTAssertEqual(host.alias, "box")
     }
 
+    /// A host saved before Files support existed must not arrive already
+    /// published: adding a field should never silently register a File
+    /// Provider domain for every host the user has.
+    func testHostsSavedBeforeFilesSupportAreNotPublished() throws {
+        let legacy = """
+        {"id":"6F1E2D3C-0000-0000-0000-000000000001","alias":"box",
+         "hostname":"box.example.com","port":22,"username":"matt",
+         "auth":{"password":{}},"useMosh":false}
+        """
+        let host = try JSONDecoder().decode(SSHHost.self, from: Data(legacy.utf8))
+        XCTAssertFalse(host.showsInFiles)
+        XCTAssertNil(host.filesRootPath)
+        XCTAssertNil(host.trimmedFilesRootPath)
+    }
+
+    func testFilesFieldsRoundTrip() throws {
+        let host = SSHHost(alias: "box", hostname: "box.example.com", username: "matt",
+                           showsInFiles: true, filesRootPath: "/srv/www")
+        let decoded = try JSONDecoder().decode(
+            SSHHost.self, from: try JSONEncoder().encode(host))
+        XCTAssertTrue(decoded.showsInFiles)
+        XCTAssertEqual(decoded.filesRootPath, "/srv/www")
+    }
+
+    /// A cleared text field must mean "use the server's default directory",
+    /// not "the path named by the empty string" — which would root the domain
+    /// at `/` and show the user a filesystem root they did not ask for.
+    func testABlankRootPathMeansTheServerDefault() {
+        XCTAssertNil(SSHHost(alias: "a", hostname: "h", username: "m",
+                             filesRootPath: "   ").trimmedFilesRootPath)
+        XCTAssertNil(SSHHost(alias: "a", hostname: "h", username: "m",
+                             filesRootPath: "").trimmedFilesRootPath)
+    }
+
+    func testARootPathIsNormalizedSoTwoSpellingsAgree() {
+        XCTAssertEqual(SSHHost(alias: "a", hostname: "h", username: "m",
+                               filesRootPath: " /srv//www/ ").trimmedFilesRootPath,
+                       "/srv/www")
+    }
+
     /// Every field set to a non-default value on purpose: the synthesized
     /// encoder uses `encodeIfPresent` for the optional `onConnectCommand`, so
     /// a `nil` value emits no key at all — meaning a decode that silently

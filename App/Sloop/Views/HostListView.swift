@@ -318,11 +318,14 @@ struct HostListView: View {
                   let text = String(data: data, encoding: .utf8) else {
                 return "Couldn't read that file as text."
             }
-            let count = model.importConfig(text)
-            switch count {
-            case 0: return "No new hosts found in that config."
-            case 1: return "Imported 1 host."
-            default: return "Imported \(count) hosts."
+            do {
+                switch try model.importConfig(text) {
+                case 0: return "No new hosts found in that config."
+                case 1: return "Imported 1 host."
+                case let count: return "Imported \(count) hosts."
+                }
+            } catch {
+                return error.localizedDescription
             }
         }
     }
