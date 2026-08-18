@@ -9,3 +9,12 @@
 //
 
 #import "MoshBridge.h"
+
+// Only the Tailscale variant (project.tailscale.yml) puts libtailscale's header
+// on the search path, so this is how Swift sees tsnet's C API there and nowhere
+// else. It cannot be a module map: libssh2.xcframework already ships one, and
+// Xcode copies every xcframework's headers into a single include/ directory
+// where two module.modulemap files collide.
+#if __has_include(<tailscale.h>)
+#include <tailscale.h>
+#endif

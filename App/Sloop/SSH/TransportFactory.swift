@@ -87,26 +87,28 @@ enum TransportFactory {
                                               accessTokens: accessTokens))
 
         case .tailscale:
-            // Sloop's own tailnet node isn't built yet — that is the embedded
-            // libtailscale work (a Go toolchain, its own xcframework and login
-            // flow; see the Tailscale section of
-            // Docs/superpowers/specs/2026-08-12-tunnel-integrations-design.md).
-            //
-            // Until it lands, a tailnet host is reachable only through the
-            // Tailscale app's system VPN, and when that is up the OS routes
-            // 100.64.0.0/10 and resolves MagicDNS for every app on the device —
-            // so an ordinary dial works and this method does nothing Direct
-            // wouldn't. When it is *not* up, saying so is the whole value here:
+            #if SLOOP_TAILSCALE
+            // Sloop's own tsnet node — no Tailscale app, no system VPN slot.
+            // Bringing it up happens inside the dial, so the first connect is
+            // where an unauthorized device is told to authorize itself.
+            return .ready(TailscaleDialer(host: host.hostname, port: host.port))
+            #else
+            // This build doesn't link libtailscale, so the only way a tailnet
+            // host is reachable is the Tailscale app's system VPN — and when
+            // that is up, the OS routes 100.64.0.0/10 and MagicDNS for every
+            // app, so an ordinary dial works and this method does nothing that
+            // Direct wouldn't. When it isn't up, saying so is the whole value:
             // the alternative is a name that doesn't resolve or a connect that
-            // times out, neither of which mentions Tailscale at all.
+            // times out, neither of which mentions Tailscale.
             guard TailnetPresence.isConnected else {
                 return .unavailable(
-                    "Sloop can't join your tailnet on its own yet, and this device " +
-                    "isn't on one, so \(host.hostname) can't be reached.\r\n" +
+                    "This build of Sloop can't join a tailnet on its own, and this " +
+                    "device isn't on one, so \(host.hostname) can't be reached.\r\n" +
                     "Install the Tailscale app and connect it, then set this host to " +
                     "Direct with its MagicDNS name.\r\n")
             }
             return .ready(TCPDialer(host: host.hostname, port: host.port))
+            #endif
         }
     }
 

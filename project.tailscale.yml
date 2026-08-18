@@ -1,0 +1,35 @@
+# Tailscale-enabled variant: layers libtailscale.xcframework onto the Mosh
+# project, so Sloop runs its own tsnet node and `TailscaleDialer` can reach
+# tailnet hosts without the Tailscale app or a system VPN slot.
+#
+# Kept as its own variant for the same reason Mosh is: the Go archive adds tens
+# of megabytes to the binary, and a user with no tailnet hosts should not carry
+# it. The base/SSH/Mosh builds stay lean, and `TransportFactory` falls back to
+# explaining the situation when `CTailscale` isn't importable.
+#
+# Requires (built by Scripts/build-libtailscale.sh, which needs a Go toolchain):
+#     Vendor/libtailscale.xcframework
+# Generate with:
+#     xcodegen generate --spec project.tailscale.yml
+include:
+  - project.mosh.yml
+
+targets:
+  Sloop_iOS:
+    dependencies:
+      - framework: Vendor/libtailscale.xcframework
+        embed: false
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_MOSH SLOOP_TAILSCALE
+        # tsnet's Go runtime pulls in the resolver and the Security framework
+        # for the system trust store.
+        OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation
+  Sloop_macOS:
+    dependencies:
+      - framework: Vendor/libtailscale.xcframework
+        embed: false
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_MOSH SLOOP_TAILSCALE
+        OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation
