@@ -197,14 +197,37 @@ Whatever the strip's absence looks like, it has to look deliberate on
 current hardware, not broken. (Lineup facts as of 2026-08 — re-check before
 building.)
 
+**Develop the model work on the Mac.** Foundation Models runs on macOS 26 with
+Apple silicon, and the development machine is a MacBook Air M4 on macOS 26.5 —
+so extraction and suggestion can be built and iterated locally, with no device
+deploy, no provisioning, and a compile-run loop measured in seconds. This is
+the single biggest practical lever on the feature, because the hard part is not
+the code but the prompt: how a screen is turned into commands, and what makes a
+suggestion good. That wants dozens of fast iterations against real captured
+screens, which is unbearable over a device deploy and trivial on the Mac.
+
+Two consequences for how it is built:
+
+- **Keep the model boundary free of iOS UI types.** Extraction and suggestion
+  take text in and return values out. Nothing about them should require a
+  `UIView`, a keyboard accessory, or an iOS-only framework, so they can be
+  exercised from the macOS app or a plain harness. This is good structure
+  regardless; being able to develop on the Mac is what makes it load-bearing.
+- **The strip is iOS-shaped and macOS is not.** There is no software keyboard to
+  attach to on the Mac, so the macOS presentation is a separate design question
+  (inline completion, a popup, a strip under the terminal) — deliberately not
+  answered here. The Mac's role in this spec is as the development and
+  prompt-tuning surface, not as a second product surface.
+
 Suggested build order:
 
 1. `CommandHistory`, capture on Return, and the suggestion strip ranked by
    frecency. Nothing here needs the model, and it makes the store and UI real
    before anything depends on them.
 2. `CommandExtractor` behind the availability gate — the model turns captured
-   screens into commands.
-3. Model re-ranking against the current screen.
+   screens into commands. Built and tuned on the Mac against real captured
+   screen text before any of it is wired to the iOS UI.
+3. Model suggestion against the current screen, tuned the same way.
 
 ## Accepted limitations
 
@@ -212,13 +235,13 @@ Suggested build order:
   hardware.** Elsewhere the strip does not appear. An alternative mode for older
   devices is planned as separate work; it is out of scope here so that this
   design is not shaped around a second, weaker one.
-- **It cannot be dogfooded on the author's iPad.** The paired device is an iPad
-  (9th generation) — A13, below the Apple Intelligence bar — so the only
-  hardware on hand that can run this is an iPhone 15 Pro Max (A17 Pro). The
-  device where phone-typing hurts most is the one that cannot run the fix, which
-  makes the deferred alternative mode more than a nicety. Any judgement about
-  how the strip *feels* on a tablet is untestable until there is M-series or
-  A17 Pro iPad hardware to hand.
+- **The strip cannot be dogfooded on the author's iPad.** The paired device is
+  an iPad (9th generation) — A13, below the Apple Intelligence bar — so
+  judgements about how suggestions *feel* on a tablet are untestable until there
+  is A17 Pro or M-series iPad hardware to hand. That is a real gap: the tablet
+  is where the strip has the most room and the most to prove. The model itself
+  is testable elsewhere (see Implementation notes) — it is the tablet-shaped
+  interaction that has no test surface.
 - **Extraction quality is the model's.** A mis-read screen produces a junk entry
   in a list the user can purge — not a wrong command executed.
 - **The model can suggest a wrong or destructive command.** That is the cost of
