@@ -14,6 +14,17 @@ include:
   - project.yml
 
 targets:
+  # libssh2 goes on the framework, not the app: every `import CSSH` now lives in
+  # App/SloopSSH. The app targets keep the dependency too so the linker resolves
+  # the static archive's symbols into the final binary.
+  SloopSSH_iOS:
+    dependencies:
+      - framework: Vendor/libssh2.xcframework
+        embed: false
+  SloopSSH_macOS:
+    dependencies:
+      - framework: Vendor/libssh2.xcframework
+        embed: false
   Sloop_iOS:
     dependencies:
       - framework: Vendor/libssh2.xcframework

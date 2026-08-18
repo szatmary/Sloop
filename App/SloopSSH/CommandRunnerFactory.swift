@@ -9,8 +9,8 @@ import SloopKit
 /// importable) it returns the real `LibSSH2CommandRunner`; otherwise it returns
 /// a runner that fails with a clear "SSH isn't built in yet" error, so callers
 /// compile and behave predictably during the libssh2 bring-up.
-enum CommandRunnerFactory {
-    static func ssh(host: SSHHost,
+public enum CommandRunnerFactory {
+    public static func ssh(host: SSHHost,
                     credential: Credential,
                     knownHosts: KnownHostsStore,
                     hostKeyVerifier: HostKeyVerifier) -> CommandRunner {
@@ -37,14 +37,14 @@ enum CommandRunnerFactory {
 /// A `CommandRunner` that always fails — used when SSH isn't compiled into the
 /// app yet, or when the requested host can't safely get a runner from this
 /// factory, so one-shot command callers have a well-defined fallback.
-final class UnavailableCommandRunner: CommandRunner {
+public final class UnavailableCommandRunner: CommandRunner {
     private let message: String
 
-    init(message: String = "SSH isn't built into this app yet — add Vendor/libssh2.xcframework (see Docs/SSH.md).") {
+    public init(message: String = "SSH isn't built into this app yet — add Vendor/libssh2.xcframework (see Docs/SSH.md).") {
         self.message = message
     }
 
-    func run(_ command: String, completion: @escaping (Result<CommandResult, Error>) -> Void) {
+    public func run(_ command: String, completion: @escaping (Result<CommandResult, Error>) -> Void) {
         completion(.failure(SSHError.notImplemented(message)))
     }
 }

@@ -14,7 +14,7 @@ import Security
 ///
 /// Requires the keychain-access-groups entitlement (Sloop.entitlements);
 /// unsigned builds get descriptive errors from set/remove, never silence.
-final class KeychainKeyStore: KeyStore {
+public final class KeychainKeyStore: KeyStore {
     // Team prefix is hardcoded rather than `$(AppIdentifierPrefix)` because
     // this string is also the CLI's (KeyCLI.swift) and any future non-app
     // caller's contract for which access group to open — a build variable
@@ -23,18 +23,18 @@ final class KeychainKeyStore: KeyStore {
     // (`$(AppIdentifierPrefix)org.szatmary.sloop.shared`, which Xcode
     // resolves to this same value for the `KR5WZAG3UE` team) — if you ever
     // sign with a different team, update both places together.
-    static let sharedAccessGroup = "KR5WZAG3UE.org.szatmary.sloop.shared"
+    public static let sharedAccessGroup = "KR5WZAG3UE.org.szatmary.sloop.shared"
 
     private let service: String
     private let accessGroup: String?
 
-    init(service: String = "org.szatmary.sloop.keys",
+    public init(service: String = "org.szatmary.sloop.keys",
          accessGroup: String? = KeychainKeyStore.sharedAccessGroup) {
         self.service = service
         self.accessGroup = accessGroup
     }
 
-    func keys() throws -> [NamedKey] {
+    public func keys() throws -> [NamedKey] {
         var query = baseQuery()
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitAll
@@ -55,7 +55,7 @@ final class KeychainKeyStore: KeyStore {
             .sorted { $0.name < $1.name }
     }
 
-    func key(named name: String) throws -> NamedKey? {
+    public func key(named name: String) throws -> NamedKey? {
         var query = baseQuery(account: name)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -72,7 +72,7 @@ final class KeychainKeyStore: KeyStore {
         return try JSONDecoder().decode(NamedKey.self, from: data)
     }
 
-    func setKey(_ key: NamedKey) throws {
+    public func setKey(_ key: NamedKey) throws {
         let data = try JSONEncoder().encode(key)
         let query = baseQuery(account: key.name)
 
@@ -101,7 +101,7 @@ final class KeychainKeyStore: KeyStore {
         }
     }
 
-    func removeKey(named name: String) throws {
+    public func removeKey(named name: String) throws {
         let status = SecItemDelete(baseQuery(account: name) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw keychainError(status, "removing key '\(name)'")

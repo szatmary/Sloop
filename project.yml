@@ -28,6 +28,39 @@ packages:
     path: .
 
 targetTemplates:
+  # Everything that touches libssh2, the keychain, or tsnet, in a framework the
+  # app and the File Provider extension both embed.
+  #
+  # It cannot live in SloopKit: that package is Foundation-only so `swift test`
+  # runs on Linux CI, and libssh2 would end that. It cannot live in App/Sloop
+  # either — those are the app target's sources, which an extension cannot
+  # link. Hence a third layer.
+  SloopSSHFramework:
+    type: framework
+    sources:
+      - path: App/SloopSSH
+    dependencies:
+      - package: SloopKit
+        product: SloopKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.szatmary.sloop.ssh
+        # Both platform targets must produce the *same* module name, or
+        # `import SloopSSH` resolves on one platform and not the other. Without
+        # this the module would be SloopSSH_iOS / SloopSSH_macOS, after the
+        # target names.
+        PRODUCT_NAME: SloopSSH
+        PRODUCT_MODULE_NAME: SloopSSH
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.9"
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: "NO"
+        # The extension loads this from the host app's Frameworks directory.
+        DYLIB_INSTALL_NAME_BASE: "@rpath"
+        SKIP_INSTALL: YES
+
   SloopApp:
     type: application
     sources:
@@ -67,13 +100,27 @@ targetTemplates:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
 
 targets:
+  SloopSSH_iOS:
+    templates: [SloopSSHFramework]
+    platform: iOS
+
+  SloopSSH_macOS:
+    templates: [SloopSSHFramework]
+    platform: macOS
+
   Sloop_iOS:
     templates: [SloopApp]
     platform: iOS
+    dependencies:
+      - target: SloopSSH_iOS
+        embed: true
 
   Sloop_macOS:
     templates: [SloopApp]
     platform: macOS
+    dependencies:
+      - target: SloopSSH_macOS
+        embed: true
     # Run the app-level tests under the macOS scheme:
     #   xcodebuild test -scheme Sloop_macOS
     scheme:
@@ -87,6 +134,7 @@ targets:
       - path: Tests/SloopAppTests
     dependencies:
       - target: Sloop_macOS
+      - target: SloopSSH_macOS
       - package: SwiftTerm
       - package: SloopKit
         product: SloopKit

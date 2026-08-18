@@ -3,6 +3,7 @@
 
 import SwiftUI
 import SloopKit
+import SloopSSH
 
 /// View model backing `HostListView`. Owns the host list, the known-hosts
 /// database, and the credential store, and turns a saved `SSHHost` into a live

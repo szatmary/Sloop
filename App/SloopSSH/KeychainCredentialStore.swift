@@ -10,26 +10,26 @@ import Security
 /// keyed by the host's UUID, holding the JSON-encoded `Credential`.
 ///
 /// Secrets never touch `HostStore`'s plain-JSON file — only the keychain.
-final class KeychainCredentialStore: CredentialStore {
+public final class KeychainCredentialStore: CredentialStore {
     private let items: GenericPasswordStore
 
-    init(service: String = "org.szatmary.sloop.credentials") {
+    public init(service: String = "org.szatmary.sloop.credentials") {
         items = GenericPasswordStore(service: service)
     }
 
     /// Throws when the keychain refuses the read; nil means this host has no
     /// stored secret. A refused read reported as nil looks exactly like a host
     /// nobody ever typed a password for — see `GenericPasswordStore.data`.
-    func credential(for hostID: UUID) throws -> Credential? {
+    public func credential(for hostID: UUID) throws -> Credential? {
         guard let data = try items.data(for: hostID.uuidString) else { return nil }
         return try JSONDecoder().decode(Credential.self, from: data)
     }
 
-    func setCredential(_ credential: Credential, for hostID: UUID) throws {
+    public func setCredential(_ credential: Credential, for hostID: UUID) throws {
         try items.set(try JSONEncoder().encode(credential), for: hostID.uuidString)
     }
 
-    func removeCredential(for hostID: UUID) throws {
+    public func removeCredential(for hostID: UUID) throws {
         try items.remove(for: hostID.uuidString)
     }
 }
