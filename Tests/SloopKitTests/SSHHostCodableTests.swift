@@ -19,13 +19,28 @@ final class SSHHostCodableTests: XCTestCase {
         XCTAssertEqual(host.alias, "box")
     }
 
+    /// Every field set to a non-default value on purpose: the synthesized
+    /// encoder uses `encodeIfPresent` for the optional `onConnectCommand`, so
+    /// a `nil` value emits no key at all — meaning a decode that silently
+    /// left it `nil` (e.g. because it had been dropped from `CodingKeys`,
+    /// exactly the mistake caught by hand during the recent merge) would
+    /// still pass `XCTAssertEqual` against a host built with the default
+    /// `nil`. Only a non-nil value round-tripping correctly actually proves
+    /// the key survives encode/decode; `port` and `useMosh` get the same
+    /// treatment so this doesn't merely re-confirm their own defaults either.
     func testRoundTripsCloudflareAccess() throws {
         let host = SSHHost(alias: "tunnel", hostname: "ssh.example.com",
-                           username: "matt", connectionMethod: .cloudflareAccess)
+                           port: 2222, username: "matt",
+                           useMosh: true,
+                           connectionMethod: .cloudflareAccess,
+                           onConnectCommand: "tmux attach || tmux new")
         let data = try JSONEncoder().encode(host)
         let back = try JSONDecoder().decode(SSHHost.self, from: data)
         XCTAssertEqual(back, host)
         XCTAssertEqual(back.connectionMethod, .cloudflareAccess)
+        XCTAssertEqual(back.onConnectCommand, "tmux attach || tmux new")
+        XCTAssertEqual(back.port, 2222)
+        XCTAssertTrue(back.useMosh)
     }
 
     /// A method this build doesn't know must FAIL to decode (Task 3 makes the
