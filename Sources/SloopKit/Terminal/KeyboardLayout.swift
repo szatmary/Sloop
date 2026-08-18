@@ -296,11 +296,16 @@ public struct KeyboardLayout: Equatable, Sendable {
                 + "zxcvbnm".map { KeyCap.character($0) }
                 + [.character(","), .character("."), .character("/"),
                    .modifier(.shift, width: .wide(2.25))],
-            // The modifier row, then space. `` ` `` sits beside it because the
-            // number row it belongs to is the row this keyboard gives up to the
-            // number pad; everything else that row carried — the digits, and
-            // `- =` — is on the pad.
-            [.modifier(.control), .modifier(.option), .character("`"),
+            // One control, at caps lock. ANSI puts control down here and caps
+            // lock up there, but caps lock is dead weight in a terminal while
+            // control is the most-typed key on the board — so it takes the
+            // easiest position to reach, and a second copy two rows below would
+            // just be a key that could have been something else.
+            //
+            // `` ` `` sits beside space because the row it belongs to is the one
+            // this keyboard trades for the number pad; the rest of that row —
+            // the digits, and `- =` — is on the pad.
+            [.modifier(.option), .character("`"),
              .character(" ", width: .wide(6)),
              .modifier(.option), .command(.dismissKeyboard)],
         ]
