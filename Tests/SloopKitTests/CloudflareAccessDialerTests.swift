@@ -15,6 +15,16 @@ final class CloudflareAccessDialerTests: XCTestCase {
         let listener: NWListener
         private(set) var port: UInt16 = 0
 
+        /// Pings seen from the client. Read from the test thread while the
+        /// connection's queue writes it, so it goes through a lock.
+        private let lock = NSLock()
+        private var pingCountStorage = 0
+        var pingCount: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return pingCountStorage
+        }
+
         init() throws {
             let params = NWParameters.tcp
             let ws = NWProtocolWebSocket.Options()
@@ -39,12 +49,21 @@ final class CloudflareAccessDialerTests: XCTestCase {
 
         private func echoLoop(_ conn: NWConnection) {
             conn.receiveMessage { data, context, _, error in
-                guard let data, error == nil else { return }
-                let meta = NWProtocolWebSocket.Metadata(opcode: .binary)
-                let ctx = NWConnection.ContentContext(identifier: "echo",
-                                                      metadata: [meta])
-                conn.send(content: data, contentContext: ctx,
-                          completion: .contentProcessed { _ in })
+                guard error == nil else { return }
+                let opcode = (context?.protocolMetadata(definition: NWProtocolWebSocket.definition)
+                    as? NWProtocolWebSocket.Metadata)?.opcode
+                if opcode == .ping {
+                    // `autoReplyPing` sends the pong; this only counts them.
+                    self.lock.lock()
+                    self.pingCountStorage += 1
+                    self.lock.unlock()
+                } else if let data, !data.isEmpty {
+                    let meta = NWProtocolWebSocket.Metadata(opcode: .binary)
+                    let ctx = NWConnection.ContentContext(identifier: "echo",
+                                                          metadata: [meta])
+                    conn.send(content: data, contentContext: ctx,
+                              completion: .contentProcessed { _ in })
+                }
                 self.echoLoop(conn)
             }
         }
@@ -150,6 +169,61 @@ final class CloudflareAccessDialerTests: XCTestCase {
 
         XCTAssertEqual(transferResult, .completed, "transfer stalled before completing")
         XCTAssertEqual(echoed, payload)
+    }
+
+    // MARK: Staying alive while idle
+
+    /// An SSH session that is being read rather than typed into sends
+    /// nothing, and Cloudflare's edge (like every NAT between it and here)
+    /// eventually closes a WebSocket that carries nothing. A tunnel with no
+    /// keepalive therefore dies of its own accord while the user is looking
+    /// at it. Pings are what stop that, so assert they actually reach the far
+    /// end — repeatedly, not just once — and that the tunnel still carries
+    /// data afterwards.
+    func testSendsPeriodicKeepalivePingsWhileIdle() throws {
+        let server = try WSEchoServer()
+        server.start()
+        defer { server.listener.cancel() }
+
+        let dialer = CloudflareAccessDialer(
+            url: URL(string: "ws://127.0.0.1:\(server.port)")!,
+            hostname: "ssh.example.com", token: "test-token",
+            pingInterval: 0.05)
+        let fd = try dialer.dial()
+        defer { close(fd) }
+
+        // Deliberately no traffic on `fd`: this is the idle case.
+        let deadline = Date().addingTimeInterval(5)
+        while server.pingCount < 3, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        XCTAssertGreaterThanOrEqual(server.pingCount, 3,
+                                    "an idle tunnel must keep pinging, not fall silent")
+
+        let sent: [UInt8] = Array("still here\r\n".utf8)
+        _ = sent.withUnsafeBytes { write(fd, $0.baseAddress, sent.count) }
+        var buf = [UInt8](repeating: 0, count: 64)
+        var got: [UInt8] = []
+        while got.count < sent.count {
+            let n = read(fd, &buf, buf.count)
+            guard n > 0 else { break }
+            got.append(contentsOf: buf[0..<n])
+        }
+        XCTAssertEqual(got, sent, "the tunnel must still carry data after idling")
+    }
+
+    /// The other half of the same failure. URLSession's
+    /// `timeoutIntervalForRequest` is not a connect timeout — it is how long
+    /// the task may go without receiving data — so its 60 s default ended an
+    /// idle tunnel after a minute, and `timeoutIntervalForResource` (7 days)
+    /// would eventually end even a busy one. Waiting out either in a test is
+    /// not an option, so assert the configuration itself.
+    func testSessionConfigurationDoesNotTimeOutAnIdleTunnel() {
+        let configuration = CloudflareAccessDialer.makeSessionConfiguration()
+        XCTAssertGreaterThan(configuration.timeoutIntervalForRequest, 60 * 60,
+                             "a quiet minute must not end an SSH session")
+        XCTAssertGreaterThan(configuration.timeoutIntervalForResource, 60 * 60 * 24 * 30,
+                             "a long-lived session must not be ended by the resource timeout")
     }
 
     // MARK: Raw TCP server (header + error mapping)

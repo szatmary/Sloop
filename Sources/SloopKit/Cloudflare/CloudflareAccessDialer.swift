@@ -20,6 +20,7 @@ public final class CloudflareAccessDialer: NSObject, Dialer {
     private let hostname: String
     private let token: String
     private let openTimeout: TimeInterval
+    private let pingInterval: TimeInterval
 
     private var relay: SocketPairRelay?
     private var task: URLSessionWebSocketTask?
@@ -45,6 +46,19 @@ public final class CloudflareAccessDialer: NSObject, Dialer {
     /// comment for why that distinction is load-bearing, not cosmetic.
     private let inboundQueue = DispatchQueue(label: "org.szatmary.sloop.cfaccessdialer.inbound")
 
+    /// Fires the keepalive pings. Its own queue, so a ping never waits behind
+    /// an inbound frame being written into the relay.
+    private let keepaliveQueue = DispatchQueue(label: "org.szatmary.sloop.cfaccessdialer.keepalive")
+    /// Guards the teardown state machine: whether `tearDown()` has run, and
+    /// the ping timer it has to cancel. A lock rather than plain properties
+    /// because `dial()` installs the timer on the dialing thread while
+    /// `tearDown()` can already be running on the relay's pump thread
+    /// (`onLocalClosed` fires there) or on URLSession's delegate queue.
+    private let teardownLock = NSLock()
+    private var isTornDown = false
+    /// The repeating ping timer, live for as long as the tunnel is.
+    private var keepalive: DispatchSourceTimer?
+
     /// - Parameters:
     ///   - url: `wss://<hostname>` in production; tests inject `ws://127.0.0.1:…`.
     ///   - hostname: the Access app hostname, used in error messages.
@@ -53,20 +67,67 @@ public final class CloudflareAccessDialer: NSObject, Dialer {
     ///     `onOutbound`) how long a single outbound frame's send is allowed
     ///     to sit unacknowledged before the dialer gives up and tears down.
     ///     One knob for both is deliberate: both are "how long is this
-    ///     network allowed to be silent before we call it dead."
+    ///     network allowed to be silent before we call it dead." It bounds
+    ///     nothing about an *idle* tunnel — see `pingInterval`.
+    ///   - pingInterval: how often a WebSocket ping is sent while the tunnel
+    ///     is open. Tests inject a short one; see `startKeepalive`.
     public init(url: URL, hostname: String, token: String,
-                openTimeout: TimeInterval = 20) {
+                openTimeout: TimeInterval = 20,
+                pingInterval: TimeInterval = 30) {
         self.url = url
         self.hostname = hostname
         self.token = token
         self.openTimeout = openTimeout
+        self.pingInterval = pingInterval
     }
+
+    /// The session configuration a tunnel runs on.
+    ///
+    /// `.ephemeral` for the usual reason (no cookie or credential storage for
+    /// a token we carry in a header ourselves), but with both of URLSession's
+    /// timeouts pushed far out, because neither of their defaults means what
+    /// it sounds like here.
+    ///
+    /// `timeoutIntervalForRequest` is not "how long may connecting take" — it
+    /// is how long the task may go without receiving data, and for a
+    /// WebSocket that is *how long the tunnel may be quiet*. At its 60 s
+    /// default, one idle minute failed the outstanding `task.receive()`;
+    /// `receiveLoop` then called `relay.finishInbound()`, libssh2 read a clean
+    /// EOF, and a perfectly good SSH session closed itself while the user was
+    /// reading. `timeoutIntervalForResource` (7 days on an ephemeral config)
+    /// is the same bug on a longer fuse: it ends the task no matter how busy
+    /// it has been.
+    ///
+    /// Sloop already learned this on the Mosh side — see 64ca4d7, which
+    /// removed a 15 s "the server went quiet" kill for the same reason.
+    /// Surviving silence is the point of a terminal that is meant to still be
+    /// there when you come back to it. What replaces the timeout is a
+    /// keepalive: see `startKeepalive`.
+    ///
+    /// Bounding the *handshake* is unaffected — `dial()` does that itself with
+    /// `opened.wait(timeout:)` — as is noticing a dead link while data is
+    /// actually moving, which `onOutbound`'s bounded send wait covers.
+    ///
+    /// Internal rather than private so a test can assert the timeouts really
+    /// were pushed out: nothing else about this configuration is observable
+    /// from outside a live session.
+    static func makeSessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = neverTimeOut
+        configuration.timeoutIntervalForResource = neverTimeOut
+        return configuration
+    }
+
+    /// "Never", as a number these APIs can hold. A year is longer than any
+    /// session that will ever exist and short of the infinities and
+    /// `greatestFiniteMagnitude`s that make deadline arithmetic misbehave.
+    private static let neverTimeOut: TimeInterval = 60 * 60 * 24 * 365
 
     public func dial() throws -> Int32 {
         var request = URLRequest(url: url)
         request.setValue(token, forHTTPHeaderField: "cf-access-token")
 
-        let session = URLSession(configuration: .ephemeral,
+        let session = URLSession(configuration: Self.makeSessionConfiguration(),
                                  delegate: self, delegateQueue: nil)
         self.session = session
         let task = session.webSocketTask(with: request)
@@ -129,7 +190,46 @@ public final class CloudflareAccessDialer: NSObject, Dialer {
         relay.onLocalClosed = { [weak self] in self?.tearDown() }
         relay.start()
         receiveLoop(task, relay)
+        startKeepalive(task)
         return relay.localFD
+    }
+
+    /// Ping the far end every `pingInterval` for as long as the tunnel is up.
+    ///
+    /// Cloudflare's edge closes a WebSocket that carries nothing for long
+    /// enough, and so does every NAT and stateful firewall between here and
+    /// it. `cloudflared` keeps its own tunnels alive exactly this way; without
+    /// it, an SSH session that is merely being *read* rather than typed into
+    /// dies on its own, which is the failure this and the timeout change in
+    /// `makeSessionConfiguration` are two halves of.
+    ///
+    /// A ping that fails needs no handling here, for the same reason a failed
+    /// send doesn't (see `onOutbound`): whatever killed it also resolves the
+    /// in-flight `task.receive()` as `.failure`, and `receiveLoop` turns that
+    /// into the clean EOF libssh2 expects. One place notices the tunnel died,
+    /// not three. Deliberately *not* a liveness check with a deadline of its
+    /// own: a missing pong on a slow link would then close a session that has
+    /// nothing wrong with it, which is the trap 64ca4d7 pulled Mosh out of.
+    private func startKeepalive(_ task: URLSessionWebSocketTask) {
+        let timer = DispatchSource.makeTimerSource(queue: keepaliveQueue)
+        timer.schedule(deadline: .now() + pingInterval, repeating: pingInterval)
+        timer.setEventHandler { [weak task] in
+            task?.sendPing { _ in }
+        }
+        // Teardown can beat us here: `relay.start()` above means the pump is
+        // already running, and a local close on it calls `tearDown()` before
+        // this line. Handing that case a timer nobody will ever cancel would
+        // leave it firing for the life of the process.
+        teardownLock.lock()
+        let missedTeardown = isTornDown
+        if !missedTeardown { keepalive = timer }
+        teardownLock.unlock()
+        // Resume unconditionally, even when it is about to be cancelled:
+        // libdispatch traps on the release of a suspended source, and a timer
+        // created here has never been resumed. Nothing can fire in between —
+        // the first deadline is a whole `pingInterval` away.
+        timer.resume()
+        if missedTeardown { timer.cancel() }
     }
 
     private func receiveLoop(_ task: URLSessionWebSocketTask, _ relay: SocketPairRelay) {
@@ -199,7 +299,18 @@ public final class CloudflareAccessDialer: NSObject, Dialer {
         }
     }
 
+    /// Idempotent, and callable from any of the threads that can discover the
+    /// tunnel is over: the dialing thread, the relay's pump thread, and
+    /// URLSession's delegate queue.
     private func tearDown() {
+        teardownLock.lock()
+        guard !isTornDown else { teardownLock.unlock(); return }
+        isTornDown = true
+        let timer = keepalive
+        keepalive = nil
+        teardownLock.unlock()
+
+        timer?.cancel()
         task?.cancel(with: .normalClosure, reason: nil)
         session?.finishTasksAndInvalidate()
         relay?.shutdown()

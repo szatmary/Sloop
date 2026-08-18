@@ -74,7 +74,10 @@ side never knows which dialer produced it.
   request header, binary frames carrying the raw SSH byte stream. A
   [`SocketPairRelay`](../Sources/SloopKit/Net/SocketPairRelay.swift) bridges
   that callback-shaped stream to one end of a `socketpair()` and hands the
-  other end out as the fd libssh2 runs over. Note that a dropped WebSocket
+  other end out as the fd libssh2 runs over. It pings every 30 s and runs with
+  URLSession's timeouts pushed out of the way, because an idle tunnel must
+  outlive silence rather than be ended by it — the same lesson as 64ca4d7 on
+  the Mosh side. Note that a dropped WebSocket
   reaches libssh2 as a *clean EOF* — the relay calls `finishInbound()`, so the
   fd half-closes and `read()` returns 0. Any bug about libssh2 mishandling a
   negative return (a TCP reset, a vanished network) is therefore a
