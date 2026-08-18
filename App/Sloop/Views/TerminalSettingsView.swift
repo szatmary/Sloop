@@ -60,25 +60,21 @@ struct TerminalSettingsView: View {
                 Section("Suggestions") {
                     Text("""
                     As you type, Sloop offers the word that usually comes next — \
-                    ranked by how often and how recently it followed what you've \
-                    already typed on this host. Tap a suggestion to use it.
-
-                    It learns from the commands you run there, and reads the \
-                    host's own shell history once per connection to be useful \
-                    before you've typed anything. Each host decides for itself — \
-                    the switch is in that host's settings, beside Use Mosh.
+                    learnt from the commands you run on a host, and from that \
+                    host's own shell history, which it reads once when you \
+                    connect. Each host decides for itself, in its own settings \
+                    beside Use Mosh.
                     """)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
                     Label("""
-                    Nothing leaves this device. Your command history is stored \
-                    on this iPhone or iPad, separately for each host. It is never \
-                    synced — not to iCloud, not to another device you own — and \
-                    it is never sent to a server, to Sloop's author, or to \
-                    anyone else, for any reason. There is no analytics, no \
-                    telemetry, and no account. A host with suggestions switched \
-                    off is not recorded at all.
+                    What Sloop learns stays on this device. It isn't synced to \
+                    iCloud, it isn't shared with your other devices, and it is \
+                    never sent to a server or to anyone else. There's no account \
+                    and nothing to opt out of, because there is nowhere for it \
+                    to go. A host with suggestions switched off is not recorded \
+                    at all.
                     """, systemImage: "lock")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
