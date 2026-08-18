@@ -112,6 +112,10 @@ public enum KeyEncoder {
             return bytes(for: resolved, modifiers: armedModifiers.subtracting(.shift))
         case .key(let terminalKey):
             return bytes(for: terminalKey, modifiers: armedModifiers, applicationCursor: applicationCursor)
+        case .chord(let modifiers, let character):
+            // The chord's own modifiers, plus anything armed — ⌃C with shift
+            // armed is still a legitimate thing to type.
+            return bytes(for: character, modifiers: modifiers.union(armedModifiers))
         case .modifier, .command, .blank:
             return nil
         }

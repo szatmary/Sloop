@@ -175,11 +175,11 @@ final class CompactKeyboardView: UIInputView, KeyCapViewDelegate, UIInputViewAud
         case .blank:
             break   // a hole in the grid; nothing to send, nothing to arm
 
-        case .character, .key:
-            // The character/key dispatch and the shift-before-encoding rule
-            // both live in `KeyEncoder.bytes(for:armedModifiers:applicationCursor:)`
+        case .character, .key, .chord:
+            // The character/key/chord dispatch and the shift-before-encoding
+            // rule all live in `KeyEncoder.bytes(for:armedModifiers:applicationCursor:)`
             // now — see its doc comment. It returns `nil` only for
-            // `.modifier`/`.command`, neither of which reaches this branch.
+            // `.modifier`/`.command`/`.blank`, none of which reaches this branch.
             if let bytes = KeyEncoder.bytes(for: value,
                                             armedModifiers: controller.armedModifiers,
                                             applicationCursor: controller.applicationCursor) {

@@ -72,6 +72,16 @@ final class KeyCapView: UIControl {
         }
         backgroundColor = .secondarySystemFill
         layer.cornerRadius = 5
+        // The reverse-L return key is two caps drawn touching; rounding the
+        // corners where they meet would draw a seam straight through it.
+        switch cap.join {
+        case .none:
+            break
+        case .below:
+            layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        case .above:
+            layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        }
         isMultipleTouchEnabled = false
 
         primaryLabel.text = Self.label(for: cap.primary)
@@ -107,6 +117,8 @@ final class KeyCapView: UIControl {
         case .character(let c):        return c == " " ? "space" : String(c)
         case .key(let key):            return label(for: key)
         case .modifier(let modifiers): return label(for: modifiers)
+        case .chord(let modifiers, let character):
+            return label(for: modifiers) + String(character).uppercased()
         case .command(let command):
             switch command {
             case .dismissKeyboard: return "⌨︎↓"
@@ -172,6 +184,8 @@ final class KeyCapView: UIControl {
         case .character(let c):        return c == " " ? "space" : String(c)
         case .key(let key):            return accessibilityLabel(for: key)
         case .modifier(let modifiers): return accessibilityLabel(for: modifiers)
+        case .chord(let modifiers, let character):
+            return accessibilityLabel(for: modifiers) + " " + String(character)
         case .command(let command):
             switch command {
             case .dismissKeyboard: return "dismiss keyboard"

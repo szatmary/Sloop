@@ -483,20 +483,22 @@ final class KeyboardLayoutTests: XCTestCase {
             frames[flat.firstIndex(where: predicate)!]
         }
 
-        // One unit, 47.5319, shared by the letters, the navigation cluster and
+        // One unit, 46.5417, shared by the letters, the navigation cluster and
         // the number pad — the keyboard has one key size, not three. It is
         // solved for directly: the busiest letter row has to fit all three
         // blocks plus the gap between them, and that equation sets it.
-        XCTAssertEqual(frame { $0.primary == .character("q") }.width, 47.5319, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 47.5319, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 47.5319, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.up) }.width, 47.5319, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character("q") }.width, 46.5417, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 46.5417, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 46.5417, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.up) }.width, 46.5417, accuracy: 0.001)
         // ANSI widths, as multiples of that unit: 1.75 for control at caps
         // lock, 2.25 for shift, 1.5 for backspace.
-        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 83.1809, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 106.9468, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 71.2979, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 81.4479, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 104.7188, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 69.8125, accuracy: 0.001)
         // Six units of space bar, not the 690pt runway `.flexible` gave it.
-        XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 285.1915, accuracy: 0.001)
+        // The unit shrank a touch from 47.5319 when the ⌃-chord keys joined the
+        // bottom row — four more slots on a row that had them going spare.
+        XCTAssertEqual(frame { $0.primary == .character(" ") }.width, 279.25, accuracy: 0.001)
     }
 }

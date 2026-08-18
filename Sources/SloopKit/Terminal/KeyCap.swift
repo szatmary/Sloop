@@ -21,6 +21,11 @@ public struct KeyCap: Equatable, Sendable {
         case modifier(KeyModifiers)
         /// An app-level action. Emits nothing to the remote.
         case command(Command)
+        /// A modifier and a key in one press — ⌃C, ⌃D — for the handful of
+        /// chords a terminal needs constantly. Distinct from arming `.modifier`
+        /// and then tapping a letter: that is two presses and leaves the
+        /// modifier armed if the second never comes.
+        case chord(KeyModifiers, Character)
         /// A hole in the grid: draws nothing, does nothing, occupies a slot.
         /// The arrow cluster's inverted T is three columns wide and only has
         /// keys in two of its rows; without a way to say "nothing here", the
@@ -42,6 +47,20 @@ public struct KeyCap: Equatable, Sendable {
         case flexible
     }
 
+    /// How a cap joins the key drawn above or below it.
+    ///
+    /// The reverse-L return key is two caps — a narrow one on the top row, a
+    /// wider one below — drawn touching, with only their outer corners rounded,
+    /// so they read as the single L-shaped key a keyboard has. Both send
+    /// return, which is the whole of what "one key" has to mean here.
+    public enum Join: Equatable, Sendable {
+        case none
+        /// Extends down into the row below, and squares its bottom corners.
+        case below
+        /// Squares its top corners to meet the cap above.
+        case above
+    }
+
     public let primary: Value
     /// Reached by dragging up from the key. Nil where a layout gives symbols
     /// their own row instead of hiding them behind a gesture.
@@ -50,15 +69,18 @@ public struct KeyCap: Equatable, Sendable {
     /// Whether press-and-hold repeats — true for backspace and arrows, where
     /// holding is how the key is normally used.
     public let repeats: Bool
+    public let join: Join
 
     public init(primary: Value,
                 secondary: Value? = nil,
                 width: Width = .unit,
-                repeats: Bool = false) {
+                repeats: Bool = false,
+                join: Join = .none) {
         self.primary = primary
         self.secondary = secondary
         self.width = width
         self.repeats = repeats
+        self.join = join
     }
 
     // MARK: Convenience constructors
@@ -72,8 +94,10 @@ public struct KeyCap: Equatable, Sendable {
     public static func key(_ terminalKey: TerminalKey,
                            secondary: Value? = nil,
                            width: Width = .unit,
-                           repeats: Bool = false) -> Self {
-        Self(primary: .key(terminalKey), secondary: secondary, width: width, repeats: repeats)
+                           repeats: Bool = false,
+                           join: Join = .none) -> Self {
+        Self(primary: .key(terminalKey), secondary: secondary, width: width,
+             repeats: repeats, join: join)
     }
 
     public static func modifier(_ modifiers: KeyModifiers,
@@ -88,6 +112,10 @@ public struct KeyCap: Equatable, Sendable {
 
     /// An empty slot, for holding a shape.
     public static let blank = Self(primary: .blank)
+
+    public static func chord(_ modifiers: KeyModifiers, _ character: Character) -> Self {
+        Self(primary: .chord(modifiers, character))
+    }
 
     /// Every character this cap can produce, by tap or by drag. Used by the
     /// layout parity test to prove the phone and tablet tables reach the same

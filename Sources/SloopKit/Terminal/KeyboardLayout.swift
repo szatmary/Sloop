@@ -249,7 +249,10 @@ public struct KeyboardLayout: Equatable, Sendable {
                 case .wide(let scale): capWidth = unit * scale
                 case .flexible:        capWidth = flexibleWidth
                 }
-                result.append(KeyFrame(x: x, y: y, width: capWidth, height: rowHeight - spacing))
+                // A cap joining the row below covers the gap between them, so
+                // the two halves of the reverse-L return key touch.
+                let capHeight = cap.join == .below ? rowHeight : rowHeight - spacing
+                result.append(KeyFrame(x: x, y: y, width: capWidth, height: capHeight))
                 x += capWidth + spacing
             }
 
@@ -286,12 +289,16 @@ public struct KeyboardLayout: Equatable, Sendable {
             // uses a terminal puts it anyway.
             [.key(.escape), .key(.tab)]
                 + "qwertyuiop".map { KeyCap.character($0) }
-                + [.character("["), .character("]"), .character("\\"),
-                   .key(.backspace, width: .wide(1.5), repeats: true)],
+                + [.character("["), .character("]"),
+                   .key(.backspace, width: .wide(1.5), repeats: true),
+                   // Upper half of the reverse-L return key. Narrower than the
+                   // half below it, and flush to the same right edge, which is
+                   // what makes the L.
+                   .key(.return, width: .wide(1.5), join: .below)],
             [.modifier(.control, width: .wide(1.75))]
                 + "asdfghjkl".map { KeyCap.character($0) }
-                + [.character(";"), .character("'"),
-                   .key(.return, width: .wide(2.25))],
+                + [.character(";"), .character("'"), .character("\\"),
+                   .key(.return, width: .wide(1.75), join: .above)],
             [.modifier(.shift, width: .wide(2.25))]
                 + "zxcvbnm".map { KeyCap.character($0) }
                 + [.character(","), .character("."), .character("/"),
@@ -305,9 +312,18 @@ public struct KeyboardLayout: Equatable, Sendable {
             // `` ` `` sits beside space because the row it belongs to is the one
             // this keyboard trades for the number pad; the rest of that row —
             // the digits, and `- =` — is on the pad.
+            // The chords a shell needs constantly, in the room the bottom row
+            // has going spare: interrupt, end-of-file, suspend, clear. They
+            // were on the smart-keys bar this keyboard replaced, and typing
+            // them by arming control and reaching for a letter is two presses
+            // for something people hit a hundred times a session.
             [.modifier(.option), .character("`"),
              .character(" ", width: .wide(6)),
-             .modifier(.option), .command(.dismissKeyboard)],
+             .modifier(.option),
+             .chord(.control, "c"), .chord(.control, "d"),
+             .chord(.control, "z"), .chord(.control, "l"),
+             .key(.delete, repeats: true),
+             .command(.dismissKeyboard)],
         ]
 
         // Navigation and arrows, three columns, as on a full keyboard: paging
@@ -315,7 +331,10 @@ public struct KeyboardLayout: Equatable, Sendable {
         // with ← and → either side. The blanks are what make that shape
         // possible — a T needs its holes as much as its keys.
         let navigationRows: [[KeyCap]] = [
-            [.key(.delete), .key(.home), .key(.pageUp)],
+            // Forward delete lives on the bottom row, not up here: it is a
+            // typing key, reached mid-word without leaving the letters, and the
+            // cluster is for the keys you look away to press.
+            [.blank, .key(.home), .key(.pageUp)],
             [.blank, .key(.end), .key(.pageDown)],
             [.blank, .key(.up, repeats: true), .blank],
             [.key(.left, repeats: true), .key(.down, repeats: true),
