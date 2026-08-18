@@ -95,10 +95,10 @@ final class KeyboardLayoutTests: XCTestCase {
     /// two ways to type `[` means one of them is a key that could have carried
     /// something else.
     ///
-    /// The number pad is excluded, and duplicating digits there is the entire
-    /// point of one: a pad that didn't repeat the number row wouldn't be a
-    /// number pad. Its keys are checked for their own consistency by
-    /// `testKeypadRepeatsTheNumberRowDeliberately`.
+    /// The number pad is excluded because a physical keyboard's isn't exempt
+    /// either: `/ * - =` sit on the pad *and* among the symbols there, and
+    /// reaching an operator from whichever hand is already there is the point.
+    /// Digits are the exception, pinned separately below.
     func testNoDuplicateCharacterWithinTheMainBlock() {
         for context in [padLandscape, padPortrait, phonePortrait, phoneLandscape] {
             var seen: Set<Character> = []
@@ -114,20 +114,22 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    /// Everything on the pad is also on the main block — a pad is a second way
-    /// to reach keys you already have, never the only way to reach something,
-    /// which would make it load-bearing on the one device that has it.
-    func testKeypadRepeatsTheNumberRowDeliberately() {
+    /// Each digit is reachable from exactly one key. The iPad carried a number
+    /// row above the letters as well as the pad, which bought a duplicate set
+    /// of ten keys at the cost of a row of height and a narrower key
+    /// everywhere; the pad is the digit row now.
+    func testEachDigitAppearsExactlyOnce() {
         for context in [padLandscape, padPortrait, phonePortrait, phoneLandscape] {
-            let layout = KeyboardLayout.resolve(for: context)
-            var main: Set<Character> = []
-            var pad: Set<Character> = []
-            for (row, keypadColumns) in zip(layout.rows, layout.keypadColumns) {
-                main.formUnion(row.dropLast(keypadColumns).flatMap(\.reachableCharacters))
-                pad.formUnion(row.suffix(keypadColumns).flatMap(\.reachableCharacters))
+            var counts: [Character: Int] = [:]
+            for cap in KeyboardLayout.resolve(for: context).rows.flatMap({ $0 }) {
+                for character in cap.reachableCharacters where character.isNumber {
+                    counts[character, default: 0] += 1
+                }
             }
-            XCTAssertTrue(pad.isSubset(of: main),
-                          "\(context): \(pad.subtracting(main)) reachable only from the number pad")
+            for digit in "0123456789" {
+                XCTAssertEqual(counts[digit], 1,
+                               "'\(digit)' is reachable \(counts[digit] ?? 0) times in \(context)")
+            }
         }
     }
 
@@ -484,23 +486,24 @@ final class KeyboardLayoutTests: XCTestCase {
             frames[flat.firstIndex(where: predicate)!]
         }
 
-        // Letter unit with the number pad present: every row now lays out in
-        // the width left of the pad, and the tightest letter row — the bottom
-        // one, 16 caps plus the pad's 3 — sets it at 54.7439. Without the pad
-        // it was 67.1176; three columns of number pad is what the difference
-        // buys.
-        XCTAssertEqual(frame { $0.primary == .key(.escape) }.width, 54.7439, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 54.7439, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 54.7439, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.primary == .modifier(.option) }.width, 54.7439, accuracy: 0.001)
-        // Wide caps stay a multiple of the same unit: 1.5 × 54.7439.
-        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 82.1159, accuracy: 0.001)
-        // The number pad is drawn at the letter unit, so its keys match the
-        // alphabet's rather than being a second size on the same keyboard.
-        XCTAssertEqual(frames[flat.count - 1].width, 54.7439, accuracy: 0.001)
-        // The symbol row remains the exception: 25 caps can't fit at the letter
-        // unit, so it takes the largest that does.
-        XCTAssertEqual(frame { $0.primary == .character("~") }.width, 37.6307, accuracy: 0.001)
-        XCTAssertEqual(frame { $0.width == .flexible }.width, 146.609, accuracy: 0.001)
+        // Letters are 62.1167 now. They were 54.7439 when a number row sat
+        // above the letters duplicating the pad, and 67.1176 before the pad
+        // existed at all — dropping the duplicate row bought most of the
+        // difference back, and the navigation keys moved into the space
+        // uniform letters leave beside them rather than being crushed onto the
+        // end of the symbol row.
+        XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 62.1165, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.control) }.width, 62.1165, accuracy: 0.001)
+        XCTAssertEqual(frame { $0.primary == .modifier(.shift) }.width, 62.1165, accuracy: 0.001)
+        // The pad is drawn at the letter unit, so it isn't a second size.
+        XCTAssertEqual(frame { $0.primary == .character("7") }.width, 62.1165, accuracy: 0.001)
+        // Wide caps stay a multiple of it: 1.5 × 62.1165.
+        XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 93.1748, accuracy: 0.001)
+        // The symbol row is the one row too crowded for the letter unit, so it
+        // takes the largest that fits — 20 caps of symbols plus escape.
+        XCTAssertEqual(frame { $0.primary == .character("~") }.width, 44.3167, accuracy: 0.001)
+        // The bottom row is modifiers and space now, so the space bar is what
+        // absorbs the room the old bottom row spent on arrows and punctuation.
+        XCTAssertEqual(frame { $0.width == .flexible }.width, 599.9512, accuracy: 0.001)
     }
 }

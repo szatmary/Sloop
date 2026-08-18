@@ -267,55 +267,60 @@ public struct KeyboardLayout: Equatable, Sendable {
     // MARK: iPad — five rows, symbols visible
 
     private static func pad(_ context: Context) -> KeyboardLayout {
-        // iPad has the width to spare, so the always-visible symbol row also
-        // carries paging and delete — `.key` values, not `.character`, so
-        // they sit outside the character-parity invariant, but they still
-        // need a home somewhere or they simply vanish in compact mode (see
-        // `KeyboardChrome`'s doc comment for why that matters: this keyboard
-        // replaces `KeyboardAccessoryBar`, which carries all five).
-        let symbolRow = symbols.map { KeyCap.character($0) } + [KeyCap.character("\"")]
-            + [.key(.home), .key(.end), .key(.pageUp), .key(.pageDown), .key(.delete)]
-
-        // A number pad down the right, in the arrangement fingers already know
-        // from a full-size keyboard — 789 / 456 / 123 / 0, with the operators
-        // beside them. It costs nothing in key size: once every letter is drawn
-        // at the same width, an iPad's letter rows leave roughly a third of the
-        // screen empty, and this is what goes there.
+        // Shaped like the keyboard the hands already know: letters in the
+        // middle, a navigation cluster to their right, a number pad down the
+        // edge, and a bottom row that is modifiers and space rather than a
+        // dumping ground.
         //
-        // Digits appear twice on this keyboard, in the pad and on the number
-        // row. That's the point of a number pad, and it's why the duplicate
-        // check in the tests looks at the main block only.
+        // No number row. The pad carries the digits, and a second copy bought
+        // nothing but a row's worth of height and narrower keys everywhere —
+        // shifted digits still produce !@#$… from the pad, since the shift
+        // rule is in `KeyEncoder` and applies wherever the digit is typed.
+        // Escape moves to the top-left corner it occupies on a real keyboard.
+        let symbolRow: [KeyCap] = [.key(.escape)]
+            + symbols.map { KeyCap.character($0) } + [KeyCap.character("\"")]
+
+        // Home/End/PgUp/PgDn used to be squeezed onto the end of the symbol
+        // row, at two-thirds the width of everything else. They sit beside the
+        // letters now, in the space uniform letter widths leave over — which is
+        // both where a physical keyboard puts them and the space that was going
+        // to waste.
+        let mainRows: [[KeyCap]] = [
+            symbolRow,
+            [.key(.tab)]
+                + "qwertyuiop".map { KeyCap.character($0) }
+                + [.key(.backspace, width: .wide(1.5), repeats: true),
+                   .key(.home), .key(.pageUp)],
+            // Control sits where caps lock does. It is the most-typed modifier
+            // in a terminal and that is the easiest key on the board to reach.
+            [.modifier(.control)]
+                + "asdfghjkl".map { KeyCap.character($0) }
+                + [.key(.return, width: .wide(1.5)),
+                   .key(.end), .key(.pageDown)],
+            // Shift at the left of the bottom letter row, where it belongs.
+            [.modifier(.shift)]
+                + "zxcvbnm".map { KeyCap.character($0) }
+                + [.character(","), .character("."),
+                   .key(.delete), .key(.up, repeats: true)],
+            [.modifier(.option), .character(" ", width: .flexible),
+             .key(.left, repeats: true), .key(.down, repeats: true),
+             .key(.right, repeats: true),
+             .command(.dismissKeyboard),
+             // Last, and alone: the same reasoning `KeyboardAccessoryBar`
+             // states for its own ✕ — closing a tab drops a live SSH session,
+             // so it belongs where a mis-tap while reaching for space or the
+             // arrows can't reach it.
+             .command(.closeTab)],
+        ]
+
+        // 789 / 456 / 123 / 0 . — the arrangement fingers already know, with
+        // the operators above it.
         let keypadRows: [[KeyCap]] = [
             [.character("/"), .character("*"), .character("-")],
             [.character("7"), .character("8"), .character("9")],
             [.character("4"), .character("5"), .character("6")],
             [.character("1"), .character("2"), .character("3")],
-            [.character("0"), .character("."), .key(.return)],
-        ]
-
-        let mainRows: [[KeyCap]] = [
-            symbolRow,
-            [.key(.escape)]
-                + "1234567890".map { KeyCap.character($0) }
-                + [.key(.backspace, width: .wide(1.5), repeats: true)],
-            [.key(.tab)]
-                + "qwertyuiop".map { KeyCap.character($0) }
-                + [.key(.up, repeats: true)],
-            [.modifier(.control)]
-                + "asdfghjkl".map { KeyCap.character($0) }
-                + [.key(.return, width: .wide(1.5)), .key(.down, repeats: true)],
-            [.modifier(.option), .modifier(.shift)]
-                + "zxcvbnm".map { KeyCap.character($0) }
-                + [.character(","), .character("."),
-                   .character(" ", width: .flexible),
-                   .key(.left, repeats: true), .key(.right, repeats: true),
-                   .command(.dismissKeyboard),
-                   // Last, and alone: the same reasoning
-                   // `KeyboardAccessoryBar` states for its own ✕ — closing
-                   // a tab drops a live SSH session, so it belongs where a
-                   // mis-tap while reaching for space/arrows/dismiss can't
-                   // reach it.
-                   .command(.closeTab)],
+            [.character("0"), .character("."), .character("=")],
         ]
 
         return KeyboardLayout(
