@@ -16,8 +16,11 @@ import Glibc
 /// One end of a `socketpair` is handed out as `localFD` (give it to libssh2;
 /// the caller closes it). The relay owns the other end: `receive(_:)` makes
 /// remote bytes readable on `localFD`; bytes written to `localFD` surface via
-/// `onOutbound`. Blocking writes against the pair's small kernel buffers give
-/// natural backpressure in both directions.
+/// `onOutbound`. The pair's small kernel buffers give natural backpressure in
+/// both directions: a caller that outruns the far side waits until there is
+/// room (or bytes) again. `remoteFD` itself is non-blocking, and every wait on
+/// it happens in `poll()` — see `waitForRemoteFD(events:)` for why that
+/// distinction is the difference between a teardown and a hang.
 ///
 /// Threading: `onOutbound` and `onLocalClosed` are always invoked on the
 /// relay's own private pump thread (spun up by `start()`), never on `main`.
@@ -44,12 +47,20 @@ import Glibc
 /// lifetime, so the relay cannot be deallocated until `shutdown()` makes the
 /// pump exit.
 public final class SocketPairRelay {
+    /// How long `shutdown()` will wait for in-flight `receive()`/
+    /// `finishInbound()` calls to leave before giving up and leaking the fds
+    /// rather than closing them under a caller. Generous: everything it waits
+    /// for is parked in a `poll()` that teardown has already woken, so a
+    /// healthy relay drains in microseconds.
+    private static let drainTimeout: TimeInterval = 5
+
     public let localFD: Int32
     private let remoteFD: Int32
 
-    /// Read end of the pump's teardown-wakeup pipe: the pump waits on this
-    /// alongside `remoteFD` (see `waitForOutboundBytes()`), so `shutdown()`
-    /// can unpark it without depending on the socket layer to do it.
+    /// Read end of the teardown-wakeup pipe: every wait on `remoteFD` — the
+    /// pump's for readability, `receive()`'s for writability — polls this
+    /// alongside it (see `waitForRemoteFD(events:)`), so `shutdown()` can
+    /// unpark either without depending on the socket layer to do it.
     ///
     /// Round-4 finding, and the reason this pipe exists at all: on Darwin,
     /// `shutdown(fd, SHUT_RDWR)` returning 0 does *not* reliably unpark a
@@ -77,6 +88,15 @@ public final class SocketPairRelay {
     /// byte that is never read back, so the wake is level-triggered and
     /// permanent — any poll entered afterward returns immediately — rather
     /// than a one-shot edge that a badly-timed park could miss.
+    ///
+    /// The write side has exactly the same problem and now gets exactly the
+    /// same treatment. `receive()` used to write straight into `remoteFD`
+    /// with no `poll()` at all, so a caller filling a full kernel buffer
+    /// parked *inside* `write()` — the one place teardown cannot reliably
+    /// reach it. `shutdown()`'s drain loop waits for those callers to leave;
+    /// with one of them stranded, teardown hung on the write side just as it
+    /// used to on the read side. Nothing about the measurement above is
+    /// specific to reading.
     private let wakeReadFD: Int32
     /// Write end of the wakeup pipe. Written exactly once, one byte, by the
     /// single `shutdown()` call that gets past the idempotency guard — so it
@@ -157,6 +177,27 @@ public final class SocketPairRelay {
         return outboundReadCountStorage
     }
 
+    /// How many `receive()` calls are inside the `write(remoteFD, …)` syscall
+    /// right now — guarded by `lock`, same reasoning as the counters above. A
+    /// count rather than a flag because nothing stops two threads calling
+    /// `receive()` at once.
+    private var insideRemoteWriteStorage = 0
+
+    /// Whether any `receive()` is currently parked inside `write()` itself.
+    /// `internal`, test-only instrumentation, and the write-side counterpart
+    /// of `outboundReadCount`: it makes "where does a blocked writer wait?"
+    /// directly observable instead of something to be inferred from a race
+    /// whose window is under a microsecond wide (see
+    /// `SocketPairRelayTests.testReceiveNeverParksInsideWrite`). With the
+    /// pair's buffer full and nothing draining it, a correct writer is
+    /// waiting in `poll()` — where `shutdown()` can reach it — and this reads
+    /// false for as long as you care to sample it.
+    var isInsideRemoteWrite: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return insideRemoteWriteStorage > 0
+    }
+
     /// The pump thread, captured so `shutdown()` (and `pumpOutbound()`
     /// itself) can tell whether it is being called/running *from* that
     /// thread — reentrantly, via `onLocalClosed` or `onOutbound` — versus
@@ -215,6 +256,20 @@ public final class SocketPairRelay {
             close(fds[1])
             throw SSHError.connectionFailed("pipe failed: errno \(failure)")
         }
+        // The relay's own end never blocks in a syscall: both directions wait
+        // in `poll()` instead, which is the only wait `shutdown()` can
+        // reliably interrupt (see `wakeReadFD`). `localFD` is left alone —
+        // libssh2 owns it and expects the blocking socket it was handed.
+        let flags = fcntl(fds[1], F_GETFL, 0)
+        guard flags != -1, fcntl(fds[1], F_SETFL, flags | O_NONBLOCK) != -1 else {
+            let failure = errno
+            close(fds[0])
+            close(fds[1])
+            close(wake[0])
+            close(wake[1])
+            throw SSHError.connectionFailed("fcntl(O_NONBLOCK) failed: errno \(failure)")
+        }
+
         localFD = fds[0]
         remoteFD = fds[1]
         wakeReadFD = wake[0]
@@ -234,10 +289,19 @@ public final class SocketPairRelay {
 
     /// Feed bytes from the remote toward the local side. Blocks for
     /// backpressure; safe (a no-op) once the local side has closed or the
-    /// relay has been shut down. The blocking write itself is never done
-    /// under `lock` — only the cheap bookkeeping in `beginUsingFD`/
-    /// `endUsingFD` is — so a blocking write here can never stall a
-    /// concurrent `shutdown()` (or vice versa).
+    /// relay has been shut down. Neither the wait nor the write is done under
+    /// `lock` — only the cheap bookkeeping in `beginUsingFD`/`endUsingFD` is —
+    /// so waiting here can never stall a concurrent `shutdown()` (or vice
+    /// versa).
+    ///
+    /// Where it waits is the point. `remoteFD` is non-blocking and the wait
+    /// happens in `waitForRemoteFD(events:)`, which polls the wakeup pipe
+    /// alongside the socket. Writing straight into the socket instead — as
+    /// this did — parks the caller inside `write()` as soon as the kernel
+    /// buffer fills, and a `write()` parked on Darwin is not reliably freed
+    /// by teardown's `shutdown(remoteFD, SHUT_RDWR)`. `shutdown()` waits for
+    /// callers to leave before it frees the fd number, so one stranded writer
+    /// hung teardown outright. Same failure the pump had, same fix.
     public func receive(_ data: Data) {
         guard beginUsingFD() else { return }
         defer { endUsingFD() }
@@ -245,10 +309,18 @@ public final class SocketPairRelay {
             guard let base = raw.baseAddress else { return }
             var offset = 0
             while offset < raw.count {
-                let n = sendNoSignal(remoteFD, base.advanced(by: offset), raw.count - offset)
-                if n < 0 && errno == EINTR { continue }   // interrupted, not an error — retry
-                if n <= 0 { return }   // EPIPE, or shutdown() poisoned the pair
-                offset += n
+                // Waits until there is room, or teardown says stop.
+                guard waitForRemoteFD(events: Int16(POLLOUT)) else { return }
+                let n = writeToRemote(base.advanced(by: offset), raw.count - offset)
+                if n > 0 {
+                    offset += n
+                } else if n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // Interrupted, or the room `poll` reported was taken by
+                    // another writer first. Neither is an error: wait again.
+                    continue
+                } else {
+                    return   // EPIPE, or shutdown() poisoned the pair
+                }
             }
         }
     }
@@ -270,16 +342,17 @@ public final class SocketPairRelay {
     /// Tear down the relay's end. Idempotent, and safe to call concurrently
     /// with another thread's in-flight `receive()`/`finishInbound()`:
     /// `remoteFD`'s number is never freed while another caller could still
-    /// be about to use it. `shutdown(remoteFD, SHUT_RDWR)` poisons the fd
-    /// first — it unblocks the pump's blocked `read()` and makes any
-    /// in-flight or subsequent `receive()`/`finishInbound()` return
-    /// promptly (via `beginUsingFD` rejecting new callers once
-    /// `teardownCommitted` is set, and existing blocking syscalls failing once
-    /// the endpoint is poisoned) — without freeing the fd number. Only once
-    /// (a) the pump thread has actually exited and (b) every caller that
-    /// was already inside `receive()`/`finishInbound()` has left do we
-    /// `close()` the fd, which is the point the OS is free to recycle its
-    /// number.
+    /// be about to use it. The wakeup pipe frees everyone waiting on
+    /// `remoteFD` — they all wait in `poll()`, on both sides — and
+    /// `shutdown(remoteFD, SHUT_RDWR)` poisons the endpoint so any syscall
+    /// issued after that returns an error rather than data, all without
+    /// freeing the fd number. `beginUsingFD` turns away new callers from the
+    /// moment `teardownCommitted` is set. Only once (a) the pump thread has
+    /// actually exited and (b) every caller that was already inside
+    /// `receive()`/`finishInbound()` has left do we `close()` the fd, which
+    /// is the point the OS is free to recycle its number — and if (b) ever
+    /// fails to happen, the fds are leaked rather than closed underneath
+    /// someone (see the drain loop below).
     ///
     /// Safe to call *reentrantly from the pump thread itself* — both the
     /// normal `onLocalClosed = { relay.shutdown() }` wiring and a callback
@@ -325,11 +398,29 @@ public final class SocketPairRelay {
             pumpDone.unlock()
         }
 
+        // Wait for anyone already inside `receive()`/`finishInbound()` to
+        // leave before freeing the fd number they may be about to use. They
+        // all wait in `poll()` on the wakeup pipe poked above, so this
+        // returns almost immediately; the deadline exists only so that a
+        // caller stranded by something nobody has thought of yet cannot turn
+        // every session close into a permanent hang. See the fallback below
+        // for what happens if it ever fires.
         lock.lock()
+        var drained = true
+        let deadline = Date().addingTimeInterval(Self.drainTimeout)
         while activeFDUsers > 0 {
-            lock.wait()
+            guard lock.wait(until: deadline) else { drained = false; break }
         }
         lock.unlock()
+
+        // The fallback is to leak, deliberately. A caller that has not left
+        // may still be inside a syscall on `remoteFD`; closing it under them
+        // frees its number for the OS to hand to something else entirely,
+        // which turns a hang into a stranger's bytes arriving in an SSH
+        // stream. Three descriptors held for the life of the process is the
+        // cheaper failure by a wide margin, and `remoteFDClosed` stays false
+        // so a test can tell the two apart.
+        guard drained else { return }
 
         close(remoteFD)
         // Safe at exactly the same point `remoteFD` is: the pump is the only
@@ -412,7 +503,7 @@ public final class SocketPairRelay {
     /// `isTeardownCommitted()` check after *every* callback invocation,
     /// below: it's what makes that assumption actually true. The matching
     /// check at the top of the loop extends the same guarantee to the wakeup
-    /// pipe `waitForOutboundBytes()` polls, which `shutdown()` closes at the
+    /// pipe `waitForRemoteFD(events:)` polls, which `shutdown()` closes at the
     /// same moment it closes `remoteFD`.
     ///
     /// Where the loop *waits* is the round-4 change: on `poll()`, not inside
@@ -430,7 +521,7 @@ public final class SocketPairRelay {
         var buffer = [UInt8](repeating: 0, count: 32 * 1024)
         while true {
             if isTeardownCommitted() { return }
-            guard waitForOutboundBytes() else { return }
+            guard waitForRemoteFD(events: Int16(POLLIN)) else { return }
             lock.lock()
             outboundReadCountStorage += 1
             lock.unlock()
@@ -438,7 +529,13 @@ public final class SocketPairRelay {
             if n > 0 {
                 onOutbound?(Data(buffer[0..<n]))
                 if isTeardownCommitted() { return }
-            } else if n == 0 || errno != EINTR {
+            } else if n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Interrupted, or nothing there after all — `remoteFD` is
+                // non-blocking, so a `poll` that raced someone else's read
+                // reports `EAGAIN` rather than parking us. Neither is the
+                // local side going away; wait again.
+                continue
+            } else {
                 lock.lock()
                 let deliberate = deliberateTeardown
                 lock.unlock()
@@ -456,20 +553,22 @@ public final class SocketPairRelay {
         }
     }
 
-    /// Parks the pump until `remoteFD` has something to report — bytes, EOF,
-    /// or an error, all of which `poll` reports as readable — or `shutdown()`
-    /// pokes the wakeup pipe. Returns `false` when the pump must stop without
-    /// reading `remoteFD` again.
+    /// Parks the caller until `remoteFD` is ready for `events` — `POLLIN` for
+    /// the pump (bytes, EOF, or an error, all of which `poll` reports as
+    /// readable), `POLLOUT` for `receive()` (room in the kernel buffer) — or
+    /// `shutdown()` pokes the wakeup pipe. Returns `false` when the caller
+    /// must stop without touching `remoteFD` again.
     ///
-    /// This is the blocking wait the pump used to do inside `read()` itself.
-    /// It moved out here because a parked `read()` is not reliably freed by
-    /// `shutdown()`, while a parked `poll()` is — see `wakeReadFD`. The
-    /// `read()` that follows a readable `poll` still blocks in principle, but
-    /// only until it has consumed what `poll` just said was there, so it is
-    /// no longer where the pump waits.
-    private func waitForOutboundBytes() -> Bool {
+    /// This is the *only* place either direction blocks, and that is the
+    /// whole design. A thread parked inside `read()` or `write()` is not
+    /// reliably freed by teardown's `shutdown(remoteFD, SHUT_RDWR)`; a thread
+    /// parked in `poll()` is, and the wakeup pipe makes it certain (see
+    /// `wakeReadFD`). The syscall that follows a ready `poll` runs against a
+    /// non-blocking fd, so it returns whatever is there — or `EAGAIN` if
+    /// another thread got there first — instead of waiting.
+    private func waitForRemoteFD(events: Int16) -> Bool {
         var fds = [
-            pollfd(fd: remoteFD, events: Int16(POLLIN), revents: 0),
+            pollfd(fd: remoteFD, events: events, revents: 0),
             pollfd(fd: wakeReadFD, events: Int16(POLLIN), revents: 0),
         ]
         while true {
@@ -478,19 +577,30 @@ public final class SocketPairRelay {
                 if errno == EINTR { continue }   // interrupted, not an error — retry
                 return false
             }
-            // Teardown wins over any pending bytes: once `shutdown()` has
-            // committed, `remoteFD`'s number is on its way to being freed and
-            // nothing may issue another syscall against it.
+            // Teardown wins over anything the socket has to say: once
+            // `shutdown()` has committed, `remoteFD`'s number is on its way to
+            // being freed and nothing may issue another syscall against it.
             if fds[1].revents != 0 { return false }
             if fds[0].revents != 0 { return true }
         }
     }
 
-    private func sendNoSignal(_ fd: Int32, _ buf: UnsafeRawPointer, _ count: Int) -> Int {
+    /// One `write()` into `remoteFD`, bracketed by the instrumentation
+    /// `isInsideRemoteWrite` reports. Never blocks — `remoteFD` is
+    /// non-blocking — so the bracket is only ever momentarily true.
+    private func writeToRemote(_ buf: UnsafeRawPointer, _ count: Int) -> Int {
+        lock.lock()
+        insideRemoteWriteStorage += 1
+        lock.unlock()
+        defer {
+            lock.lock()
+            insideRemoteWriteStorage -= 1
+            lock.unlock()
+        }
         #if canImport(Darwin)
-        return write(fd, buf, count)          // SO_NOSIGPIPE is set
+        return write(remoteFD, buf, count)          // SO_NOSIGPIPE is set
         #else
-        return send(fd, buf, count, Int32(MSG_NOSIGNAL))
+        return send(remoteFD, buf, count, Int32(MSG_NOSIGNAL))
         #endif
     }
 }

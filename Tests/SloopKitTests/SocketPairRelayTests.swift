@@ -234,6 +234,81 @@ final class SocketPairRelayTests: XCTestCase {
         wait(for: [notClosed], timeout: 1)
     }
 
+    /// The write side of the round-4 finding, which the round-4 fix left
+    /// standing: the pump stopped waiting inside `read()`, but `receive()`
+    /// still wrote straight into `remoteFD` with no `poll()` at all, so a
+    /// caller that filled the kernel buffer parked *inside `write()`* — the
+    /// one place teardown cannot reliably reach it (see `wakeReadFD`:
+    /// `shutdown(fd, SHUT_RDWR)` failed to free a parked reader in ~0.5% of
+    /// runs, and nothing about that measurement is specific to reading).
+    /// `shutdown()` waits for in-flight callers to leave before freeing the
+    /// fd number, so one stranded writer hung teardown exactly as a stranded
+    /// reader used to.
+    ///
+    /// Racing that window is hopeless — it is under a microsecond wide — so
+    /// this asserts the property instead, the same way
+    /// `testPumpNeverParksInsideRead` does: with the buffer full and nothing
+    /// draining it, a correct receiver is waiting in `poll()` and
+    /// `isInsideRemoteWrite` reads false however often you look.
+    func testReceiveNeverParksInsideWrite() throws {
+        let relay = try SocketPairRelay()
+        relay.start()
+
+        // Deliberately nobody reads `localFD`: the pair's buffers are a few
+        // KB, so this receiver blocks almost immediately and stays blocked.
+        let receiveReturned = expectation(description: "receive() returned")
+        Thread.detachNewThread {
+            relay.receive(Data(repeating: 0x5A, count: 4 * 1024 * 1024))
+            receiveReturned.fulfill()
+        }
+
+        // Long enough to have filled the buffer and settled into the wait.
+        Thread.sleep(forTimeInterval: 0.25)
+        for _ in 0..<10 {
+            XCTAssertFalse(relay.isInsideRemoteWrite,
+                           "with the buffer full the receiver must be waiting in poll(), not "
+                         + "parked inside write(remoteFD, …) — shutdown() cannot reliably "
+                         + "interrupt a blocked write, and it must wait for this caller to "
+                         + "leave before it may free the fd")
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+
+        relay.shutdown()
+        wait(for: [receiveReturned], timeout: 5)
+        close(relay.localFD)
+    }
+
+    /// The same finding from the outside: teardown must finish while a
+    /// `receive()` is blocked on a full buffer, which is the ordinary state
+    /// of a tunnel whose SSH session stopped reading. `shutdown()` bounds its
+    /// own drain wait now, so a regression fails this assertion instead of
+    /// hanging the test run — but it gives up by *leaking* the fd rather than
+    /// closing it under a caller, and `remoteFDClosed` is what tells the two
+    /// outcomes apart.
+    func testShutdownCompletesWhileAReceiveIsBlockedOnAFullBuffer() throws {
+        let relay = try SocketPairRelay()
+        relay.start()
+
+        let receiveReturned = expectation(description: "receive() returned")
+        Thread.detachNewThread {
+            relay.receive(Data(repeating: 0x42, count: 4 * 1024 * 1024))
+            receiveReturned.fulfill()
+        }
+        Thread.sleep(forTimeInterval: 0.25)   // let it block
+
+        let shutdownReturned = expectation(description: "shutdown() returned")
+        Thread.detachNewThread {
+            relay.shutdown()
+            shutdownReturned.fulfill()
+        }
+
+        wait(for: [shutdownReturned, receiveReturned], timeout: 5)
+        XCTAssertTrue(relay.remoteFDClosed,
+                      "teardown must have drained its callers and closed the fd, not given up "
+                    + "on the drain and leaked it")
+        close(relay.localFD)
+    }
+
     /// Round-4 finding, and the load-bearing property of the fix for it.
     ///
     /// `shutdown()` must get the pump out of its wait on `remoteFD` before it
