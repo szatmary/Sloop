@@ -113,9 +113,9 @@ Access application's session: several saved hosts may sit behind one Access
 app and share it. So signing out is hostname-wide on purpose, while deleting a
 host only drops the token when no remaining host still reaches that hostname
 through Access (`accessTokenIsStillNeeded(for:by:)`).
-`AccessToken` parses only the JWT payload's `exp`/`aud` client-side (no
-signature check: the app is the bearer, not the verifier) to decide if a
-stored token is still worth trying before dialing. A WebSocket upgrade that
+`AccessToken` parses only the JWT payload's `exp` client-side (no signature
+check, and no audience check: the app is the bearer, not the verifier) to
+decide if a stored token is still worth trying before dialing. A WebSocket upgrade that
 Cloudflare's edge rejects for lack of a session produces
 `SSHError.accessLoginRequired`; one it rejects because the policy denies the
 authenticated identity produces `SSHError.accessDenied`.

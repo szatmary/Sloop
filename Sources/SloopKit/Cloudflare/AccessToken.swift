@@ -4,13 +4,22 @@
 import Foundation
 
 /// A Cloudflare Access application token (`CF_Authorization` JWT). The app is
-/// the bearer, not the verifier, so only the payload's `exp`/`aud` claims are
-/// parsed (no signature check) — enough to know when a fresh browser login is
-/// needed before we bother dialing.
+/// the bearer, not the verifier, so only the payload's `exp` claim is parsed
+/// (no signature check) — enough to know when a fresh browser login is needed
+/// before we bother dialing.
+///
+/// Nothing else in the payload is read, `aud` included. Checking the audience
+/// here would only duplicate, badly, what Cloudflare's edge does properly on
+/// every dial: it rejects a token whose `aud` doesn't match the application
+/// being reached, and that rejection is already handled
+/// (`SSHError.accessDenied`, and `TokenClearingDialer` clearing the token).
+/// Parsing it cost an availability regression instead — a payload whose `aud`
+/// was shaped unexpectedly failed the whole decode, throwing away a token
+/// whose expiry was perfectly readable and which the edge might well have
+/// accepted.
 public struct AccessToken: Equatable {
     public let raw: String
     public let expiresAt: Date
-    public let audiences: [String]
 
     /// Treat tokens expiring within this window as already expired, so a
     /// connection doesn't start on a token that dies mid-handshake.
@@ -24,7 +33,6 @@ public struct AccessToken: Equatable {
         else { return nil }
         self.raw = raw
         self.expiresAt = Date(timeIntervalSince1970: payload.exp)
-        self.audiences = payload.aud?.values ?? []
     }
 
     public var isExpired: Bool {
@@ -44,22 +52,11 @@ public struct AccessToken: Equatable {
         return token
     }
 
+    /// Only what is actually used. Unknown keys are ignored by `Decodable`,
+    /// so a claim this app has no opinion about can never cost the user a
+    /// usable token.
     private struct Payload: Decodable {
         let exp: Double
-        let aud: Audience?
-    }
-
-    /// Access emits `aud` as an array; RFC 7519 also allows a bare string.
-    private struct Audience: Decodable {
-        let values: [String]
-        init(from decoder: Decoder) throws {
-            let c = try decoder.singleValueContainer()
-            if let many = try? c.decode([String].self) {
-                values = many
-            } else {
-                values = [try c.decode(String.self)]
-            }
-        }
     }
 
     private static func base64urlDecode(_ s: String) -> Data? {

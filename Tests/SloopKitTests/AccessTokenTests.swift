@@ -20,20 +20,13 @@ final class AccessTokenTests: XCTestCase {
         return "\(header).\(body).fakesig"
     }
 
-    func testParsesExpiryAndAudienceArray() throws {
+    func testParsesExpiry() throws {
         let exp = Date().addingTimeInterval(3600).timeIntervalSince1970
         let raw = jwt(["exp": exp, "aud": ["abc123", "def456"]])
         let token = try XCTUnwrap(AccessToken(raw: raw))
         XCTAssertEqual(token.expiresAt.timeIntervalSince1970, exp, accuracy: 1)
-        XCTAssertEqual(token.audiences, ["abc123", "def456"])
         XCTAssertFalse(token.isExpired)
         XCTAssertEqual(token.raw, raw)
-    }
-
-    func testParsesSingleStringAudience() throws {
-        let raw = jwt(["exp": Date().addingTimeInterval(600).timeIntervalSince1970,
-                       "aud": "solo"])
-        XCTAssertEqual(AccessToken(raw: raw)?.audiences, ["solo"])
     }
 
     func testPastExpiryIsExpired() throws {
@@ -61,23 +54,20 @@ final class AccessTokenTests: XCTestCase {
         XCTAssertNil(AccessToken(raw: raw))
     }
 
-    /// `aud` is either a JSON array or a bare string (RFC 7519) — never an
-    /// object. A malformed/attacker-adjacent payload carrying one must fail
-    /// closed rather than crash the decoder.
-    func testAudAsObjectIsNil() {
-        let raw = jwt(["exp": Date().addingTimeInterval(3600).timeIntervalSince1970,
-                       "aud": ["nested": "object"]])
-        XCTAssertNil(AccessToken(raw: raw))
-    }
-
-    /// `aud` explicitly present but `null` must decode safely to an empty
-    /// audience list, not crash or wedge the optional's decoding.
-    func testAudAsNullYieldsEmptyAudiences() throws {
-        let raw = jwt(["exp": Date().addingTimeInterval(3600).timeIntervalSince1970,
-                       "aud": NSNull()])
-        let token = try XCTUnwrap(AccessToken(raw: raw))
-        XCTAssertEqual(token.audiences, [])
-        XCTAssertFalse(token.isExpired)
+    /// Claims this app doesn't read must not cost the user a usable token,
+    /// whatever shape they arrive in. `aud` used to be parsed — for nothing,
+    /// since no production code ever looked at the result — and an `aud` the
+    /// decoder didn't expect (an object where RFC 7519 allows an array or a
+    /// bare string) failed the whole payload, discarding a token whose expiry
+    /// was perfectly readable and which Cloudflare's edge, the only thing that
+    /// actually validates audiences, might well have accepted.
+    func testUnreadClaimsCannotInvalidateAToken() throws {
+        let exp = Date().addingTimeInterval(3600).timeIntervalSince1970
+        for aud in [["nested": "object"] as Any, NSNull(), 42, ["a", "b"]] {
+            let token = try XCTUnwrap(AccessToken(raw: jwt(["exp": exp, "aud": aud])),
+                                      "aud: \(aud)")
+            XCTAssertFalse(token.isExpired)
+        }
     }
 
     /// An extreme negative `exp` (deep past, but still a finite JSON number —
