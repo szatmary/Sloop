@@ -1380,6 +1380,7 @@ git commit -m "SSH: sign agent challenges with library keys via libssh2's crypto
 
 **Files:**
 - Create: `App/Sloop/SSH/AgentSignPrompter.swift`, `App/Sloop/Views/AgentSignPromptView.swift`
+- Modify: `App/Sloop/Views/HostListView.swift` — present the sheet (Step 5). Omitting this deadlocks the SSH thread; see that step.
 - Test: `Tests/SloopAppTests/AgentSignPrompterTests.swift`
 
 **Interfaces:**
@@ -1534,6 +1535,30 @@ The two-step assignment of `self.present` is awkward; if a cleaner formulation c
 - [ ] **Step 4: Write `AgentSignPromptView.swift`**
 
 A sheet naming the key and the endpoint, with Allow and Deny. Deny is the default action, and the copy says plainly that allowing lets the remote host authenticate as the user somewhere else. Follow `HostKeyPromptView`'s layout and use `SloopStyle.teal` for the accent, as the rest of the app does.
+
+- [ ] **Step 5: Present the sheet from `HostListView`**
+
+**Without this the app deadlocks.** `shouldSign` blocks the SSH thread on a semaphore that only the sheet's response closure signals. If nothing presents the sheet, that signal never comes and the terminal freezes permanently on the first signature request — not a missing dialog, a hung session with no way out.
+
+`HostListView` already does exactly this for host keys. Mirror it. Beside the existing observed prompter (`HostListView.swift:15`):
+
+```swift
+@ObservedObject private var agentSignPrompter = AgentSignPrompter.shared
+```
+
+and beside the existing host-key sheet (`HostListView.swift:201-203`):
+
+```swift
+.sheet(item: $agentSignPrompter.prompt) { prompt in
+    AgentSignPromptView(prompt: prompt)
+}
+```
+
+This means `AgentSignPrompter.Prompt` must be `Identifiable`, as `HostKeyPrompter.Prompt` is — it carries `let id = UUID()` for exactly this reason.
+
+- [ ] **Step 6: Add a test that the refusal path cannot hang**
+
+The deadlock above is the failure mode that matters, so pin it: assert that a prompter whose `present` closure never calls `respond` does NOT block forever when the caller gives up. If the design has no timeout — and it should not have one, since silently refusing after a delay is worse than waiting for a human — then instead assert the contract that makes it safe: `shouldSign` returns exactly what `respond` was called with, and returns promptly once it is called. Document in the test why no timeout exists.
 
 - [ ] **Step 5: Run the tests and confirm they pass**
 
