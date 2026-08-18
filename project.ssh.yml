@@ -31,3 +31,15 @@ targets:
     settings:
       base:
         SWIFT_OBJC_BRIDGING_HEADER: App/Sloop/SSH/Sloop-Bridging-Header.h
+  # AgentSignerTests calls libssh2_init/session_init_ex/session_free/exit
+  # directly (`import CSSH`) rather than only through Sloop_macOS's Swift API,
+  # so the test bundle needs its own link to libssh2 — the host app linking it
+  # is not enough. XCTest bundles link against their host app via
+  # -bundle_loader, which resolves symbols the host app *calls*, not
+  # necessarily every symbol pulled from a statically-linked archive; the test
+  # bundle must import the framework itself to be sure of both the module and
+  # the symbols.
+  SloopTests:
+    dependencies:
+      - framework: Vendor/libssh2.xcframework
+        embed: false
