@@ -217,6 +217,18 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     func dismissKeyboard() {
         _ = terminalView.resignFirstResponder()
     }
+
+    /// Swap between Apple's keyboard and Sloop's compact one.
+    ///
+    /// `inputView` is the same hook SwiftTerm's own `KeyboardView` uses; nil means
+    /// the system keyboard. Reloading is required because UIKit caches the input
+    /// view for as long as the responder stays first responder.
+    func setCompactKeyboard(_ enabled: Bool) {
+        terminalView.inputView = enabled ? CompactKeyboardView(controller: self) : nil
+        if terminalView.isFirstResponder {
+            terminalView.reloadInputViews()
+        }
+    }
     #endif
 
     /// Tear down the connection — called when the session's tab is closed.
