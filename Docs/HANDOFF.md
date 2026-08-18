@@ -44,11 +44,10 @@ key types below, and Mosh roaming across a network change.
 
 ### NOT done / not verifiable here
 
-- **Runtime validation** — SSH (RSA key) and Mosh both verified on an iPad.
+- **Runtime validation** — SSH (RSA key), Mosh, and a Cloudflare Access tunnel
+  all verified on an iPad.
   Not yet exercised: Ed25519/ECDSA/passphrase-protected keys, Mosh roaming
-  across Wi-Fi→cellular, the host-key mismatch path, and any live Cloudflare
-  Access tunnel connection (that one needs the maintainer's own Access
-  application and IdP).
+  across Wi-Fi→cellular, and the host-key mismatch path.
 - **Code signing / distribution** — the app is unsigned.
 - **Marketing assets** (App Store screenshots). The app icon itself is DONE:
   `App/Sloop/Assets.xcassets` generated from the SVG master by
@@ -155,13 +154,15 @@ Cannot be exercised in CI or the simulator against a real IdP — this needs the
 maintainer's own Cloudflare Access application ([`Docs/ARCHITECTURE.md`](ARCHITECTURE.md)
 has the mechanics: `CloudflareAccessDialer`, `AccessLoginView`, `AccessTokenStore`).
 
-- [ ] Add a host, set "Connect via" to **Cloudflare Access**, and enter the
+- [x] Add a host, set "Connect via" to **Cloudflare Access**, and enter the
       Access application's public hostname (the port field is hidden — sshd is
-      reached inside the tunnel).
-- [ ] First connect: the login sheet opens in-app, loads the hostname, and lets
+      reached inside the tunnel). Verified 2026-08-18. Note the failure mode
+      that cost the first attempt: a mistyped hostname reports as a failed
+      sign-in, so read the alert rather than assuming the tunnel is broken.
+- [x] First connect: the login sheet opens in-app, loads the hostname, and lets
       the IdP flow complete; once it captures the `CF_Authorization` cookie the
       sheet dismisses on its own and the terminal connects without a second
-      prompt.
+      prompt. Verified on an iPad, 2026-08-18.
 - [ ] Quit and relaunch, then reconnect: no browser sheet — the stored token is
       reused directly.
 - [ ] Confirm the "Use Mosh" toggle is disabled (and forced off) for this host

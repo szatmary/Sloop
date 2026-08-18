@@ -63,9 +63,10 @@ top of a working SSH terminal rather than first.
 - [x] Licensing files: `LICENSE` (GPL-3.0) + `THIRD-PARTY-NOTICES.md`. The
       GPL-3.0/App-Store posture is decided (`Docs/LICENSING.md`); only your
       sign-off on the residual risk remains.
-- [ ] **Runtime validation on real hardware** — SSH and Mosh both connect from
-      an iPad. Remaining: Ed25519/ECDSA/passphrase-protected keys, and Mosh
-      roaming across Wi-Fi→cellular. Checklist in `Docs/HANDOFF.md`.
+- [ ] **Runtime validation on real hardware** — SSH, Mosh, and a Cloudflare
+      Access tunnel all connect from an iPad. Remaining:
+      Ed25519/ECDSA/passphrase-protected keys, and Mosh roaming across
+      Wi-Fi→cellular. Checklist in `Docs/HANDOFF.md`.
 - [x] App icon: `AppIcon.appiconset` generated from the SVG master
       (`Scripts/generate-appicon.sh`); launch screen is system-generated.
 - [ ] Code signing + notarization. Releases are ad-hoc signed today;
