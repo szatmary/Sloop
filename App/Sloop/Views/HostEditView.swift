@@ -43,7 +43,18 @@ struct HostEditView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         #endif
-                    Stepper("Port: \(host.port)", value: $host.port, in: 1...65535)
+                    Picker("Connect via", selection: $host.connectionMethod) {
+                        Text("Direct").tag(ConnectionMethod.direct)
+                        Text("Cloudflare Access").tag(ConnectionMethod.cloudflareAccess)
+                    }
+
+                    if host.connectionMethod == .cloudflareAccess {
+                        Text("The hostname above is the Access application's public hostname. A browser sign-in runs on first connect.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Stepper("Port: \(host.port)", value: $host.port, in: 1...65535)
+                    }
                 }
 
                 Section("Authentication") {
@@ -83,7 +94,16 @@ struct HostEditView: View {
 
                 Section("Options") {
                     Toggle("Use Mosh", isOn: $host.useMosh)
+                        .disabled(host.connectionMethod != .direct)
+                    if host.connectionMethod != .direct {
+                        Text("Mosh needs UDP, which can't pass through this tunnel — SSH is used instead.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+            }
+            .onChange(of: host.connectionMethod) { _, method in
+                if method != .direct { host.useMosh = false }
             }
             .navigationTitle(host.hostname.isEmpty ? "New Host" : host.alias)
             #if os(iOS)

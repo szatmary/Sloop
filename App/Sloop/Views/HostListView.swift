@@ -12,6 +12,7 @@ struct HostListView: View {
     @ObservedObject private var hostKeyPrompter = HostKeyPrompter.shared
     @ObservedObject private var appearance = AppearanceStore.shared
     @State private var editing: SSHHost?
+    @State private var accessLogin: SSHHost?
     @State private var showingSupport = false
     @State private var showingSettings = false
     @State private var showingTerminal = false
@@ -47,7 +48,7 @@ struct HostListView: View {
                     }
                     ForEach(model.hosts) { host in
                         HStack {
-                            Button { open(model.connect(host)) } label: {
+                            Button { connect(host) } label: {
                                 HostRow(host: host)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .contentShape(Rectangle())
@@ -111,6 +112,16 @@ struct HostListView: View {
             .sheet(item: $editing) { host in
                 HostEditView(host: host) { model.save($0, credential: $1) }
             }
+            .sheet(item: $accessLogin) { host in
+                AccessLoginView(hostname: host.hostname) { token in
+                    do {
+                        try model.storeAccessToken(token, for: host)
+                        open(model.connect(host))
+                    } catch {
+                        importResult = "Couldn't store the Access token: \(error.localizedDescription)"
+                    }
+                }
+            }
             .sheet(isPresented: $showingSupport) {
                 SupportView()
             }
@@ -132,7 +143,7 @@ struct HostListView: View {
                     importResult = error.localizedDescription
                 }
             }
-            .alert("Import SSH Config", isPresented: Binding(
+            .alert("Sloop", isPresented: Binding(
                 get: { importResult != nil },
                 set: { if !$0 { importResult = nil } })
             ) {
@@ -156,6 +167,16 @@ struct HostListView: View {
     private func open(_ session: TerminalSession) {
         sessions.openSession(session)
         showingTerminal = true
+    }
+
+    /// Connect, first running the Cloudflare Access browser login when the
+    /// host needs a (fresh) token.
+    private func connect(_ host: SSHHost) {
+        if model.needsAccessLogin(host) {
+            accessLogin = host
+        } else {
+            open(model.connect(host))
+        }
     }
 
     /// Read the picked SSH config file and import its hosts. Returns a short
@@ -215,6 +236,12 @@ private struct HostRow: View {
                         .font(.caption2)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(.tint.opacity(0.2), in: Capsule())
+                }
+                if host.connectionMethod == .cloudflareAccess {
+                    Text("cloudflare")
+                        .font(.caption2)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(.orange.opacity(0.2), in: Capsule())
                 }
             }
             Text(host.connectionSummary)
