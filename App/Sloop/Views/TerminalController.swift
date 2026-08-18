@@ -312,6 +312,12 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         transport.close()
         #if os(iOS)
         removeKeyboardObservers()
+        // Belt-and-braces: the controller shouldn't hold a callback into a
+        // view it's finished with. `TerminalPane` already avoids capturing
+        // the controller (or view) in this closure, so this isn't load-
+        // bearing for the retain cycle — but `close()` isn't guaranteed to
+        // run on every path, so it's not a substitute for that fix either.
+        onCloseTabRequested = {}
         #endif
     }
 
