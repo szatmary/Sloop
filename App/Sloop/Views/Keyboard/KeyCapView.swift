@@ -202,21 +202,34 @@ final class KeyCapView: UIControl {
         // Once past the threshold this stays true for the rest of the touch:
         // a finger that overshoots and drifts back down still commits.
         let rise = dragOrigin.y - touch.location(in: self).y
-        if rise > Self.dragThreshold { didDrag = true }
+        if rise > Self.dragThreshold, !didDrag {
+            didDrag = true
+            // A key that both repeats and carries a secondary (↑ repeating
+            // to move the cursor, but also reaching Page Up on a drag) should
+            // stop repeating the primary the moment the drag commits to the
+            // secondary instead of continuing to fire the wrong one — see
+            // `endTracking`, which delivers the secondary regardless of
+            // `cap.repeats` for exactly this reason.
+            stopRepeating()
+        }
         return true
     }
 
     override func endTracking(_ touch: UITouch?, with event: UIEvent?) {
         alpha = 1
         stopRepeating()
+        if didDrag, let secondary = cap.secondary {
+            // Checked before `cap.repeats`: a repeating key that also carries
+            // a secondary (see `continueTracking`) must still deliver it on a
+            // committed drag, or that secondary would be permanently
+            // unreachable on every such key.
+            delegate?.keyCapView(self, didProduce: secondary)
+            return
+        }
         // A repeating key already fired on touch-down and on every tick;
         // firing again here would emit one extra character per press.
         guard !cap.repeats else { return }
-        if didDrag, let secondary = cap.secondary {
-            delegate?.keyCapView(self, didProduce: secondary)
-        } else {
-            delegate?.keyCapView(self, didProduce: cap.primary)
-        }
+        delegate?.keyCapView(self, didProduce: cap.primary)
     }
 
     override func cancelTracking(with event: UIEvent?) {

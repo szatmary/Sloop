@@ -127,7 +127,14 @@ public struct KeyboardLayout: Equatable, Sendable {
     // MARK: iPad — five rows, symbols visible
 
     private static func pad(_ context: Context) -> KeyboardLayout {
+        // iPad has the width to spare, so the always-visible symbol row also
+        // carries paging and delete — `.key` values, not `.character`, so
+        // they sit outside the character-parity invariant, but they still
+        // need a home somewhere or they simply vanish in compact mode (see
+        // `KeyboardChrome`'s doc comment for why that matters: this keyboard
+        // replaces `KeyboardAccessoryBar`, which carries all five).
         let symbolRow = symbols.map { KeyCap.character($0) } + [KeyCap.character("\"")]
+            + [.key(.home), .key(.end), .key(.pageUp), .key(.pageDown), .key(.delete)]
 
         return KeyboardLayout(
             rows: [
@@ -207,15 +214,27 @@ public struct KeyboardLayout: Equatable, Sendable {
         return KeyboardLayout(
             rows: [
                 [.key(.escape)] + digits
-                    + [.key(.backspace, repeats: true)],
+                    // Backspace and forward-delete are the same physical
+                    // relationship as the pairing below: hold to repeat the
+                    // one you reach for constantly, drag up for the one you
+                    // don't.
+                    + [.key(.backspace, secondary: .key(.delete), repeats: true)],
                 [.key(.tab)] + "qwertyuiop".map { KeyCap.character($0) }
-                    + [.key(.up, repeats: true)],
+                    + [.key(.up, secondary: .key(.pageUp), repeats: true)],
                 [.modifier(.control)] + homeRow
-                    + [.key(.return), .key(.down, repeats: true)],
+                    + [.key(.return), .key(.down, secondary: .key(.pageDown), repeats: true)],
                 [.modifier(.option), .modifier(.shift)]
                     + bottomLetters
                     + [.character(" ", width: .flexible),
-                       .key(.left, repeats: true), .key(.right, repeats: true),
+                       // No row to spare for home/end, so they ride the
+                       // arrows that already point their direction — ←/home
+                       // both mean "toward the start", →/end both mean
+                       // "toward the end". `KeyCapView`'s drag-up gesture
+                       // works the same way here as for a symbol secondary;
+                       // see `endTracking` for why a repeating key can still
+                       // deliver one.
+                       .key(.left, secondary: .key(.home), repeats: true),
+                       .key(.right, secondary: .key(.end), repeats: true),
                        .command(.dismissKeyboard),
                        // Last, and alone — see the matching comment on the
                        // iPad table.

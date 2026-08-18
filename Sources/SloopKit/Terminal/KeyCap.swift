@@ -66,9 +66,10 @@ public struct KeyCap: Equatable, Sendable {
     }
 
     public static func key(_ terminalKey: TerminalKey,
+                           secondary: Value? = nil,
                            width: Width = .unit,
                            repeats: Bool = false) -> Self {
-        Self(primary: .key(terminalKey), width: width, repeats: repeats)
+        Self(primary: .key(terminalKey), secondary: secondary, width: width, repeats: repeats)
     }
 
     public static func modifier(_ modifiers: KeyModifiers,

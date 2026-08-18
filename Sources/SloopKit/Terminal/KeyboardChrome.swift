@@ -21,11 +21,15 @@ public enum KeyboardChrome: Equatable, Sendable {
     /// No keyboard — hardware, or software of either style — is up: show the
     /// floating pill, the only way to bring one back.
     case floatingPill
-    /// The compact keyboard is up. It already folds the smart-keys bar's
-    /// keys — including ⌃ — into itself, so neither the bar nor the pill
-    /// belongs on screen: the bar would cost back the height compact mode
-    /// exists to reclaim, and the pill would offer a keyboard that's already
-    /// there.
+    /// The compact keyboard is up. Its own rows carry the bar's ⌃/⌥/⇧
+    /// modifiers, esc/tab/return, arrows, paging (home/end/page up/down),
+    /// backspace/delete, dismiss, and close-tab, so neither the bar nor the
+    /// pill belongs on screen: the bar would cost back the height compact
+    /// mode exists to reclaim, and the pill would offer a keyboard that's
+    /// already there. The one thing NOT folded in is the bar's one-tap
+    /// Ctrl-letter chips (⌃B, ⌃C, …) — those aren't reproduced as dedicated
+    /// keys, but the same combination is still reachable as ⌃ then the
+    /// letter, via the same sticky-modifier mechanism both keyboards share.
     case none
 
     /// - Parameters:

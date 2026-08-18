@@ -153,6 +153,26 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
+    /// `home`/`end`/`pageUp`/`pageDown`/`delete` are `.key` values, so they
+    /// never show up in a `reachableCharacters` set either — this is the
+    /// class of gap that let them go missing from every layout table in the
+    /// first place (they were only ever on `KeyboardAccessoryBar`, which
+    /// compact mode replaces). Checked by primary OR secondary, since iPad
+    /// carries them as plain keys but iPhone hangs them off the arrows/
+    /// backspace as drag-up secondaries.
+    func testEveryLayoutCanReachPagingAndDeleteKeys() {
+        let required: [KeyCap.Value] = [
+            .key(.home), .key(.end), .key(.pageUp), .key(.pageDown), .key(.delete),
+        ]
+        for context in [padLandscape, padPortrait, phonePortrait, phoneLandscape] {
+            let caps = KeyboardLayout.resolve(for: context).rows.flatMap { $0 }
+            for value in required {
+                let reachable = caps.contains { $0.primary == value || $0.secondary == value }
+                XCTAssertTrue(reachable, "\(value) missing from \(context)")
+            }
+        }
+    }
+
     func testDirectAndShiftedCharactersCoverPrintableASCII() {
         // Neither `testEveryShellCharacterIsReachable` nor
         // `testShiftedDigitsFollowUSQWERTY` alone proves a shifted symbol like
@@ -341,7 +361,8 @@ final class KeyboardLayoutTests: XCTestCase {
             frames[flat.firstIndex(where: predicate)!]
         }
 
-        XCTAssertEqual(frame { $0.primary == .character("~") }.width, 59.5789, accuracy: 0.001) // symbol row
+        // Symbol row: 24 caps now (19 + the 5 paging/delete keys).
+        XCTAssertEqual(frame { $0.primary == .character("~") }.width, 46.5417, accuracy: 0.001) // symbol row
         XCTAssertEqual(frame { $0.primary == .key(.escape) }.width, 92.24, accuracy: 0.01)       // digit row unit
         XCTAssertEqual(frame { $0.primary == .key(.backspace) }.width, 138.36, accuracy: 0.01)   // digit row wide
         XCTAssertEqual(frame { $0.primary == .key(.tab) }.width, 96.0833, accuracy: 0.001)       // qwerty row
