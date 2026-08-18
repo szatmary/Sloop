@@ -18,7 +18,16 @@ targets:
     dependencies:
       - framework: Vendor/libssh2.xcframework
         embed: false
+    settings:
+      base:
+        # Without this, libssh2-internal.h is invisible to Swift and agent
+        # forwarding compiles only in the Mosh variant. project.mosh.yml sets
+        # the same value; it layers on top of this spec, so the two agree.
+        SWIFT_OBJC_BRIDGING_HEADER: App/Sloop/SSH/Sloop-Bridging-Header.h
   Sloop_macOS:
     dependencies:
       - framework: Vendor/libssh2.xcframework
         embed: false
+    settings:
+      base:
+        SWIFT_OBJC_BRIDGING_HEADER: App/Sloop/SSH/Sloop-Bridging-Header.h
