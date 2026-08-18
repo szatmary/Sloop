@@ -62,16 +62,25 @@ struct KeyboardAccessoryBar: View {
                 divider
 
                 // B first: it's tmux's prefix, the most-reached-for combo for
-                // anyone running tmux over SSH.
+                // anyone running tmux over SSH. These honor an already-armed
+                // ⌥ the same way `emit` does (arm ⌥, tap ⌃B → ⌥⌃B) rather than
+                // ignoring it — they're keys in this bar like any other, so
+                // the sticky modifier's stated contract ("applies to the next
+                // key … then auto-disarms") applies here too. Either way,
+                // armed must not survive the tap, so it clears after sending.
                 ForEach(Array("BCDZLRAE"), id: \.self) { letter in
                     special("⌃\(letter)") {
-                        send(KeyEncoder.bytes(for: letter, modifiers: .control)[...])
+                        send(KeyEncoder.bytes(for: letter, modifiers: armed.union(.control))[...])
+                        armed = []
                     }
                 }
                 divider
                 special("⌨︎↓") { dismissKeyboard() }
                 divider
-                special("✕ tab") { closeTab() }
+                special("✕ tab") {
+                    armed = []
+                    closeTab()
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
