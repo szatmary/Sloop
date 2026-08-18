@@ -161,17 +161,18 @@ top of a working SSH terminal rather than first.
 - **`ssh://` URL scheme** — no `CFBundleURLTypes` in `project.yml`, so tapping
   an `ssh://user@host` link does nothing. It is how people share hosts, and it
   is close to free.
-- **Snippets, or something better than snippets** — every competitor ships a
-  saved-command library (Prompt calls them Clips; Blink and Termius call them
-  Snippets) because typing `docker compose -f prod.yml logs -f --tail=100 api`
-  on a phone is miserable. That is the same problem the compact keyboard
-  attacks, from the other end. **Open question, not yet decided:** whether the
-  answer is a plain saved-command list or something that suggests commands.
-  If it suggests, the design questions are which model and where it runs —
-  Apple's on-device Foundation Models framework needs no key, no network and
-  no privacy story, while a hosted model is far more capable but means terminal
-  context leaving the device, which for a shell client is a much bigger promise
-  than it looks. Decide the privacy posture before the model.
+- **Command suggestions** — designed and planned, not yet built. Instead of a
+  curated snippet library (which every competitor ships and nobody maintains),
+  Sloop reads the terminal *screen* and lets an on-device model pick the
+  commands out of it, so the history is the snippet library and there is
+  nothing to curate. Reading the screen rather than the keystrokes is also what
+  makes it safe: a password is never echoed, so it is structurally absent
+  rather than filtered out. The model may invent commands, not just recall
+  them, so suggestions insert and never execute, and invented ones are marked
+  as such. On-device only — nothing leaves the phone. Requires iOS 26 with
+  Apple Intelligence; a mode for older devices is still open.
+  Spec: `Docs/superpowers/specs/2026-08-18-command-suggestions-design.md`.
+  Plan: `Docs/superpowers/plans/2026-08-18-command-suggestions.md` (7 tasks).
 - ~~Key management~~ → DONE: shared key library synced via iCloud Keychain;
   `sloop import-key` CLI on the Mac (embedded in the app binary). Spec:
   `Docs/superpowers/specs/2026-08-11-key-library-design.md`.
