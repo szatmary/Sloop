@@ -217,7 +217,15 @@ UUID. Three things about it are worth knowing before changing anything:
   unauthorized tailnet device into `NSFileProviderError.notAuthenticated` with
   the sentence that fixes it. That error code is what makes Files.app offer a
   way forward instead of spinning; `signalErrorResolved` clears it once the app
-  has done the thing.
+  has done the thing. Anything conforming to `UserActionRequiredError` lands
+  there, rather than a hand-kept list of error types — the list had already
+  missed the tailnet case.
+- **Only two error domains exist here.** `NSFileProviderErrorDomain` and
+  `NSCocoaErrorDomain`. The system treats every other domain as transient and
+  retries it forever, so `FileProviderError` maps into those two and never into
+  `NSPOSIXErrorDomain` — which it did at first, on the mistaken belief that
+  Files.app read errno directly. The symptom of getting this wrong is nothing
+  at all: no error, no log, just an operation that never settles.
 
 Shared state lives in the App Group (`SloopStorage`): the host list, known
 hosts, each domain's item index, and tsnet state. Per-host credentials and

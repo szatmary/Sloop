@@ -63,10 +63,18 @@ public struct SFTPEntry: Hashable, Sendable {
 /// already makes and that `Docs/ROADMAP.md` still carries as an open item:
 /// stringify at the boundary and nothing downstream can tell a missing file
 /// from a refused permission from a dropped link. Here the distinction is not
-/// cosmetic. Files.app renders `ENOENT` as "the file no longer exists" and
-/// silently drops the item from its replica, `EACCES` as a permissions
-/// complaint the user can act on, and `EIO` as an unexplained failure. One
-/// string would render all three as the last.
+/// cosmetic: the File Provider extension turns each case into a *different*
+/// instruction to the system — drop the item, offer to resolve a name
+/// collision, restore the directory it just deleted, or retry — and a single
+/// string could only ever produce one of them.
+///
+/// The translation happens in `FileProviderError`, not here, and it does not go
+/// through errno. An earlier version of this comment claimed Files.app reads
+/// POSIX codes directly; it does not. `NSFileProviderReplicatedExtension`
+/// accepts `NSFileProviderErrorDomain` and `NSCocoaErrorDomain` and treats
+/// every other domain — POSIX included — as a transient failure to be retried,
+/// so mapping to errno at that boundary meant a deleted file was never dropped
+/// and a permissions refusal never surfaced.
 public enum SFTPError: Error, LocalizedError, Hashable, Sendable {
     case noSuchFile(String)
     case permissionDenied(String)
@@ -101,8 +109,13 @@ public enum SFTPError: Error, LocalizedError, Hashable, Sendable {
         }
     }
 
-    /// The errno the system layer should report. Files.app acts on these
-    /// directly, so the mapping is behavior, not decoration.
+    /// The errno this failure corresponds to.
+    ///
+    /// *Not* what the File Provider extension reports — see the note on the
+    /// type. This is the plain POSIX reading of each case, for callers that
+    /// want one (a CLI, a future in-app browser, a test asserting the meaning
+    /// of a status code). The File Provider boundary maps to
+    /// `NSFileProviderErrorDomain`/`NSCocoaErrorDomain` instead.
     public var posixCode: Int32 {
         switch self {
         case .noSuchFile:        return ENOENT

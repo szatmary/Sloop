@@ -125,6 +125,18 @@ per-host credentials and Access tokens move into a **third** group,
 `$(AppIdentifierPrefix)org.szatmary.sloop.fileprovider`, listed in both
 targets' entitlements.
 
+> **Correction, 2026-08-18.** The table above says these items live in the
+> "default" access group, and the first implementation of the migration took
+> that literally: it read *and deleted* them with no `kSecAttrAccessGroup` at
+> all, meaning to name that group. A keychain query without one does not name a
+> group — it matches **every group the process is entitled to**, and
+> `SecItemDelete` removes every match. So the delete that was supposed to retire
+> the original also removed the copy written one line earlier, destroying every
+> saved password, key passphrase and Access token on the first launch after
+> upgrading, while reporting a successful migration. Both stores now name their
+> group explicitly, and the original is removed only after the new copy reads
+> back. Found by review; nothing about it is visible from a build or a test run.
+
 Reusing the existing `…sloop.shared` group would have been less work and is
 wrong. That group is the iCloud-synced key library. Per-host passwords are
 stored `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` and deliberately
@@ -192,6 +204,17 @@ megabyte, and it can become SQLite if that stops being true.
 Losing the map is recoverable, not corrupting: ids are re-minted and the fix is
 `NSFileProviderManager.reimportItems(below:)`.
 
+> **Correction, 2026-08-18.** That claim was true of a *missing* map and false
+> of a *malformed* one. `move` did not retire an identifier already sitting at
+> the destination, so a rename onto a known path left two ids naming it;
+> `modifyItem` saves immediately, so it reached disk; and `load` rebuilt the
+> inverse map with `Dictionary(uniqueKeysWithValues:)`, which **traps** — inside
+> `init`, where the `try?` guarding the decode cannot catch it. The domain then
+> crashed on every launch until the file was deleted by hand, which is the
+> opposite of recoverable. `move` now retires the displaced id, and `load` keeps
+> one id per path instead of trapping, so the documented property holds for a
+> corrupt file as well as an absent one. Both have regression tests.
+
 ## Change tracking without a change feed
 
 SFTP has no notification channel, so `enumerateChanges(from:)` cannot be
@@ -250,6 +273,27 @@ tell a rejected credential from a dropped Wi-Fi link from a tunnel that wants a
 browser login."* `SFTPError` stays typed all the way to the mapping table,
 because here the distinction is not a nicety: it is the difference between five
 words of instruction and a spinner.
+
+### Correction, 2026-08-18: the mapping table does not speak POSIX
+
+As designed and first implemented, that table mapped `SFTPError` to errno and
+returned `NSPOSIXErrorDomain`, on the belief that Files.app acted on those codes
+directly. **It does not.** `NSFileProviderReplicatedExtension` accepts errors in
+`NSFileProviderErrorDomain` and `NSCocoaErrorDomain`, and classifies every other
+domain — POSIX among them — as *transient*, retrying indefinitely.
+
+So the design's whole argument for keeping the error typed was sound while its
+conclusion was wrong: a file deleted on the server was never dropped from the
+replica, a permissions refusal never reached the user, and a full filesystem
+read as a glitch. Each case now maps to the domain the system actually reads
+(`noSuchItem`, `filenameCollision`, `directoryNotEmpty`,
+`NSFileReadNoPermissionError`, `NSFileWriteOutOfSpaceError`), and anything
+unrecognized lands in `NSCocoaErrorDomain` rather than leaking a domain that
+means "retry forever". `SFTPError.posixCode` still exists for callers that want
+the POSIX reading; it is simply not what this boundary speaks.
+
+Found by review, not by testing — the failure mode is an invisible retry loop,
+which no build or unit test would have shown.
 
 ## Host model and UI
 
