@@ -77,6 +77,13 @@ targetTemplates:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.szatmary.sloop
+        # The targets are Sloop_iOS and Sloop_macOS so XcodeGen can name them in
+        # dependencies, but that is a build-system detail and the user should
+        # never see it. Without this the generated Info.plist takes PRODUCT_NAME,
+        # so the home screen icon reads "Sloop_iOS" and — because Files.app
+        # labels a file provider with its containing app's display name — so does
+        # every location Sloop publishes.
+        INFOPLIST_KEY_CFBundleDisplayName: Sloop
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: YES
