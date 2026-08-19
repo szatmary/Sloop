@@ -182,8 +182,17 @@ so the plain no-SSH build still compiles and tests cleanly.
 
 ## Message flow
 
-1. After `libssh2_channel_process_startup`, if `host.forwardedKeys` is
-   non-empty, call `libssh2_channel_request_auth_agent`.
+1. Before `libssh2_channel_process_startup`, if `host.forwardedKeys` is
+   non-empty, call `libssh2_channel_request_auth_agent` — while the channel is
+   still open but not yet a shell. sshd's `session_input_channel_req` only
+   honours `auth-agent-req@openssh.com` while the channel is
+   `SSH_CHANNEL_LARVAL`; its own `session_shell_req` (invoked by our shell
+   request) calls `channel_set_fds`, which flips the channel to
+   `SSH_CHANNEL_OPEN` and bakes the child's environment — `SSH_AUTH_SOCK`
+   included, or not — in the same step. Asking after `process_startup` is not
+   merely late: sshd has already refused it (`CHANNEL_FAILURE`), and even a
+   hypothetical late success could never reach the shell process, whose
+   environment was already fixed.
 2. The remote opens `auth-agent@openssh.com`; libssh2 calls our
    `LIBSSH2_CALLBACK_AUTHAGENT` with the new channel.
 3. `ForwardedAgent` takes ownership and services it in the existing

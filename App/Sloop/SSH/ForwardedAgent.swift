@@ -66,6 +66,19 @@ final class ForwardedAgent {
     /// similarly-sized chunks.
     private static let readChunkSize = 4096
 
+    /// Caps how many forwarded-agent channels can be adopted at once. Each
+    /// session carries its own `AgentFramer`, which will buffer up to
+    /// `AgentFramer.maximumFrameLength` (256 KiB, `AgentProtocol.swift`) of
+    /// unreassembled input before it ever sees one complete message — so N
+    /// adopted channels is an N × 256 KiB worst case with nothing yet to show
+    /// for it. 16 caps that at 4 MiB: comfortably above anything an ordinary
+    /// interactive session opens at once (a handful of parallel git/ssh
+    /// subprocesses is a large one), while keeping a single misbehaving or
+    /// hostile forwarding client from growing this without bound. Internal,
+    /// not private, so a test can adopt exactly this many channels plus one
+    /// without hardcoding the number twice.
+    static let maximumConcurrentChannels = 16
+
     init(signer: AgentSigner, confirming: AgentSignConfirming, endpoint: String) {
         self.signer = signer
         self.confirming = confirming
@@ -100,6 +113,23 @@ final class ForwardedAgent {
     func service() -> Bool {
         guard !sessions.isEmpty else { return false }
         var didWork = false
+
+        // Enforce the cap here, not in `adopt` — `adopt` runs from inside the
+        // AUTHAGENT callback and must never call into libssh2, which closing
+        // a channel does. A channel that arrives over the cap just sits in
+        // `sessions`, unserviced, until this runs; then it's refused outright
+        // — closed without ever being read — so a flood of channels can't
+        // make each one buffer partial input first. The oldest
+        // `maximumConcurrentChannels` sessions are kept; only the newest
+        // arrivals beyond the cap are refused, so already-working sessions
+        // are never punished to make room for new ones.
+        if sessions.count > Self.maximumConcurrentChannels {
+            let overflow = sessions[Self.maximumConcurrentChannels...]
+            for session in overflow { session.channel.close() }
+            sessions.removeLast(sessions.count - Self.maximumConcurrentChannels)
+            didWork = true
+        }
+
         // Collected rather than removed in place: `sessions` is being walked
         // right now, and removing a finished entry mid-iteration would skip
         // or re-visit a neighbour. Closing and dropping happens in a second
@@ -215,9 +245,15 @@ final class ForwardedAgent {
 /// three functions instead of a second event loop.
 final class LibSSH2AgentChannel: AgentChannel {
     private let channel: OpaquePointer
+    /// Retries a libssh2 call against EAGAIN, waiting on the underlying
+    /// socket between attempts — the same helper `LibSSH2Transport` uses for
+    /// every other libssh2 call, handed in because `LibSSH2AgentChannel`
+    /// doesn't hold a session or a socket of its own.
+    private let retryUntilReady: (@escaping () -> Int32) -> Int32
 
-    init(channel: OpaquePointer) {
+    init(channel: OpaquePointer, retry: @escaping (@escaping () -> Int32) -> Int32) {
         self.channel = channel
+        self.retryUntilReady = retry
     }
 
     func read(into buffer: inout [UInt8]) -> Int {
@@ -232,20 +268,21 @@ final class LibSSH2AgentChannel: AgentChannel {
         }
     }
 
-    /// Best-effort: unlike the shell channel's teardown in
-    /// `LibSSH2Transport.run()`, this has no `sock` to retry an EAGAIN close
-    /// against without threading one through from the transport. A single
-    /// close attempt, then freeing the local channel struct regardless, is
-    /// enough — freeing doesn't depend on the close packet having actually
-    /// gone out, and this channel is never the last thing standing between
-    /// the app and a clean disconnect; the shell channel's own teardown, and
-    /// the session disconnect after it, still run.
+    /// Retries the close against EAGAIN before freeing, the same as the shell
+    /// channel's own teardown in `LibSSH2Transport.run()` — a single
+    /// un-retried `libssh2_channel_close` ordinarily returns EAGAIN, and
+    /// `_libssh2_channel_free` refuses to actually free a channel whose local
+    /// side hasn't finished closing. Skip the retry and the channel is stuck
+    /// in `session->channels` for good: libssh2 keeps queuing its inbound
+    /// CHANNEL_DATA into `session->packets` with nothing left to drain it —
+    /// unbounded, and worst on exactly the protocol-error close path where
+    /// the remote is still writing.
     ///
     /// Only ever called from `ForwardedAgent.service()` or `.close()` — both
     /// run from the event loop, off the AUTHAGENT callback's stack, which is
     /// what makes calling into libssh2 here safe. `adopt` never calls this.
     func close() {
-        _ = libssh2_channel_close(channel)
+        _ = retryUntilReady { [channel] in libssh2_channel_close(channel) }
         libssh2_channel_free(channel)
     }
 }

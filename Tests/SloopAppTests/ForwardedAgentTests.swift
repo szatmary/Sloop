@@ -320,6 +320,44 @@ final class ForwardedAgentTests: XCTestCase {
         XCTAssertEqual(try readReplies(channelA).map { $0.first ?? 0 }, [14],
                        "channel A's message reassembles correctly despite B's unrelated traffic in between")
     }
+
+    // MARK: Channel cap
+
+    /// Channels beyond `ForwardedAgent.maximumConcurrentChannels` are refused
+    /// outright — closed without ever being read — rather than left to
+    /// accumulate. The already-adopted channels under the cap must be
+    /// completely unaffected.
+    func testChannelsBeyondTheCapAreRefusedWithoutBeingServiced() throws {
+        let (agent, identity, firstChannel) = try makeAgent()
+        var underCap = [firstChannel]
+        for _ in 1..<ForwardedAgent.maximumConcurrentChannels {
+            let channel = FakeAgentChannel()
+            agent.adopt(channel)
+            underCap.append(channel)
+        }
+        XCTAssertEqual(underCap.count, ForwardedAgent.maximumConcurrentChannels)
+
+        let overflow = FakeAgentChannel()
+        overflow.inbound = [requestIdentitiesFrame()]
+        agent.adopt(overflow)
+
+        // Give every under-cap channel a real request too, so the test can
+        // tell "serviced normally" apart from "just never touched".
+        for channel in underCap { channel.inbound = [requestIdentitiesFrame()] }
+
+        XCTAssertTrue(agent.service())
+
+        XCTAssertTrue(overflow.closed, "a channel beyond the cap is refused")
+        XCTAssertEqual(overflow.readCallCount, 0,
+                       "refused outright — never read from, let alone answered")
+        XCTAssertTrue(overflow.outbound.isEmpty)
+
+        for (index, channel) in underCap.enumerated() {
+            XCTAssertFalse(channel.closed, "channel \(index) is under the cap and must stay open")
+            XCTAssertEqual(try readReplies(channel), [AgentResponse.identities([identity]).framedPayloadOnly()],
+                           "channel \(index) is under the cap and must still be answered normally")
+        }
+    }
 }
 
 /// A confirmer whose answer (and whether it was even asked) is fully under a
