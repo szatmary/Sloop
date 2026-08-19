@@ -105,6 +105,21 @@ public struct SSHHost: Identifiable, Codable, Hashable {
     /// motivates it. Optional so host files written before this existed still
     /// decode; empty and whitespace-only values run nothing.
     public var onConnectCommand: String?
+    /// Whether this host is published to Files.app as a File Provider domain.
+    ///
+    /// On by default, including for hosts saved before this existed. Opt-in was
+    /// the original design — a domain is a location the system may enumerate on
+    /// its own schedule, so publishing everything has Files.app reaching servers
+    /// nobody asked it to. In use that reasoning lost to a simpler fact: a host
+    /// added in Sloop and then looked for in Files.app is not there, and nothing
+    /// about the terminal suggests why. Someone who wants a host kept out still
+    /// has the switch; someone who wants it in has to do nothing.
+    public var showsInFiles: Bool
+    /// The directory that domain is rooted at. Nil means the SFTP session's
+    /// default directory, which on essentially every server is the login
+    /// directory — the same place a fresh shell starts, and what someone
+    /// tapping their host in Files.app expects to see.
+    public var filesRootPath: String?
 
     public init(id: UUID = UUID(),
                 alias: String,
@@ -115,6 +130,8 @@ public struct SSHHost: Identifiable, Codable, Hashable {
                 useMosh: Bool = false,
                 connectionMethod: ConnectionMethod = .direct,
                 onConnectCommand: String? = nil,
+                showsInFiles: Bool = true,
+                filesRootPath: String? = nil,
                 suggestions: Bool = true) {
         self.id = id
         self.alias = alias
@@ -125,12 +142,14 @@ public struct SSHHost: Identifiable, Codable, Hashable {
         self.useMosh = useMosh
         self.connectionMethod = connectionMethod
         self.onConnectCommand = onConnectCommand
+        self.showsInFiles = showsInFiles
+        self.filesRootPath = filesRootPath
         self.suggestions = suggestions
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, alias, hostname, port, username, auth, useMosh, connectionMethod
-        case onConnectCommand, suggestions
+        case onConnectCommand, showsInFiles, filesRootPath, suggestions
     }
 
     public init(from decoder: Decoder) throws {
@@ -145,7 +164,20 @@ public struct SSHHost: Identifiable, Codable, Hashable {
         connectionMethod = try c.decodeIfPresent(ConnectionMethod.self,
                                                  forKey: .connectionMethod) ?? .direct
         onConnectCommand = try c.decodeIfPresent(String.self, forKey: .onConnectCommand)
+        showsInFiles = try c.decodeIfPresent(Bool.self, forKey: .showsInFiles) ?? true
+        filesRootPath = try c.decodeIfPresent(String.self, forKey: .filesRootPath)
         suggestions = try c.decodeIfPresent(Bool.self, forKey: .suggestions) ?? true
+    }
+
+    /// The directory this host's Files.app domain is rooted at, or nil to use
+    /// the server's default. Trimmed here so every caller agrees on what
+    /// "blank" means — the same treatment `onConnectCommand` gets, for the same
+    /// reason: a field the user cleared should mean "unset", not "the path
+    /// named by the empty string".
+    public var trimmedFilesRootPath: String? {
+        guard let path = filesRootPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !path.isEmpty else { return nil }
+        return RemotePath.normalize(path)
     }
 
     /// The command to send on connect, or nil when there's nothing to run.

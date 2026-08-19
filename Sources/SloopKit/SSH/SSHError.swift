@@ -3,6 +3,19 @@
 
 import Foundation
 
+/// Marks a failure that only a person, in the app, can clear.
+///
+/// The File Provider extension has no UI and cannot ask for anything, so it has
+/// to tell the system which failures are worth retrying and which are not. An
+/// error it does not recognize is treated as transient and retried forever —
+/// which for "authorize this device on your tailnet" means a silent loop
+/// instead of a sign-in affordance. Conforming is how a new error opts out of
+/// that, rather than by being listed in a `switch` somewhere else that nobody
+/// updates.
+public protocol UserActionRequiredError: Error {}
+
+extension SSHError: UserActionRequiredError {}
+
 /// Errors surfaced by the SSH and Mosh transports.
 public enum SSHError: Error, LocalizedError {
     case notImplemented(String)

@@ -9,14 +9,17 @@ import SloopKit
 /// matching the host's connection method; otherwise it returns a
 /// `MessageTransport` explaining what's missing, so the app stays usable
 /// during the libssh2 bring-up.
-enum TransportFactory {
-    static func ssh(host: SSHHost,
+public enum TransportFactory {
+    public static func ssh(host: SSHHost,
                     credential: Credential,
                     knownHosts: KnownHostsStore,
                     hostKeyVerifier: HostKeyVerifier,
-                    accessTokens: AccessTokenStore) -> Transport {
+                    accessTokens: AccessTokenStore,
+                    authorizationPresenter: TailscaleAuthorizationPresenter
+                        = NoAuthorizationPresenter()) -> Transport {
         #if canImport(CSSH)
-        switch dialer(for: host, accessTokens: accessTokens) {
+        switch dialer(for: host, accessTokens: accessTokens,
+                      authorizationPresenter: authorizationPresenter) {
         case .ready(let dialer):
             return LibSSH2Transport(host: host, credential: credential,
                                     dialer: dialer,
@@ -52,7 +55,9 @@ enum TransportFactory {
     /// `TCPDialer`, so a tailnet host's probe refused to run and every Mosh
     /// session on one silently became SSH.
     static func dialer(for host: SSHHost,
-                       accessTokens: AccessTokenStore) -> DialerResolution {
+                       accessTokens: AccessTokenStore,
+                       authorizationPresenter: TailscaleAuthorizationPresenter)
+    -> DialerResolution {
         switch host.connectionMethod {
         case .direct:
             return .ready(TCPDialer(host: host.hostname, port: host.port))
@@ -97,7 +102,9 @@ enum TransportFactory {
             // Sloop's own tsnet node — no Tailscale app, no system VPN slot.
             // Bringing it up happens inside the dial, so the first connect is
             // where an unauthorized device is told to authorize itself.
-            return .ready(TailscaleDialer(host: host.hostname, port: host.port))
+            return .ready(TailscaleDialer(host: host.hostname, port: host.port,
+                                          role: .app,
+                                          presenter: authorizationPresenter))
             #else
             // This build doesn't link libtailscale, so the only way a tailnet
             // host is reachable is the Tailscale app's system VPN — and when
@@ -160,18 +167,18 @@ enum TransportFactory {
 /// catch-and-clear behavior is the whole fix for the stranded-host bug, and
 /// exercising it only through a real WebSocket handshake to `wss://<host>`
 /// wouldn't be practical from a unit test.
-final class TokenClearingDialer: Dialer {
+public final class TokenClearingDialer: Dialer {
     private let wrapped: Dialer
     private let hostname: String
     private let accessTokens: AccessTokenStore
 
-    init(wrapping wrapped: Dialer, hostname: String, accessTokens: AccessTokenStore) {
+    public init(wrapping wrapped: Dialer, hostname: String, accessTokens: AccessTokenStore) {
         self.wrapped = wrapped
         self.hostname = hostname
         self.accessTokens = accessTokens
     }
 
-    func dial() throws -> Int32 {
+    public func dial() throws -> Int32 {
         do {
             return try wrapped.dial()
         } catch {

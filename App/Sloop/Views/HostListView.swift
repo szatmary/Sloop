@@ -17,6 +17,7 @@ struct HostListView: View {
     @ObservedObject private var tailscaleAuth = TailscaleAuthPrompter.shared
     #endif
     @ObservedObject private var appearance = AppearanceStore.shared
+    @Environment(\.openURL) private var openURL
     @State private var editing: SSHHost?
     @State private var accessLogin: SSHHost?
     /// What to do once the Access login sheet has actually finished closing.
@@ -108,6 +109,22 @@ struct HostListView: View {
                             Button { editing = host } label: {
                                 Label("Edit…", systemImage: "pencil")
                             }
+                            if host.showsInFiles {
+                                // Resolved on tap rather than up front: the URL
+                                // needs a round trip to the File Provider
+                                // system, and doing that for every row on every
+                                // list render would be one per host for a menu
+                                // nobody may open.
+                                Button {
+                                    Task {
+                                        guard let url = await FilesDomainRegistrar
+                                            .userVisibleURL(for: host) else { return }
+                                        openURL(url)
+                                    }
+                                } label: {
+                                    Label("Open in Files", systemImage: "folder")
+                                }
+                            }
                             if host.connectionMethod == .cloudflareAccess {
                                 Button {
                                     run { try model.signOutOfCloudflareAccess(host) }
@@ -127,6 +144,11 @@ struct HostListView: View {
                 }
             }
             .navigationTitle("Sloop")
+            // Off the launch path on purpose — see HostListModel.syncFilesDomains.
+            // Also the repair for domains that drifted while Sloop wasn't
+            // running: a host deleted on another device, or a domain the system
+            // dropped.
+            .task { await model.syncFilesDomains() }
             .toolbar {
                 ToolbarItem {
                     Button { showingSettings = true } label: {
@@ -337,11 +359,14 @@ struct HostListView: View {
                   let text = String(data: data, encoding: .utf8) else {
                 return "Couldn't read that file as text."
             }
-            let count = model.importConfig(text)
-            switch count {
-            case 0: return "No new hosts found in that config."
-            case 1: return "Imported 1 host."
-            default: return "Imported \(count) hosts."
+            do {
+                switch try model.importConfig(text) {
+                case 0: return "No new hosts found in that config."
+                case 1: return "Imported 1 host."
+                case let count: return "Imported \(count) hosts."
+                }
+            } catch {
+                return error.localizedDescription
             }
         }
     }

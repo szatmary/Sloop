@@ -167,10 +167,51 @@ top of a working SSH terminal rather than first.
   otherwise, with no code behind it anywhere, has been deleted.) Forwarding is
   what lets `git pull` on the remote use the key held on the phone, which is
   one of the most common reasons to SSH from a phone at all.
-- **SFTP / file transfer** — and the version that actually matters is a
-  `FileProvider` extension, so a remote host appears in Files.app and any app
-  can open and save to it. Secure ShellFish built its whole identity on that;
-  a transfer sheet inside the app is a much smaller feature.
+- ~~**SFTP / file transfer**~~ → BUILT, not yet run on a device. A host with
+  "Show in Files" on is published as an `NSFileProviderDomain`, so it appears in
+  Files.app and Finder and any app can open and save to it. Built as the
+  extension rather than an in-app transfer sheet for the reason that made it
+  worth doing at all: a sheet can only move files into Sloop's own container.
+  Spec: `Docs/superpowers/specs/2026-08-18-sftp-file-provider-design.md`.
+
+  What it cost elsewhere, because it is load-bearing for the rest of the app:
+  the libssh2 layer moved out of the app target into a `SloopSSH` framework the
+  extension can link; `LibSSH2Connection` was extracted from the duplicated
+  dial/handshake/host-key/auth paths in the transport and the command runner;
+  the host list, known-hosts database and per-host secrets moved into an App
+  Group and a shared keychain group.
+
+  **Validated on an iPad (9th gen), 2026-08-18:** the app launches against the
+  App Group and migrates its host list into it, the extension loads, published
+  hosts appear in Files.app, and browsing works over **all three** connection
+  methods — direct, Cloudflare Access, and Tailscale. The extension's own tsnet
+  node came up without the separate device authorization the design expected;
+  that gap is real but does not bite on a tailnet that doesn't require approval.
+
+  Remaining before it can be claimed as working:
+  - [ ] **The write path, on a device** — upload, rename, delete. Only browsing
+        has been exercised against a real server.
+  - [ ] **A multi-gigabyte file**, to confirm the streaming read and write hold
+        under a memory cap rather than merely being written to.
+  - [ ] **Access with the device locked** — the `AfterFirstUnlock` assumption
+        the whole keychain design rests on, untested.
+  - [ ] **The memory spike.** The extension runs its own tsnet node, which puts
+        a ~23 MB Go runtime inside a memory-capped extension process. It starts,
+        which the design treated as the open question — but nothing has measured
+        peak RSS during a large transfer, which is where jetsam would strike. If
+        it does not hold, drop the libtailscale targets from
+        `project.tailscale.yml` and tailnet hosts fall back to a clear "can't
+        join a tailnet" error; nothing else in the design changes.
+  - [ ] **Authorizing the extension's tailnet node** when a tailnet *does*
+        require device approval. The extension cannot present the URL and the
+        app authorizes its own node, not the extension's, so there is currently
+        no path to approve it.
+  - [ ] **macOS.** The extension builds for macOS and the replicated API is
+        identical, but Finder integration needs the app properly signed and in
+        `/Applications`, which waits on M4's signing work. Unverified, so
+        unclaimed.
+  - [ ] Server-side changes appear on refresh, not instantly — SFTP has no
+        change feed. Worth a line in the user-facing docs when there are any.
 - **Port forwarding** — local forwarding especially: reaching a remote dev
   server from mobile Safari.
 - ~~`ssh://` URL scheme~~ → DONE: tapping an `ssh://user@host` link opens

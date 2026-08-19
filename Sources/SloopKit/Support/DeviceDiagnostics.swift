@@ -13,9 +13,10 @@ import Foundation
 /// neither: `devicectl device copy from` pulls it whenever, however the app was
 /// started.
 ///
-/// Debug builds only. Nothing here should ship: these lines describe what the
-/// user typed and what was suggested back.
-enum DeviceDiagnostics {
+/// Debug builds only, and in SloopKit rather than the app because the code that
+/// most needs it — the SSH and tailnet layers — now lives in a framework the app
+/// links rather than in the app itself.
+public enum DeviceDiagnostics {
     #if DEBUG
     private static let queue = DispatchQueue(label: "org.szatmary.sloop.diagnostics")
     private static let url: URL? = {
@@ -25,7 +26,7 @@ enum DeviceDiagnostics {
     }()
     #endif
 
-    static func log(_ message: String) {
+    public static func log(_ message: String) {
         #if DEBUG
         guard let url else { return }
         let stamped = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"

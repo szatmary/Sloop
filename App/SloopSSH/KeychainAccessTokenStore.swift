@@ -13,23 +13,23 @@ import SloopKit
 ///
 /// `@unchecked Sendable` is earned by `GenericPasswordStore`, which serializes
 /// every access — see the concurrency contract on `AccessTokenStore`.
-final class KeychainAccessTokenStore: AccessTokenStore, @unchecked Sendable {
+public final class KeychainAccessTokenStore: AccessTokenStore, @unchecked Sendable {
     private let items: GenericPasswordStore
 
-    init(service: String = "org.szatmary.sloop.access-tokens") {
+    public init(service: String = "org.szatmary.sloop.access-tokens") {
         items = GenericPasswordStore(service: service)
     }
 
-    func rawToken(for hostname: String) throws -> String? {
+    public func rawToken(for hostname: String) throws -> String? {
         guard let data = try items.data(for: account(hostname)) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    func setRawToken(_ raw: String, for hostname: String) throws {
+    public func setRawToken(_ raw: String, for hostname: String) throws {
         try items.set(Data(raw.utf8), for: account(hostname))
     }
 
-    func removeToken(for hostname: String) throws {
+    public func removeToken(for hostname: String) throws {
         try items.remove(for: account(hostname))
     }
 

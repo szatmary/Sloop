@@ -51,6 +51,27 @@ public final class AutoAcceptHostKeyVerifier: HostKeyVerifier {
     }
 }
 
+/// Refuses anything not already trusted — the verifier for a process that
+/// cannot ask.
+///
+/// Trust-on-first-use is not a policy, it is a *prompt*: it works because a
+/// person looks at a fingerprint and decides. The File Provider extension has
+/// no UI and runs while the app does not, so the only honest answers it can
+/// give are the ones that need no one. Auto-accepting there would silently
+/// pin whatever key answered, including an attacker's, and the user would
+/// never see the moment it happened.
+///
+/// So an unknown host is refused, and the extension turns that refusal into
+/// "open Sloop and connect to this host once to trust its key" — which routes
+/// the decision back to the one place a person can actually make it. Changed
+/// keys are refused by the protocol default, as everywhere else.
+public final class StrictHostKeyVerifier: HostKeyVerifier {
+    public init() {}
+    public func shouldTrust(endpoint: String, keyType: String, fingerprint: String) -> Bool {
+        false
+    }
+}
+
 /// A verifier backed by closures — used for tests and to bridge the SSH loop to
 /// an interactive UI prompt. The changed-key closure defaults to refusing.
 public final class ClosureHostKeyVerifier: HostKeyVerifier {

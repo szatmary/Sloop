@@ -21,6 +21,11 @@ struct HostEditView: View {
     @State private var showingMoshHelp = false
     @State private var showingSuggestionsHelp = false
     @State private var showingConnectionHelp = false
+    @Environment(\.openURL) private var openURL
+    /// Where "Open in Files" goes, once this host's domain exists. Resolved
+    /// asynchronously because it requires a round trip to the File Provider
+    /// system, and held here because a SwiftUI view builder cannot await.
+    @State private var filesURL: URL?
     @FocusState private var commandFocused: Bool
 
     /// Ready-made on-connect commands. Reattaching to a multiplexer is why
@@ -282,6 +287,56 @@ struct HostEditView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                // Only offered where it could actually work. In a build without
+                // libssh2 the extension isn't included at all, and a toggle
+                // that adds a permanently broken location to Files.app is worse
+                // than no toggle.
+                if FilesDomainRegistrar.isAvailable {
+                    Section("Files") {
+                        Toggle("Show in Files", isOn: $host.showsInFiles)
+                        if host.showsInFiles {
+                            // Only once the domain actually exists. Offering a
+                            // button that opens nothing is worse than not
+                            // offering one — registration happens on save, so
+                            // a host being switched on right now has no domain
+                            // yet and correctly shows nothing.
+                            if let filesURL {
+                                Button {
+                                    openURL(filesURL)
+                                } label: {
+                                    Label("Open in Files", systemImage: "folder")
+                                }
+                            }
+                            TextField("Folder (optional)",
+                                      text: Binding(get: { host.filesRootPath ?? "" },
+                                                    set: { host.filesRootPath = $0 }))
+                                .textFieldStyle(.roundedBorder)
+                                #if os(iOS)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                #endif
+                            Text(host.trimmedFilesRootPath.map { "Opens at \($0)." }
+                                 ?? "Opens where a new shell starts, usually your home folder.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            // Everything the extension cannot do for itself.
+                            // Saying so here is cheaper than the user meeting
+                            // it as a failure inside Files.app later.
+                            Text("Files can't answer prompts. Connect to this host in Sloop "
+                                 + "once first, so its host key is trusted"
+                                 + (host.connectionMethod == .cloudflareAccess
+                                    ? " and its Cloudflare Access login is current." : "."))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .task(id: host.showsInFiles) {
+                filesURL = host.showsInFiles
+                    ? await FilesDomainRegistrar.userVisibleURL(for: host)
+                    : nil
             }
             .onChange(of: host.connectionMethod) { _, method in
                 // Leaving the toggle on while the method can't honor it is how

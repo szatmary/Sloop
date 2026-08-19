@@ -6,6 +6,9 @@ import SloopKit
 import SwiftTerm
 // The macOS app target is named Sloop_macOS, so its module is Sloop_macOS.
 @testable import Sloop_macOS
+// The transports, dialers and keychain stores live in the framework the app
+// shares with the File Provider extension, not in the app target.
+@testable import SloopSSH
 
 /// Unit tests that run against the built macOS app (`@testable import Sloop`),
 /// exercising app-layer code that the pure-Foundation SloopKit tests can't

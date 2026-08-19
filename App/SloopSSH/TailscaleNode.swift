@@ -5,6 +5,7 @@ import Foundation
 import os
 import SloopKit
 #if SLOOP_TAILSCALE
+import CTailscale
 
 /// Sloop's own node on the user's tailnet, via `libtailscale` (tsnet).
 ///
@@ -14,17 +15,37 @@ import SloopKit
 /// socket fd, so a tailnet host reaches libssh2 through exactly the same
 /// `Dialer` seam as a direct TCP connect.
 ///
-/// One node per app, not per host: a tsnet node is a device on the tailnet with
-/// its own key and its own entry in the admin console. Several would appear as
-/// several devices, each needing its own login.
-final class TailscaleNode: @unchecked Sendable {
-    static let shared = TailscaleNode()
+/// One node per *process role*, not per host: a tsnet node is a device on the
+/// tailnet with its own key and its own entry in the admin console. Several
+/// would appear as several devices, each needing its own login.
+///
+/// There are exactly two roles, and they are two devices on purpose. The app
+/// and the File Provider extension are separate processes, and the extension
+/// runs while the app does not — so they cannot take turns with one identity.
+/// Sharing a state directory would mean one node key on two connections, which
+/// the control plane sees as a single device flapping between endpoints, and
+/// which breaks both. The visible cost is a second entry in the admin console
+/// (`sloop-<device>-files`) needing its own one-time authorization; the
+/// alternative is a Files integration that only works while the terminal is
+/// closed.
+public final class TailscaleNode: @unchecked Sendable {
+    private static let lock = NSLock()
+    private static var nodes: [SloopStorage.TailnetRole: TailscaleNode] = [:]
+
+    /// The node for this process's role, created once.
+    public static func node(for role: SloopStorage.TailnetRole) -> TailscaleNode {
+        lock.lock(); defer { lock.unlock() }
+        if let existing = nodes[role] { return existing }
+        let node = TailscaleNode(role: role)
+        nodes[role] = node
+        return node
+    }
 
     /// Where the node keeps its identity — its node key, above all. Losing this
     /// directory means the tailnet sees a *new* device, which the user has to
     /// authorize again and then clean up in the admin console, so it lives in
-    /// Application Support (backed up, not purgeable) rather than Caches.
-    private static let stateDirectoryName = "tailnet"
+    /// the App Group container (backed up, not purgeable) rather than Caches.
+    private let role: SloopStorage.TailnetRole
 
     private static let log = Logger(subsystem: "org.szatmary.sloop", category: "tailnet")
 
@@ -32,9 +53,15 @@ final class TailscaleNode: @unchecked Sendable {
     private var handle: tailscale = -1
     private var started = false
 
-    private init() {}
+    private init(role: SloopStorage.TailnetRole) {
+        self.role = role
+    }
 
-    enum NodeError: LocalizedError {
+    /// `UserActionRequiredError` because neither case clears itself: the node
+    /// needs a person to authorize the device, or a problem fixed in the app.
+    /// Without it the File Provider extension retried the dial forever instead
+    /// of showing the user somewhere to go.
+    enum NodeError: LocalizedError, UserActionRequiredError {
         case tailscale(String)
         case needsAuthorization(URL)
 
@@ -123,7 +150,7 @@ final class TailscaleNode: @unchecked Sendable {
     /// Sloop's addition to libtailscale (`Scripts/libtailscale-sloop-udp.go`)
     /// and bridges through a datagram socketpair, so one write stays one
     /// packet.
-    func dialUDP(host: String, port: Int) throws -> Int32 {
+    public func dialUDP(host: String, port: Int) throws -> Int32 {
         lock.lock()
         defer { lock.unlock() }
         guard started else {
@@ -173,22 +200,21 @@ final class TailscaleNode: @unchecked Sendable {
     }
 
     private func stateDirectory() throws -> URL {
-        let support = try FileManager.default.url(for: .applicationSupportDirectory,
-                                                  in: .userDomainMask,
-                                                  appropriateFor: nil, create: true)
-        let directory = support.appendingPathComponent(Self.stateDirectoryName, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
+        try SloopStorage.tailnetStateDirectory(
+            role: role, in: try SloopStorage.sharedDirectory())
     }
 
+    /// The name this device shows up under in the admin console. The extension
+    /// gets a `-files` suffix so the two entries are tellable apart by someone
+    /// looking at the console wondering why their iPad is listed twice.
     private func deviceName() -> String {
         #if os(iOS)
-        return "sloop-" + UIDevice.current.name.lowercased()
-            .replacingOccurrences(of: " ", with: "-")
+        let device = UIDevice.current.name
         #else
-        return "sloop-" + (Host.current().localizedName ?? "mac").lowercased()
-            .replacingOccurrences(of: " ", with: "-")
+        let device = Host.current().localizedName ?? "mac"
         #endif
+        let base = "sloop-" + device.lowercased().replacingOccurrences(of: " ", with: "-")
+        return role == .fileProvider ? base + "-files" : base
     }
 
     /// The last error from libtailscale. Caller holds the lock.
