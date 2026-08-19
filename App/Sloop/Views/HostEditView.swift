@@ -54,6 +54,21 @@ struct HostEditView: View {
         pastedPEM.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Membership of `name` in `host.forwardedKeys`, as a toggle. The array
+    /// itself is the only stored state — `forwardsAgent` derives from it — so
+    /// there is no separate "forwarding enabled" bit to keep in sync here.
+    private func forwardingBinding(for name: String) -> Binding<Bool> {
+        Binding(
+            get: { host.forwardedKeys.contains(name) },
+            set: { isOn in
+                if isOn {
+                    if !host.forwardedKeys.contains(name) { host.forwardedKeys.append(name) }
+                } else {
+                    host.forwardedKeys.removeAll { $0 == name }
+                }
+            })
+    }
+
     init(host: SSHHost,
          libraryKeys: [NamedKey] = [],
          libraryError: String? = nil,
@@ -230,6 +245,31 @@ struct HostEditView: View {
                     }
                     if host.connectionMethod == .cloudflareAccess {
                         Text("Mosh needs UDP, which can't pass through this tunnel — SSH is used instead.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                // No `useMosh` check here on purpose: `HostListModel.connect`
+                // falls back to plain SSH whenever `mosh-server` isn't reachable
+                // — which today is always, since the Mosh transport isn't wired
+                // up — and that fallback forwards fine. Hiding the section, or
+                // clearing the selection, on a Mosh host would silently break a
+                // setting that is doing real work on every one of its sessions.
+                Section("Forward Agent") {
+                    if libraryKeys.isEmpty {
+                        Text("No keys in the library")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(libraryKeys) { key in
+                            Toggle(key.name, isOn: forwardingBinding(for: key.name))
+                        }
+                    }
+                    Text("A forwarded key can be used by anyone with root on this host, for as long as the connection is open. Every use asks first.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if host.useMosh {
+                        Text("Applies to SSH sessions, including the SSH fallback this host uses when mosh-server isn't reachable.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }

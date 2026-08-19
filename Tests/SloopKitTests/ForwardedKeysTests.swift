@@ -72,4 +72,15 @@ final class ForwardedKeysTests: XCTestCase {
                                                     keys: store).map(\.name),
                        ["a"])
     }
+
+    /// A Mosh host still forwards over its SSH fallback, so enabling Mosh must
+    /// leave the selection alone. Clearing it here would silently discard a
+    /// setting that is doing real work on every fallback session.
+    func testEnablingMoshLeavesForwardedKeysIntact() throws {
+        var host = SSHHost(alias: "a", hostname: "h", username: "u")
+        host.forwardedKeys = ["id_ed25519"]
+        host.useMosh = true
+        XCTAssertEqual(host.forwardedKeys, ["id_ed25519"])
+        XCTAssertTrue(host.forwardsAgent)
+    }
 }

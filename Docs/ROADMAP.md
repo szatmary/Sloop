@@ -154,12 +154,15 @@ top of a working SSH terminal rather than first.
   Blink, Termius and Prompt all support it. Adjacent to the Cloudflare Access
   tunnel work, which is the same shape of problem: reaching a host you cannot
   route to directly.
-- **Agent forwarding, and `ssh-agent` generally** — `AuthMethod.agent` is
-  declared in `SSHHost.swift` but has **no implementation anywhere** in the SSH
-  layer or the UI; it currently reads as a supported auth method that silently
-  isn't one. Either implement it or delete the case. Forwarding specifically is
-  what lets `git pull` on the remote use the key held on the phone, which is
-  one of the most common reasons to SSH from a phone at all.
+- ~~Agent forwarding~~ → DONE: a host picks which library keys its forwarded
+  agent may expose (`SSHHost.forwardedKeys`, empty means off); the host editor
+  lists the library with a toggle per key and states plainly what forwarding
+  means (anyone with root on the host can use the key while the connection is
+  open; every use prompts on-device first). Covered by unit tests, including
+  concurrent forwarded-agent clients — **but never exercised against a real
+  remote host.** Nothing in the on-device checklist (`Docs/HANDOFF.md`) has
+  confirmed a live `ssh-add -l`, a real approve/deny round trip, or two
+  concurrent `ssh` calls against actual `sshd`.
 - **SFTP / file transfer** — and the version that actually matters is a
   `FileProvider` extension, so a remote host appears in Files.app and any app
   can open and save to it. Secure ShellFish built its whole identity on that;
