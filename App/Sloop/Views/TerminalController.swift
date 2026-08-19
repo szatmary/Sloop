@@ -261,17 +261,17 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     }
 
     private func wire(_ transport: Transport) {
-        // A Mosh session reads the host's history on its bootstrap channel,
-        // which runs before this transport ever opens — so the callback has to
-        // be in place before `start()`, not after `onOpen`.
-        DeviceDiagnostics.log("wire: suggester=\(suggester != nil) "
-                              + "composite=\(transport is MoshOrSSHTransport)")
-        if let suggester, let composite = transport as? MoshOrSSHTransport {
-            composite.onShellHistory = { [weak self] output in
-                suggester.absorb(historyOutput: output) { [weak self] notice in
-                    DispatchQueue.main.async { self?.terminalView.feed(text: notice) }
-                }
-            }
+        DeviceDiagnostics.log("wire: suggester=\(suggester != nil)")
+        // Asked before `start()`, never after `onOpen`. A Mosh session folds
+        // the question into its bootstrap exec, which is built during `start()`
+        // and is the only SSH connection it will ever have; an SSH session
+        // takes the same registration and answers it on a second channel once
+        // the shell is up, so it is never in the way of the connection the user
+        // actually asked for. Both from one call: asking each transport shape
+        // its own way is what made this feature work on SSH hosts and silently
+        // do nothing on Mosh ones.
+        suggester?.importHistory(over: transport) { [weak self] notice in
+            DispatchQueue.main.async { self?.terminalView.feed(text: notice) }
         }
 
         // `transport` is captured weakly on purpose. This closure is stored ON
@@ -285,12 +285,6 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
                 guard let self, let transport else { return }
                 self.state = .connected
                 self.runOnConnectCommand(on: transport)
-                // After the shell is up, never alongside it: the import rides
-                // a second channel on this same connection, and it is not
-                // allowed to be in the way of the thing the user asked for.
-                self.suggester?.importHistory(over: transport) { [weak self] notice in
-                    self?.terminalView.feed(text: notice)
-                }
             }
         }
         transport.onData = { [weak self, weak terminalView] bytes in

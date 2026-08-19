@@ -48,14 +48,6 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
     /// that a slow cellular first round trip won't trip it.
     public static let firstPacketNotice: TimeInterval = 8
 
-    /// Receives the host's shell history, read on the Mosh bootstrap channel.
-    ///
-    /// Mosh's only SSH connection is the one that starts `mosh-server`, and it
-    /// is gone before the terminal opens — so unlike an SSH session, there is
-    /// nothing left to ask afterwards. Set this before `start()`; left nil,
-    /// nothing is read.
-    public var onShellHistory: ((String) -> Void)?
-
     /// Guards everything below: the bootstrap completion arrives on the probe's
     /// worker thread while `send`/`resize`/`close` are called from the main one.
     private let lock = NSLock()
@@ -78,6 +70,14 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
     /// the mistake is never corrected.
     private var pendingBytes: [UInt8] = []
     private var pendingResize: (cols: Int, rows: Int)?
+
+    /// Questions registered before the session picked a transport — see
+    /// `requestOnSession`. They ride the bootstrap when there is one, because
+    /// for a Mosh session that is the only connection there will ever be; a
+    /// session with no bootstrap hands them to whatever it activates instead.
+    /// Every entry is answered exactly once and then dropped, so a completion
+    /// can never fire twice or be left holding a caller forever.
+    private var pendingRequests: [(command: String, completion: (String?) -> Void)] = []
     /// Set by `close()`, whatever stage we are at. Before activation it stops
     /// the probe's completion opening a connection nobody owns; after it, it
     /// stops anything writing into a terminal that is already gone.
@@ -108,12 +108,21 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
 
         emit("[sloop] mosh: probing server…\r\n")
         let bootstrapper = MoshBootstrapper(runner: makeCommandRunner())
-        bootstrapper.onShellHistory = onShellHistory
+        // Whatever was registered before now rides the bootstrap. Taken under
+        // the lock and left in place: `answerPendingRequests` clears the queue
+        // once the outputs are back, so `activate` won't hand them on again.
+        lock.lock()
+        bootstrapper.extraCommands = pendingRequests.map(\.command)
+        lock.unlock()
         self.bootstrapper = bootstrapper
-        bootstrapper.bootstrap { [weak self] startup in
+        bootstrapper.bootstrap { [weak self] result in
             guard let self else { return }
             self.bootstrapper = nil   // probe done; release the runner
-            switch startup {
+            // Before activation, so the answers are delivered whichever
+            // transport the probe chose — and so a fallback to SSH doesn't open
+            // a second channel to re-ask what the bootstrap already answered.
+            self.answerPendingRequests(with: result.extraOutputs)
+            switch result.startup {
             case .connect(let bootstrap):
                 if let makeMosh = self.makeMoshTransport {
                     self.emit("[sloop] mosh: connected (udp \(bootstrap.udpPort))\r\n")
@@ -160,7 +169,13 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
         // completion activates a fresh connection for a tab the user already
         // closed, which nobody owns and nothing will ever close.
         isClosed = true
+        let stranded = pendingRequests
+        pendingRequests.removeAll()
         lock.unlock()
+        // There is no connection left to ask on, and saying so is what lets the
+        // caller stop waiting — a completion that never fires strands it, and
+        // whatever it captured, for the life of the process.
+        for request in stranded { request.completion(nil) }
         live?.close()
     }
 
@@ -174,8 +189,12 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
         active = transport
         let resize = pendingResize
         let bytes = pendingBytes
+        // Anything still queued was never carried by a bootstrap — there wasn't
+        // one, or it arrived after the probe's commands were fixed.
+        let requests = pendingRequests
         pendingResize = nil
         pendingBytes.removeAll()
+        pendingRequests.removeAll()
         lock.unlock()
 
         transport.onData = { [weak self] bytes in
@@ -189,8 +208,30 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
         // the session, so a resize applied afterwards would leave the first
         // frames drawn at the wrong width.
         if let resize { transport.resize(cols: resize.cols, rows: resize.rows) }
+        // Questions before start too, for the same shape of reason: that is the
+        // contract `SessionCommandRunner` states, and an SSH transport wants
+        // them in hand before its event loop makes its first pass.
+        for request in requests { forward(request, to: transport) }
         transport.start()
         if !bytes.isEmpty { transport.send(bytes[...]) }
+    }
+
+    /// Hand the bootstrap's answers to whoever asked, in the order they were
+    /// registered, and empty the queue so nothing is asked or answered twice.
+    private func answerPendingRequests(with outputs: [String?]) {
+        lock.lock()
+        let answered = Array(pendingRequests.prefix(outputs.count))
+        pendingRequests.removeFirst(answered.count)
+        lock.unlock()
+        for (request, output) in zip(answered, outputs) { request.completion(output) }
+    }
+
+    private func forward(_ request: (command: String, completion: (String?) -> Void),
+                         to transport: Transport) {
+        guard let runner = transport as? SessionCommandRunner else {
+            return request.completion(nil)
+        }
+        runner.requestOnSession(request.command, completion: request.completion)
     }
 
     private func noteDataArrived() {
@@ -222,17 +263,32 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
         }
     }
 
-    /// Forward to whichever transport is live, if it can run a command at all.
+    /// Queue the question until this session knows what it is, then answer it
+    /// from the cheapest connection it has.
     ///
-    /// A Mosh session cannot: its SSH connection existed only long enough to
-    /// start `mosh-server` and is gone by the time anything asks. Saying so
-    /// plainly beats appearing to work.
-    public func runOnSession(_ command: String, completion: @escaping (String?) -> Void) {
+    /// Before the session picks a transport, the answer isn't knowable: a Mosh
+    /// session must ask on its bootstrap exec and an SSH one on a second
+    /// channel once the shell is up, and which of those this is takes a full
+    /// connect, auth and exec round trip to discover. Queuing is what lets one
+    /// caller cover both.
+    ///
+    /// Asked *after* the session is live, it can only forward — and a live Mosh
+    /// session has nothing left to forward to, so it says nil. That is not a
+    /// limitation to route around with a second, Mosh-shaped API; it is the
+    /// reason to register before `start()`.
+    public func requestOnSession(_ command: String, completion: @escaping (String?) -> Void) {
         lock.lock()
-        let live = active
+        if isClosed {
+            lock.unlock()
+            return completion(nil)
+        }
+        guard let live = active else {
+            pendingRequests.append((command, completion))
+            lock.unlock()
+            return
+        }
         lock.unlock()
-        guard let runner = live as? SessionCommandRunner else { return completion(nil) }
-        runner.runOnSession(command, completion: completion)
+        forward((command, completion), to: live)
     }
 
     private func emit(_ text: String) {

@@ -30,30 +30,16 @@ public enum MoshServer {
     /// increment can forward the client's own locale instead.)
     public static let bootstrapCommand = "mosh-server new -s -c 256 -l LANG=en_US.UTF-8"
 
-    /// Separates the server's handshake from anything run after it in the same
-    /// command. Chosen to be something no shell prints by accident.
-    static let historyMarker = "@@sloop-history@@"
-
-    /// The bootstrap, optionally with the host's shell history read straight
-    /// afterwards on the same channel.
+    /// The bootstrap, with anything else this session needs to ask the host run
+    /// straight afterwards on the same channel.
     ///
     /// A Mosh session leaves no SSH connection behind — this exec is the only
     /// one there will ever be, and it closes as soon as mosh-server daemonizes.
-    /// Reading the history here costs nothing extra: no second connection, no
-    /// second authentication, and nothing to schedule after the session opens,
-    /// because by then there is nothing left to ask.
-    public static func bootstrapCommand(includingShellHistory: Bool) -> String {
-        guard includingShellHistory else { return bootstrapCommand }
-        return bootstrapCommand + "; echo \(historyMarker); " + ShellHistoryImporter.command
-    }
-
-    /// Split a combined bootstrap output into the server's part and the
-    /// history's.
-    public static func separateShellHistory(from output: String) -> (banner: String, history: String?) {
-        guard let range = output.range(of: historyMarker) else { return (output, nil) }
-        let history = String(output[range.upperBound...])
-        return (String(output[..<range.lowerBound]),
-                history.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : history)
+    /// So a question asked here costs nothing extra (no second connection, no
+    /// second authentication), and a question *not* asked here can never be
+    /// asked at all.
+    public static func script(extraCommands: [String]) -> String {
+        MarkedCommandBatch.script(lead: bootstrapCommand, commands: extraCommands)
     }
 
     /// Classify the combined stdout/stderr of the bootstrap command.
@@ -74,6 +60,21 @@ public enum MoshServer {
     }
 }
 
+/// What one run of the bootstrap produced: whether to proceed with Mosh, and
+/// the output of everything else that rode along on the same channel.
+public struct MoshBootstrapResult {
+    public let startup: MoshStartup
+    /// One entry per `MoshBootstrapper.extraCommands`, in order. `nil` where
+    /// that command's output never came back — the exec failed, or the batch
+    /// was cut short.
+    public let extraOutputs: [String?]
+
+    public init(startup: MoshStartup, extraOutputs: [String?]) {
+        self.startup = startup
+        self.extraOutputs = extraOutputs
+    }
+}
+
 /// Runs the Mosh bootstrap over a `CommandRunner` (an SSH exec channel) and
 /// reports whether to proceed with Mosh or fall back to SSH.
 ///
@@ -82,30 +83,42 @@ public enum MoshServer {
 public final class MoshBootstrapper {
     private let runner: CommandRunner
 
-    /// Set to also read the host's shell history on the bootstrap channel, and
-    /// receive it here. Left nil, nothing is read — a host that doesn't want
-    /// suggestions shouldn't have its history opened for any reason.
-    public var onShellHistory: ((String) -> Void)?
+    /// Anything else the session wants to ask this host, run on the bootstrap
+    /// channel right after `mosh-server`. Empty by default: a host nobody has a
+    /// question for runs the bare bootstrap and nothing more.
+    ///
+    /// This is the only chance. Set it before `bootstrap(completion:)`.
+    public var extraCommands: [String] = []
 
     public init(runner: CommandRunner) {
         self.runner = runner
     }
 
-    /// Start `mosh-server` and classify the result. The completion is invoked
-    /// once, off the main thread.
-    public func bootstrap(completion: @escaping (MoshStartup) -> Void) {
-        let wantsHistory = onShellHistory != nil
-        runner.run(MoshServer.bootstrapCommand(includingShellHistory: wantsHistory)) { [weak self] result in
+    /// Start `mosh-server`, classify the result, and hand back whatever the
+    /// extra commands printed. The completion is invoked once, off the main
+    /// thread, always with one entry per extra command — a caller left holding
+    /// a completion that never fires waits forever.
+    public func bootstrap(completion: @escaping (MoshBootstrapResult) -> Void) {
+        let extras = extraCommands
+        runner.run(MoshServer.script(extraCommands: extras)) { result in
             switch result {
             case .success(let output):
-                // mosh-server prints its handshake on stdout and errors on
-                // stderr; a missing binary shows up as a shell error on stderr.
-                let combined = output.stdoutText + "\n" + output.stderrText
-                let (banner, history) = MoshServer.separateShellHistory(from: combined)
-                if let history { self?.onShellHistory?(history) }
-                completion(MoshServer.interpret(banner))
+                // The markers are echoed to stdout, so that is what carries the
+                // extra commands' outputs. stderr belongs to the banner: a
+                // missing `mosh-server` shows up there as a shell error, and
+                // that is what `interpret` reads. Folding stderr into the
+                // stdout split instead is what let a login shell's warnings
+                // trail into the last command's output — and be parsed as
+                // somebody's shell history.
+                let (banner, outputs) = MarkedCommandBatch.split(output.stdoutText,
+                                                                 count: extras.count)
+                completion(MoshBootstrapResult(
+                    startup: MoshServer.interpret(banner + "\n" + output.stderrText),
+                    extraOutputs: outputs))
             case .failure(let error):
-                completion(.unavailable(reason: error.localizedDescription))
+                completion(MoshBootstrapResult(
+                    startup: .unavailable(reason: error.localizedDescription),
+                    extraOutputs: [String?](repeating: nil, count: extras.count)))
             }
         }
     }

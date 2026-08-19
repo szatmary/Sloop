@@ -82,24 +82,24 @@ final class CommandSuggester {
         [0x15] + Array(suggestion.utf8)   // ⌃U, then the command
     }
 
-    /// Read the host's own shell history over the connection that is already
-    /// open, once per session.
+    /// Ask the host for its own shell history, once per session.
+    ///
+    /// Registered *before* the transport starts, because that is the only
+    /// moment a Mosh session can still fold the question into its bootstrap
+    /// exec — the one SSH connection it will ever have. An SSH session takes
+    /// the same registration and answers it later, on a second channel once the
+    /// shell is up. Which of the two this is isn't knowable here, and the whole
+    /// point of `requestOnSession` is that it doesn't have to be.
     func importHistory(over transport: Transport, report: @escaping (String) -> Void = { _ in }) {
-        guard !hasImported else { return }
+        guard !hasImported, let runner = transport as? SessionCommandRunner else { return }
         hasImported = true
-        guard let runner = transport as? SessionCommandRunner else { return }
-        runner.runOnSession(ShellHistoryImporter.command) { [weak self] output in
+        runner.requestOnSession(ShellHistoryImporter.command) { [weak self] output in
             self?.absorb(historyOutput: output, report: report)
         }
     }
 
-    /// Take history that arrived by some other route — Mosh reads it on the
-    /// bootstrap channel, because that connection is the only one it will ever
-    /// have and it closes before the terminal opens.
-    func absorb(historyOutput output: String?, report: @escaping (String) -> Void = { _ in }) {
+    private func absorb(historyOutput output: String?, report: @escaping (String) -> Void) {
         DeviceDiagnostics.log("suggestions: absorb history — \(output?.count ?? -1) bytes")
-        guard !hasImported || output != nil else { return }
-        hasImported = true
         let commands = output.map(ShellHistoryImporter.commands(fromHistoryOutput:)) ?? []
         DispatchQueue.main.async {
             let before = self.history.commands.count

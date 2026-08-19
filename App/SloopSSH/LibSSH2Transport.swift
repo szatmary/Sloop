@@ -105,10 +105,13 @@ final class LibSSH2Transport: Transport, SessionCommandRunner {
         lock.lock(); shouldClose = true; lock.unlock()
     }
 
-    /// Run a command on this connection and hand back what it printed, or nil
-    /// if it couldn't run. One at a time; a request made while another is in
-    /// flight replaces it, since the only caller asks once per session.
-    func runOnSession(_ command: String, completion: @escaping (String?) -> Void) {
+    /// Queue a command for the session thread, which runs it on a second
+    /// channel once the shell is up — never before, and never alongside. The
+    /// connection the user asked for does not get to wait behind a convenience.
+    ///
+    /// One at a time; a request made while another is in flight replaces it,
+    /// since the only caller asks once per session.
+    func requestOnSession(_ command: String, completion: @escaping (String?) -> Void) {
         lock.lock(); pendingCommand = (command, completion); lock.unlock()
     }
 

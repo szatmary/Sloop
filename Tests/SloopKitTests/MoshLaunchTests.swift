@@ -41,8 +41,8 @@ final class MoshLaunchTests: XCTestCase {
         let runner = MockCommandRunner(stdout: "MOSH CONNECT 60005 abc123==\n")
         let boot = MoshBootstrapper(runner: runner)
         let exp = expectation(description: "bootstrap")
-        boot.bootstrap { startup in
-            XCTAssertEqual(startup, .connect(MoshBootstrap(udpPort: 60005, key: "abc123==")))
+        boot.bootstrap { result in
+            XCTAssertEqual(result.startup, .connect(MoshBootstrap(udpPort: 60005, key: "abc123==")))
             exp.fulfill()
         }
         wait(for: [exp], timeout: 1)
@@ -53,8 +53,8 @@ final class MoshLaunchTests: XCTestCase {
         let runner = MockCommandRunner(stderr: "bash: mosh-server: command not found\n", exitStatus: 127)
         let boot = MoshBootstrapper(runner: runner)
         let exp = expectation(description: "bootstrap")
-        boot.bootstrap { startup in
-            guard case .unavailable(let reason) = startup else {
+        boot.bootstrap { result in
+            guard case .unavailable(let reason) = result.startup else {
                 return XCTFail("expected fallback")
             }
             XCTAssertTrue(reason.contains("isn't installed"))
@@ -67,8 +67,8 @@ final class MoshLaunchTests: XCTestCase {
         let runner = MockCommandRunner(.failure(SSHError.channelFailure("exec failed")))
         let boot = MoshBootstrapper(runner: runner)
         let exp = expectation(description: "bootstrap")
-        boot.bootstrap { startup in
-            guard case .unavailable = startup else {
+        boot.bootstrap { result in
+            guard case .unavailable = result.startup else {
                 return XCTFail("expected fallback")
             }
             exp.fulfill()
@@ -77,50 +77,73 @@ final class MoshLaunchTests: XCTestCase {
     }
 }
 
+/// A Mosh session's only SSH connection is the one that starts `mosh-server`,
+/// and it closes before the terminal opens — so anything else this host is
+/// going to be asked has to be asked on that same command, or not at all.
 extension MoshLaunchTests {
-    /// A Mosh session's only SSH connection is the one that starts
-    /// mosh-server, and it closes before the terminal opens — so the host's
-    /// shell history is read on that same command or not at all.
-    func testBootstrapCanCarryTheHistoryReadWithIt() {
-        let command = MoshServer.bootstrapCommand(includingShellHistory: true)
-        XCTAssertTrue(command.hasPrefix(MoshServer.bootstrapCommand),
-                      "the server must still be started first")
-        XCTAssertTrue(command.contains(".zsh_history"))
+    func testTheServerIsStartedBeforeAnythingElseIsAsked() {
+        let script = MoshServer.script(extraCommands: ["echo hi"])
+        XCTAssertTrue(script.hasPrefix(MoshServer.bootstrapCommand))
     }
 
-    /// Nothing is read for a host that doesn't want suggestions.
-    func testBootstrapAloneWhenNoHistoryIsWanted() {
-        XCTAssertEqual(MoshServer.bootstrapCommand(includingShellHistory: false),
-                       MoshServer.bootstrapCommand)
+    /// Nothing to ask means nothing appended: a host whose session wants no
+    /// questions answered runs the bare bootstrap.
+    func testTheBootstrapRunsAloneWhenNothingElseIsAsked() {
+        XCTAssertEqual(MoshServer.script(extraCommands: []), MoshServer.bootstrapCommand)
     }
 
-    func testTheServerBannerAndTheHistoryAreSeparated() {
-        let output = """
-        MOSH CONNECT 60001 dGhpcyBpcyBhIGtleQ==
-        \(MoshServer.historyMarker)
-        git status
-        make -j8
-        """
-        let (banner, history) = MoshServer.separateShellHistory(from: output)
-        XCTAssertTrue(banner.contains("MOSH CONNECT 60001"))
-        XCTAssertFalse(banner.contains("git status"), "history must not reach the banner parser")
-        XCTAssertEqual(ShellHistoryImporter.commands(fromHistoryOutput: history ?? ""),
-                       ["git status", "make -j8"])
+    func testEachExtraCommandsOutputComesBackWithTheStartup() {
+        let runner = MockCommandRunner(stdout: """
+            MOSH CONNECT 60001 key==
+            \(MarkedCommandBatch.marker(0))
+            git status
+            \(MarkedCommandBatch.marker(1))
+            /home/matt
+            """)
+        let boot = MoshBootstrapper(runner: runner)
+        boot.extraCommands = ["history", "pwd"]
+
+        let exp = expectation(description: "bootstrap")
+        boot.bootstrap { result in
+            XCTAssertEqual(result.startup, .connect(MoshBootstrap(udpPort: 60001, key: "key==")))
+            XCTAssertEqual(result.extraOutputs, ["git status", "/home/matt"])
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 1)
     }
 
-    /// A host with no history files prints nothing after the marker, which is
-    /// not the same as a failure.
-    func testNoHistoryIsReportedAsNone() {
-        let (banner, history) = MoshServer.separateShellHistory(
-            from: "MOSH CONNECT 60001 key==\n\(MoshServer.historyMarker)\n\n")
-        XCTAssertTrue(banner.contains("MOSH CONNECT"))
-        XCTAssertNil(history)
+    /// stderr is the bootstrap's: a missing binary is a shell error, and that is
+    /// what tells `interpret` Mosh isn't there. It is emphatically *not* part of
+    /// the last command's output — appending it there is how a warning from the
+    /// remote's login shell ended up being parsed as somebody's command history.
+    func testStderrReachesTheBannerAndNotTheLastCommandsOutput() {
+        let runner = MockCommandRunner(
+            stdout: "MOSH CONNECT 60001 key==\n\(MarkedCommandBatch.marker(0))\ngit status\n",
+            stderr: "Warning: no access to tty\n")
+        let boot = MoshBootstrapper(runner: runner)
+        boot.extraCommands = ["history"]
+
+        let exp = expectation(description: "bootstrap")
+        boot.bootstrap { result in
+            XCTAssertEqual(result.extraOutputs, ["git status"])
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 1)
     }
 
-    /// An older server, or a host where the marker never printed, still boots.
-    func testOutputWithoutAMarkerIsAllBanner() {
-        let (banner, history) = MoshServer.separateShellHistory(from: "MOSH CONNECT 60001 key==")
-        XCTAssertEqual(banner, "MOSH CONNECT 60001 key==")
-        XCTAssertNil(history)
+    /// Every command gets an answer, even when there was never a connection to
+    /// ask on. A caller waiting on a completion that never fires waits forever.
+    func testEveryExtraCommandIsAnsweredWhenTheRunnerFails() {
+        let runner = MockCommandRunner(.failure(SSHError.channelFailure("exec failed")))
+        let boot = MoshBootstrapper(runner: runner)
+        boot.extraCommands = ["history", "pwd"]
+
+        let exp = expectation(description: "bootstrap")
+        boot.bootstrap { result in
+            XCTAssertEqual(result.extraOutputs.count, 2)
+            XCTAssertTrue(result.extraOutputs.allSatisfy { $0 == nil })
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 1)
     }
 }

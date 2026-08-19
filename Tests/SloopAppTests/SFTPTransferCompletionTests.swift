@@ -1,6 +1,12 @@
 // Sloop — Copyright (C) 2026 Matthew Szatmary
 // GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
 
+// Guarded exactly as its subject is. `LibSSH2SFTPClient` lives inside
+// `#if canImport(CSSH)`, and the base `project.yml` — the spec CI generates
+// before running these tests — links no libssh2, so without this the whole
+// SloopAppTests bundle failed to compile there and *every* app-level test
+// stopped running. A test may only assume what the build it runs in contains.
+#if canImport(CSSH)
 import XCTest
 import SloopKit
 @testable import SloopSSH
@@ -45,6 +51,8 @@ final class SFTPTransferCompletionTests: XCTestCase {
     /// compare against, and reading the absence as zero would fail every
     /// download from such a server.
     func testAnUnreportedSizeIsNotCheckedAgainst() throws {
-        try LibSSH2SFTPClient.verifyComplete(path: "/a", expected: nil, transferred: 0)
+        try LibSSH2SFTPClient.verifyComplete(path: "/a", expected: nil as UInt64?, transferred: 0)
     }
 }
+
+#endif  // canImport(CSSH)

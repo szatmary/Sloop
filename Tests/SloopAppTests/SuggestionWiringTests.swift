@@ -112,3 +112,87 @@ final class SuggestionWiringTests: XCTestCase {
         XCTAssertEqual(controller.suggestions, [])
     }
 }
+
+/// Reading the host's own shell history, so suggestions are useful on the first
+/// connection rather than the second week.
+///
+/// It used to arrive two different ways — `runOnSession` for an SSH session,
+/// and a history-shaped callback on `MoshOrSSHTransport` that the controller
+/// reached by casting to it — which meant the feature worked only for the two
+/// transport shapes somebody had remembered to write a path for. Now there is
+/// one: ask the transport, before starting it, and let it decide when it can
+/// afford to.
+extension SuggestionWiringTests {
+    /// Answers one question about the host, and remembers whether it was asked
+    /// in time — a Mosh session can only carry a question registered before
+    /// `start()`, because its bootstrap exec is built there.
+    private final class HistoryTransport: Transport, SessionCommandRunner {
+        var onData: ((ArraySlice<UInt8>) -> Void)?
+        var onOpen: (() -> Void)?
+        var onClose: ((Error?) -> Void)?
+        private let answer: String?
+        private(set) var started = false
+        private(set) var askedAfterStart = false
+        private(set) var requested: String?
+
+        init(answering answer: String?) { self.answer = answer }
+
+        func start() { started = true }
+        func send(_ bytes: ArraySlice<UInt8>) {}
+        func resize(cols: Int, rows: Int) {}
+        func close() {}
+
+        func requestOnSession(_ command: String, completion: @escaping (String?) -> Void) {
+            if started { askedAfterStart = true }
+            requested = command
+            completion(answer)
+        }
+    }
+
+    /// Lets the main queue run what `CommandSuggester` posted to it. The import
+    /// lands on the main thread because it mutates published state.
+    private func drainMainQueue() {
+        let settled = expectation(description: "main queue settled")
+        DispatchQueue.main.async { settled.fulfill() }
+        wait(for: [settled], timeout: 1)
+    }
+
+    func testTheHostsShellHistoryIsLearnedOverAnyTransportThatCanAnswer() {
+        let transport = HistoryTransport(answering: "git status --short\nmake -j8\n")
+        let controller = TerminalController(makeTransport: { transport },
+                                            appearance: .default,
+                                            suggestionsFor: host,
+                                            historyStore: store)
+        drainMainQueue()
+
+        for byte in Array("git st".utf8) {
+            controller.send(source: controller.terminalView, data: ArraySlice([byte]))
+        }
+        XCTAssertEqual(controller.suggestions, ["git status"],
+                       "the host's own history should be suggestable on the first connection")
+    }
+
+    /// Registered before the transport starts, which is the only moment a Mosh
+    /// session can still fold the question into its bootstrap.
+    func testTheHistoryIsAskedForBeforeTheTransportStarts() {
+        let transport = HistoryTransport(answering: "")
+        _ = TerminalController(makeTransport: { transport },
+                               appearance: .default,
+                               suggestionsFor: host,
+                               historyStore: store)
+        XCTAssertNotNil(transport.requested)
+        XCTAssertFalse(transport.askedAfterStart,
+                       "a session that asks after starting can never carry the question on a Mosh bootstrap")
+    }
+
+    /// A host with suggestions off is never asked. The switch governs whether
+    /// the host's history is opened at all, not merely what is shown.
+    func testAHostWithSuggestionsOffIsNeverAskedForItsHistory() {
+        let transport = HistoryTransport(answering: "kubectl get pods\n")
+        _ = TerminalController(makeTransport: { transport },
+                               appearance: .default,
+                               suggestionsFor: nil,
+                               historyStore: store)
+        XCTAssertNil(transport.requested)
+    }
+}

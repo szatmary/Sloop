@@ -236,23 +236,28 @@ final class MoshOrSSHTransportTests: XCTestCase {
     }
 }
 
-/// The history import asks the transport to run a command on the connection it
-/// already has. It used to ask by casting to the concrete SSH transport, which
-/// is exactly what a Mosh-enabled host does not hand back — so on those hosts
-/// the import silently did nothing, and the feature looked broken rather than
-/// absent.
+/// Asking the session a question — "what's in this host's shell history?" — on
+/// a connection it already has.
+///
+/// The caller registers before `start()` and the transport decides *when*,
+/// because the honest answer differs: an SSH session has a connection for as
+/// long as the terminal is open and can afford a second channel once the shell
+/// is up; a Mosh session's only SSH connection is the bootstrap exec, gone
+/// before the terminal opens. Making the caller decide is what forked this
+/// feature in two — one path through `runOnSession`, one through a
+/// history-shaped callback reached by casting to the concrete composite type.
 extension MoshOrSSHTransportTests {
     private final class RunnerTransport: Transport, SessionCommandRunner {
         var onData: ((ArraySlice<UInt8>) -> Void)?
         var onOpen: (() -> Void)?
         var onClose: ((Error?) -> Void)?
-        private(set) var ranCommand: String?
+        private(set) var requested: [String] = []
         func start() {}
         func send(_ bytes: ArraySlice<UInt8>) {}
         func resize(cols: Int, rows: Int) {}
         func close() {}
-        func runOnSession(_ command: String, completion: @escaping (String?) -> Void) {
-            ranCommand = command
+        func requestOnSession(_ command: String, completion: @escaping (String?) -> Void) {
+            requested.append(command)
             completion("git status")
         }
     }
@@ -266,14 +271,80 @@ extension MoshOrSSHTransportTests {
         composite.start()
 
         var output: String?
-        composite.runOnSession("history", completion: { output = $0 })
-        XCTAssertEqual(ssh.ranCommand, "history")
+        composite.requestOnSession("history", completion: { output = $0 })
+        XCTAssertEqual(ssh.requested, ["history"])
         XCTAssertEqual(output, "git status")
     }
 
+    /// The headline: a Mosh session can answer a question, because the question
+    /// was registered in time to ride the bootstrap. This is the whole point of
+    /// registering rather than invoking.
+    func testAMoshSessionAnswersACommandRegisteredBeforeStart() {
+        let mosh = RecordingTransport("mosh")
+        let composite = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: {
+                MockCommandRunner(stdout: """
+                MOSH CONNECT 60001 key==
+                \(MarkedCommandBatch.marker(0))
+                terraform apply
+                """)
+            },
+            makeSSHTransport: { RecordingTransport("ssh") },
+            makeMoshTransport: { _ in mosh })
+
+        var output: String?
+        composite.requestOnSession("history") { output = $0 }
+        composite.start()
+
+        XCTAssertTrue(mosh.started, "the session must still be a Mosh one")
+        XCTAssertEqual(output, "terraform apply")
+    }
+
+    /// A command registered before start reaches the SSH transport when there
+    /// was no bootstrap to carry it.
+    func testAnSSHOnlySessionForwardsACommandRegisteredBeforeStart() {
+        let ssh = RunnerTransport()
+        let composite = MoshOrSSHTransport(
+            useMosh: false,
+            makeCommandRunner: { MockCommandRunner() },
+            makeSSHTransport: { ssh })
+
+        var output: String?
+        composite.requestOnSession("history") { output = $0 }
+        XCTAssertTrue(ssh.requested.isEmpty, "nothing should reach a transport that hasn't started")
+
+        composite.start()
+        XCTAssertEqual(ssh.requested, ["history"])
+        XCTAssertEqual(output, "git status")
+    }
+
+    /// Falling back to SSH must not ask twice. The bootstrap ran the command
+    /// already — a second channel for an answer we are holding is a round trip
+    /// nobody needs, and two answers is one more than the caller expects.
+    func testAMoshFallbackAnswersFromTheBootstrapWithoutAskingTheSSHSessionAgain() {
+        let ssh = RunnerTransport()
+        let composite = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: {
+                MockCommandRunner(stdout: "\(MarkedCommandBatch.marker(0))\nmake -j8",
+                                  stderr: "bash: mosh-server: command not found\n",
+                                  exitStatus: 127)
+            },
+            makeSSHTransport: { ssh })
+
+        var answers: [String?] = []
+        composite.requestOnSession("history") { answers.append($0) }
+        composite.start()
+
+        XCTAssertTrue(ssh.requested.isEmpty, "the bootstrap already has the answer")
+        XCTAssertEqual(answers, ["make -j8"])
+    }
+
     /// A Mosh session's SSH connection existed only long enough to start
-    /// mosh-server. Reporting nil is how the caller learns to stop waiting.
-    func testReportsNothingWhenTheLiveTransportCannotRunCommands() {
+    /// mosh-server. Once it is gone, reporting nil is how a caller that asked
+    /// too late learns to stop waiting.
+    func testReportsNothingWhenAskedAfterAMoshSessionIsLive() {
         let mosh = RecordingTransport("mosh")
         let composite = MoshOrSSHTransport(
             useMosh: true,
@@ -284,41 +355,13 @@ extension MoshOrSSHTransportTests {
 
         var asked = false
         var output: String? = "unset"
-        composite.runOnSession("history") { asked = true; output = $0 }
+        composite.requestOnSession("history") { asked = true; output = $0 }
         XCTAssertTrue(asked)
         XCTAssertNil(output)
     }
-}
 
-extension MoshOrSSHTransportTests {
-    /// Mosh hosts get their history from the bootstrap channel, since that
-    /// connection is the only one they ever have.
-    func testTheBootstrapCarriesTheShellHistoryWhenAsked() {
-        let mosh = RecordingTransport("mosh")
-        let composite = MoshOrSSHTransport(
-            useMosh: true,
-            makeCommandRunner: {
-                MockCommandRunner(stdout: """
-                MOSH CONNECT 60001 key==
-                \(MoshServer.historyMarker)
-                terraform apply
-                """)
-            },
-            makeSSHTransport: { RecordingTransport("ssh") },
-            makeMoshTransport: { _ in mosh })
-
-        var history: String?
-        composite.onShellHistory = { history = $0 }
-        composite.start()
-
-        XCTAssertTrue(mosh.started)
-        XCTAssertEqual(ShellHistoryImporter.commands(fromHistoryOutput: history ?? ""),
-                       ["terraform apply"])
-    }
-
-    /// A host that doesn't want suggestions has its history left alone: no
-    /// callback, so the bootstrap command doesn't ask for it in the first place.
-    func testNoHistoryIsReadWhenNobodyIsListening() {
+    /// A host nobody has a question for runs the bare bootstrap.
+    func testTheBootstrapCarriesNothingExtraWhenNothingWasRegistered() {
         let runner = RecordingCommandRunner(stdout: "MOSH CONNECT 60001 key==\n")
         let composite = MoshOrSSHTransport(
             useMosh: true,
@@ -328,7 +371,27 @@ extension MoshOrSSHTransportTests {
         composite.start()
 
         XCTAssertEqual(runner.ranCommand, MoshServer.bootstrapCommand,
-                       "the history read must not be appended for a host that didn't ask")
+                       "nothing must be appended for a session that asked nothing")
+    }
+
+    /// A tab closed mid-probe still answers everyone waiting. A completion that
+    /// never fires is a caller stuck forever and a closure kept alive with it.
+    func testCommandsRegisteredBeforeAClosedProbeAreStillAnswered() {
+        let runner = DeferredCommandRunner()
+        let composite = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: { runner },
+            makeSSHTransport: { RecordingTransport("ssh") },
+            makeMoshTransport: { _ in RecordingTransport("mosh") })
+
+        var asked = false
+        var output: String? = "unset"
+        composite.requestOnSession("history") { asked = true; output = $0 }
+        composite.start()
+        composite.close()
+
+        XCTAssertTrue(asked, "a closed session must not leave the caller waiting")
+        XCTAssertNil(output)
     }
 
     private final class RecordingCommandRunner: CommandRunner {
