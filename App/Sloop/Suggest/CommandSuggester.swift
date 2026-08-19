@@ -58,6 +58,13 @@ final class CommandSuggester {
     /// The best completions for the line as it stands, or nothing at all when
     /// the line isn't one we can trust.
     func suggestions(limit: Int = 3) -> [String] {
+        // Length, never content: this feature's promise is that what you type
+        // stays on the device and goes nowhere, and a debug log of command
+        // lines is a file that walks off it — pulled to a Mac, pasted into a
+        // bug report. The length and the flags say everything a diagnosis
+        // needs.
+        DeviceDiagnostics.log("suggestions: typed=\(tracker.line.count) chars "
+                              + "suggestable=\(tracker.isSuggestable) known=\(history.commands.count)")
         guard tracker.isSuggestable else { return [] }
         return history.suggestions(for: tracker.line, limit: limit)
     }
@@ -90,6 +97,7 @@ final class CommandSuggester {
     /// bootstrap channel, because that connection is the only one it will ever
     /// have and it closes before the terminal opens.
     func absorb(historyOutput output: String?, report: @escaping (String) -> Void = { _ in }) {
+        DeviceDiagnostics.log("suggestions: absorb history — \(output?.count ?? -1) bytes")
         guard !hasImported || output != nil else { return }
         hasImported = true
         let commands = output.map(ShellHistoryImporter.commands(fromHistoryOutput:)) ?? []

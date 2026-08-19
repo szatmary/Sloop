@@ -135,22 +135,16 @@ final class TailscaleNode: @unchecked Sendable {
         // a device console that shows the node coming up and then nothing is
         // ambiguous about whose fault the silence is.
         Self.log.info("dialing udp \(address, privacy: .public)")
-        #if DEBUG
-        print("[sloop] tailnet: dialing udp \(address)")
-        #endif
+        DeviceDiagnostics.log("tailnet: dialing udp \(address)")
         guard TsnetDialUDP(handle, address, &conn) == 0 else {
             Self.log.error("udp dial failed: \(self.errorMessageLocked(), privacy: .public)")
-            #if DEBUG
-            print("[sloop] tailnet: udp dial FAILED — \(errorMessageLocked())")
-            #endif
+            DeviceDiagnostics.log("tailnet: udp dial FAILED — \(errorMessageLocked())")
             throw NodeError.tailscale(
                 "Couldn't open a Mosh connection to \(address) over the tailnet: "
                 + errorMessageLocked())
         }
         Self.log.info("udp fd \(conn) for \(address, privacy: .public)")
-        #if DEBUG
-        print("[sloop] tailnet: udp fd \(conn) for \(address)")
-        #endif
+        DeviceDiagnostics.log("tailnet: udp fd \(conn) for \(address)")
         return conn
     }
 

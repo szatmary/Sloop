@@ -264,6 +264,8 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         // A Mosh session reads the host's history on its bootstrap channel,
         // which runs before this transport ever opens — so the callback has to
         // be in place before `start()`, not after `onOpen`.
+        DeviceDiagnostics.log("wire: suggester=\(suggester != nil) "
+                              + "composite=\(transport is MoshOrSSHTransport)")
         if let suggester, let composite = transport as? MoshOrSSHTransport {
             composite.onShellHistory = { [weak self] output in
                 suggester.absorb(historyOutput: output) { [weak self] notice in
