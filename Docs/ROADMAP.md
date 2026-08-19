@@ -174,16 +174,31 @@ top of a working SSH terminal rather than first.
   the host list, known-hosts database and per-host secrets moved into an App
   Group and a shared keychain group.
 
+  **Validated on an iPad (9th gen), 2026-08-18:** the app launches against the
+  App Group and migrates its host list into it, the extension loads, published
+  hosts appear in Files.app, and browsing works over **all three** connection
+  methods — direct, Cloudflare Access, and Tailscale. The extension's own tsnet
+  node came up without the separate device authorization the design expected;
+  that gap is real but does not bite on a tailnet that doesn't require approval.
+
   Remaining before it can be claimed as working:
-  - [ ] **On-device validation** — {direct, Cloudflare Access, Tailscale} ×
-        {browse, download, upload, rename, delete}, a multi-gigabyte file, and
-        access with the device locked (the `AfterFirstUnlock` assumption).
+  - [ ] **The write path, on a device** — upload, rename, delete. Only browsing
+        has been exercised against a real server.
+  - [ ] **A multi-gigabyte file**, to confirm the streaming read and write hold
+        under a memory cap rather than merely being written to.
+  - [ ] **Access with the device locked** — the `AfterFirstUnlock` assumption
+        the whole keychain design rests on, untested.
   - [ ] **The memory spike.** The extension runs its own tsnet node, which puts
-        a ~23 MB Go runtime inside a memory-capped extension process. Whether
-        that survives jetsam during a large transfer is unmeasured. If it does
-        not, drop the libtailscale targets from `project.tailscale.yml` and
-        tailnet hosts fall back to a clear "can't join a tailnet" error —
-        nothing else in the design changes.
+        a ~23 MB Go runtime inside a memory-capped extension process. It starts,
+        which the design treated as the open question — but nothing has measured
+        peak RSS during a large transfer, which is where jetsam would strike. If
+        it does not hold, drop the libtailscale targets from
+        `project.tailscale.yml` and tailnet hosts fall back to a clear "can't
+        join a tailnet" error; nothing else in the design changes.
+  - [ ] **Authorizing the extension's tailnet node** when a tailnet *does*
+        require device approval. The extension cannot present the URL and the
+        app authorizes its own node, not the extension's, so there is currently
+        no path to approve it.
   - [ ] **macOS.** The extension builds for macOS and the replicated API is
         identical, but Finder integration needs the app properly signed and in
         `/Applications`, which waits on M4's signing work. Unverified, so
