@@ -351,12 +351,62 @@ final class ForwardedAgentTests: XCTestCase {
         XCTAssertEqual(overflow.readCallCount, 0,
                        "refused outright — never read from, let alone answered")
         XCTAssertTrue(overflow.outbound.isEmpty)
+        XCTAssertEqual(overflow.lastCloseWasRetrying, false,
+                       "an over-cap channel is already an abnormal case and must not be waited on")
 
         for (index, channel) in underCap.enumerated() {
             XCTAssertFalse(channel.closed, "channel \(index) is under the cap and must stay open")
             XCTAssertEqual(try readReplies(channel), [AgentResponse.identities([identity]).framedPayloadOnly()],
                            "channel \(index) is under the cap and must still be answered normally")
         }
+    }
+
+    /// A protocol error's close must not wait on the remote either — same
+    /// reasoning as the over-cap path, same policy.
+    func testMalformedFrameCloseDoesNotRetry() throws {
+        let (agent, _, channel) = try makeAgent()
+        channel.inbound = [[0x00, 0x00, 0x00, 0x00]]
+
+        XCTAssertTrue(agent.service())
+
+        XCTAssertEqual(channel.lastCloseWasRetrying, false)
+    }
+
+    /// The real hazard `libssh2_channel_close` can trigger: it can re-enter
+    /// packet processing and fire the AUTHAGENT callback again mid-close,
+    /// appending a brand-new session to `sessions` while the over-cap block
+    /// is still closing the channel that arrived before it. A `removeLast`
+    /// computed from the array's size *after* that append could target the
+    /// wrong tail element — dropping the brand-new, never-closed session
+    /// from tracking without ever calling `close` on it: a leaked channel
+    /// nobody reads, writes to, or frees.
+    func testSessionAppendedDuringAnOverCapCloseIsNotSilentlyDroppedUnclosed() throws {
+        let (agent, _, _) = try makeAgent()   // adopts one channel already
+        for _ in 1..<ForwardedAgent.maximumConcurrentChannels {
+            agent.adopt(FakeAgentChannel())
+        }
+
+        let overflow = FakeAgentChannel()
+        let reentrant = FakeAgentChannel()
+        overflow.onClose = { [weak agent] in agent?.adopt(reentrant) }
+        agent.adopt(overflow)
+
+        XCTAssertTrue(agent.service())
+
+        XCTAssertTrue(overflow.closed, "the original over-cap channel is refused as expected")
+        XCTAssertFalse(reentrant.closed,
+                       "not yet closed — it only just arrived and hasn't been serviced or refused yet")
+
+        // The buggy position-based removal drops `reentrant` from `sessions`
+        // entirely at this point without ever calling `close` on it — gone
+        // for good, never read, never closed, never freed. The fix keeps it
+        // tracked, so the *next* pass — which still sees the cap exceeded by
+        // exactly the one channel that just arrived — closes it through the
+        // ordinary over-cap path, exactly as it would have if it had simply
+        // arrived on its own instead of via this re-entrant append.
+        XCTAssertTrue(agent.service())
+        XCTAssertTrue(reentrant.closed,
+                      "must still be tracked, not leaked — even though it's the one that ends up refused next")
     }
 }
 
@@ -390,6 +440,16 @@ private final class FakeAgentChannel: AgentChannel {
     /// has dropped (after EOF or a protocol error) is never touched again —
     /// not just marked closed, but actually removed from what gets serviced.
     private(set) var readCallCount = 0
+    /// What `retrying` was on the most recent `close` call, so a test can
+    /// confirm a given path chose the policy it was supposed to.
+    private(set) var lastCloseWasRetrying: Bool?
+    /// Fires once, the first time `close` is called, then clears itself —
+    /// lets a test simulate the real hazard a libssh2-backed channel's close
+    /// has and a fake one otherwise couldn't: `libssh2_channel_close` can
+    /// re-enter packet processing and fire the AUTHAGENT callback again
+    /// mid-close, appending a brand-new session to the very agent that is
+    /// doing the closing.
+    var onClose: (() -> Void)?
 
     func read(into buffer: inout [UInt8]) -> Int {
         readCallCount += 1
@@ -405,8 +465,12 @@ private final class FakeAgentChannel: AgentChannel {
         return bytes.count
     }
 
-    func close() {
+    func close(retrying: Bool) {
         closed = true
+        lastCloseWasRetrying = retrying
+        let callback = onClose
+        onClose = nil
+        callback?()
     }
 }
 

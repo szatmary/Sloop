@@ -19,7 +19,13 @@ protocol AgentChannel: AnyObject {
     /// >0 bytes read, 0 EOF, negative for EAGAIN or error.
     func read(into buffer: inout [UInt8]) -> Int
     func write(_ bytes: [UInt8]) -> Int
-    func close()
+    /// `retrying`: true allows a brief, BOUNDED wait for the peer's own
+    /// CHANNEL_CLOSE before giving up; false makes exactly one best-effort
+    /// attempt and returns immediately. See the call sites in
+    /// `ForwardedAgent` for which paths choose which, and why: the short
+    /// version is that anything reached while the shell is still live and
+    /// interactive must never wait on a peer that may not answer.
+    func close(retrying: Bool)
 }
 
 /// Speaks the ssh-agent wire protocol over one or more forwarded-agent
@@ -122,11 +128,28 @@ final class ForwardedAgent {
         // make each one buffer partial input first. The oldest
         // `maximumConcurrentChannels` sessions are kept; only the newest
         // arrivals beyond the cap are refused, so already-working sessions
-        // are never punished to make room for new ones.
+        // are never punished to make room for new ones. `retrying: false`:
+        // a channel that showed up over the cap is already an abnormal
+        // case, possibly hostile, and must not make `service()` wait on it —
+        // see `LibSSH2Transport.closeAttempt`.
         if sessions.count > Self.maximumConcurrentChannels {
-            let overflow = sessions[Self.maximumConcurrentChannels...]
-            for session in overflow { session.channel.close() }
-            sessions.removeLast(sessions.count - Self.maximumConcurrentChannels)
+            // Snapshotted by reference identity BEFORE closing anything, not
+            // removed by position afterward: `session.channel.close` can, in
+            // the real libssh2-backed channel, re-enter packet processing
+            // and fire the AUTHAGENT callback again mid-close, appending a
+            // brand-new session to `sessions` right here. `removeLast(n)`
+            // computed from a POST-close `sessions.count` would then target
+            // whatever now sits at the tail — possibly that brand-new,
+            // never-closed session — while leaving one of the sessions
+            // actually closed above still in `sessions`, a dangling
+            // reference to a freed channel. Removing by identity against a
+            // snapshot taken up front is immune to how many new sessions
+            // appeared while closing; any that did just stay tracked and are
+            // handled on a later pass, the same as if they'd arrived on
+            // their own.
+            let overflow = Array(sessions[Self.maximumConcurrentChannels...])
+            for session in overflow { session.channel.close(retrying: false) }
+            sessions.removeAll { candidate in overflow.contains { $0 === candidate } }
             didWork = true
         }
 
@@ -143,7 +166,12 @@ final class ForwardedAgent {
         }
 
         if !finished.isEmpty {
-            for session in finished { session.channel.close() }
+            // `retrying: false` here too: EOF and a protocol error both mean
+            // the remote is either done or has stopped speaking a protocol
+            // we trust, and `service()` must return to the event loop
+            // promptly either way — a peer that never sends its own
+            // CHANNEL_CLOSE must not be waited on while the shell is live.
+            for session in finished { session.channel.close(retrying: false) }
             sessions.removeAll { candidate in finished.contains { $0 === candidate } }
             didWork = true
         }
@@ -153,8 +181,14 @@ final class ForwardedAgent {
 
     /// Tears down every adopted channel — the whole-transport teardown path,
     /// not the per-channel EOF path above, so closing here is unconditional.
+    /// `retrying: true`: this only runs once, from `LibSSH2Transport.run()`'s
+    /// own teardown `defer`, after `eventLoop` has already returned — the
+    /// shell is not live to freeze, so a short, BOUNDED wait for each
+    /// channel's own CHANNEL_CLOSE (see `LibSSH2Transport.closeAttempt`) is
+    /// worth spending to leave things tidy, unlike the paths in `service()`
+    /// above that run while the shell is still interactive.
     func close() {
-        for session in sessions { session.channel.close() }
+        for session in sessions { session.channel.close(retrying: true) }
         sessions.removeAll()
     }
 
@@ -245,15 +279,16 @@ final class ForwardedAgent {
 /// three functions instead of a second event loop.
 final class LibSSH2AgentChannel: AgentChannel {
     private let channel: OpaquePointer
-    /// Retries a libssh2 call against EAGAIN, waiting on the underlying
-    /// socket between attempts — the same helper `LibSSH2Transport` uses for
-    /// every other libssh2 call, handed in because `LibSSH2AgentChannel`
-    /// doesn't hold a session or a socket of its own.
-    private let retryUntilReady: (@escaping () -> Int32) -> Int32
+    /// Waits for the socket to be ready in whichever direction libssh2 is
+    /// blocked on — the same helper `LibSSH2Transport` uses everywhere else
+    /// — handed in because this class holds neither a session nor a socket
+    /// of its own. Called only between retries `close(retrying:)` has
+    /// already decided to make; see `LibSSH2Transport.closeAttempt`.
+    private let waitForSocket: () -> Void
 
-    init(channel: OpaquePointer, retry: @escaping (@escaping () -> Int32) -> Int32) {
+    init(channel: OpaquePointer, waitForSocket: @escaping () -> Void) {
         self.channel = channel
-        self.retryUntilReady = retry
+        self.waitForSocket = waitForSocket
     }
 
     func read(into buffer: inout [UInt8]) -> Int {
@@ -268,21 +303,30 @@ final class LibSSH2AgentChannel: AgentChannel {
         }
     }
 
-    /// Retries the close against EAGAIN before freeing, the same as the shell
-    /// channel's own teardown in `LibSSH2Transport.run()` — a single
-    /// un-retried `libssh2_channel_close` ordinarily returns EAGAIN, and
-    /// `_libssh2_channel_free` refuses to actually free a channel whose local
-    /// side hasn't finished closing. Skip the retry and the channel is stuck
-    /// in `session->channels` for good: libssh2 keeps queuing its inbound
-    /// CHANNEL_DATA into `session->packets` with nothing left to drain it —
-    /// unbounded, and worst on exactly the protocol-error close path where
-    /// the remote is still writing.
+    /// `retrying: true` retries the close against EAGAIN, up to
+    /// `LibSSH2Transport.closeRetryAttempts` times, before freeing — a
+    /// single un-retried `libssh2_channel_close` ordinarily returns EAGAIN,
+    /// and `_libssh2_channel_free` refuses to actually free a channel whose
+    /// local side hasn't finished closing, so skipping the retry entirely
+    /// would leave the channel stuck in `session->channels` for good:
+    /// libssh2 keeps queuing its inbound CHANNEL_DATA into `session->packets`
+    /// with nothing left to drain it. `retrying: false` makes exactly one
+    /// attempt — for a peer that may never answer, where waiting even a
+    /// bounded amount is a self-inflicted freeze of a still-live shell.
+    /// Either way `libssh2_channel_free` runs regardless of whether the
+    /// close actually completed; a channel struct left in
+    /// `session->channels` because it never got a clean CHANNEL_CLOSE is a
+    /// bounded, known cost, and far better than a frozen terminal.
     ///
     /// Only ever called from `ForwardedAgent.service()` or `.close()` — both
     /// run from the event loop, off the AUTHAGENT callback's stack, which is
-    /// what makes calling into libssh2 here safe. `adopt` never calls this.
-    func close() {
-        _ = retryUntilReady { [channel] in libssh2_channel_close(channel) }
+    /// what makes calling into libssh2 here safe at all. `adopt` never calls
+    /// this.
+    func close(retrying: Bool) {
+        LibSSH2Transport.closeAttempt(retrying: retrying,
+                                      maximumAttempts: LibSSH2Transport.closeRetryAttempts,
+                                      op: { [channel] in libssh2_channel_close(channel) },
+                                      waitForSocket: waitForSocket)
         libssh2_channel_free(channel)
     }
 }

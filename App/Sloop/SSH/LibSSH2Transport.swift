@@ -426,16 +426,54 @@ final class LibSSH2Transport: Transport {
     /// SSH thread, same as everything else in this class — `eventLoop`
     /// services the newly-adopted channel on its own next pass.
     private func adoptAgentChannel(_ channel: OpaquePointer) {
-        forwardedAgent?.adopt(LibSSH2AgentChannel(channel: channel) { [weak self] op in
-            // Lets the agent channel retry its close against EAGAIN through
-            // the exact same helper the shell channel's own teardown uses,
-            // without `LibSSH2AgentChannel` needing to know what a
+        forwardedAgent?.adopt(LibSSH2AgentChannel(channel: channel) { [weak self] in
+            // Lets the agent channel wait for the socket the same way every
+            // other libssh2 call in this file does, without
+            // `LibSSH2AgentChannel` needing to know what a
             // `LibSSH2Transport` is. If the transport is already gone there
-            // is no session left to retry against, so just take the one
-            // answer `op()` gives.
-            guard let self, let session = self.sshSession else { return op() }
-            return self.retry(session, self.sshSocket, op)
+            // is nothing to wait on, so this is just a no-op — the caller
+            // (`closeAttempt`) only calls it between retries it's already
+            // decided to make.
+            guard let self, let session = self.sshSession else { return }
+            self.waitSocket(self.sshSocket, session)
         })
+    }
+
+    /// How many EAGAIN retries a "normal" agent-channel close gets before
+    /// giving up — see `closeAttempt`. 5 attempts, each preceded by
+    /// `waitSocket`'s own 200 ms poll cap, is up to 1 s worst case: enough
+    /// for a cooperative peer's CHANNEL_CLOSE to arrive without turning a
+    /// graceful teardown — which already means the tab is closing — into a
+    /// noticeable hang.
+    static let closeRetryAttempts = 5
+
+    /// Attempts `op` (a libssh2 close call) against EAGAIN: exactly once
+    /// when `retrying` is false, or up to `maximumAttempts` times — waiting
+    /// on the socket between attempts — when it's true. Never unbounded
+    /// either way: `retrying: true` is for the one whole-transport teardown
+    /// path, where the connection is already ending and a short, bounded
+    /// wait for the peer's own CHANNEL_CLOSE is worth it; `retrying: false`
+    /// is for paths reached while the shell is still live and interactive —
+    /// the over-cap refusal and a channel's own protocol error — where the
+    /// remote may be unresponsive or actively hostile, and waiting on it at
+    /// all would freeze the shell (`service()` runs from inside `eventLoop`)
+    /// and stop `shouldClose` from ever being polled, making the whole
+    /// session unrecoverable from the user's side.
+    ///
+    /// Extracted as its own pure function — over closures, not a live
+    /// libssh2 channel — purely so both policies are unit-testable: a test
+    /// can hand it a closure that always reports EAGAIN and count exactly
+    /// how many times it's called, which is the one thing that actually
+    /// distinguishes "does not spin" from "spins forever". A real channel's
+    /// EAGAIN timing can't prove that either way — it depends on when, or
+    /// whether, a live peer answers.
+    static func closeAttempt(retrying: Bool, maximumAttempts: Int,
+                             op: () -> Int32, waitForSocket: () -> Void) {
+        guard retrying else { _ = op(); return }
+        for attempt in 0..<maximumAttempts {
+            if op() != LIBSSH2_ERROR_EAGAIN { return }
+            if attempt < maximumAttempts - 1 { waitForSocket() }
+        }
     }
 
     private func eventLoop(session: OpaquePointer, channel: OpaquePointer, sock: Int32) {

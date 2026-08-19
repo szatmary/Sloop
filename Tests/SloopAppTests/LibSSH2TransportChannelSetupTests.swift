@@ -7,6 +7,7 @@ import XCTest
 import SloopKit
 
 #if canImport(CSSH)
+import CSSH
 
 /// `LibSSH2Transport.configureChannel` — the order in which `openShell` asks
 /// for a PTY, agent forwarding, and the shell itself.
@@ -122,6 +123,84 @@ final class LibSSH2TransportChannelSetupTests: XCTestCase {
         XCTAssertFalse(transport.wantsForwarding,
                        "must not want to request forwarding when nothing resolved, " +
                        "regardless of host.forwardsAgent")
+    }
+
+    // MARK: closeAttempt — bounded vs. non-retrying agent-channel close
+    //
+    // A remote that is connected but unresponsive keeps `libssh2_channel_close`
+    // returning EAGAIN forever — the peer's own CHANNEL_CLOSE just never
+    // arrives. `service()` runs inside `eventLoop`, so anything that waits on
+    // that indefinitely freezes the shell *and* stops `shouldClose` from ever
+    // being polled, making the session unrecoverable from the user's side —
+    // worse, it's reachable from the over-cap path, so a hostile remote can
+    // flood channels and trade the cap meant to defend against it for exactly
+    // that freeze. These tests run `closeAttempt` off the main thread with an
+    // `XCTestExpectation` timeout: not because production code is
+    // asynchronous — `closeAttempt` is one straight-line function call — but
+    // because a real regression here is a literal infinite loop, and giving
+    // the call a deadline from the outside is the only safe way to let a test
+    // fail cleanly instead of hanging the whole run.
+
+    /// `retrying: false` must attempt exactly once, no matter how many times
+    /// EAGAIN comes back — the over-cap and protocol-error close paths depend
+    /// on this to never wait on an unresponsive peer.
+    func testNonRetryingCloseAttemptsExactlyOnceEvenWhenAlwaysEAGAIN() {
+        var opCalls = 0
+        var waitCalls = 0
+
+        let finished = expectation(description: "closeAttempt returned")
+        DispatchQueue.global().async {
+            LibSSH2Transport.closeAttempt(
+                retrying: false,
+                maximumAttempts: LibSSH2Transport.closeRetryAttempts,
+                op: { opCalls += 1; return LIBSSH2_ERROR_EAGAIN },
+                waitForSocket: { waitCalls += 1 })
+            finished.fulfill()
+        }
+
+        wait(for: [finished], timeout: 3)
+        XCTAssertEqual(opCalls, 1, "retrying: false must attempt exactly once, never loop")
+        XCTAssertEqual(waitCalls, 0, "no reason to wait on the socket for an attempt that isn't retried")
+    }
+
+    /// `retrying: true` still must give up — never wait unboundedly — once
+    /// `maximumAttempts` is reached.
+    func testRetryingCloseAttemptGivesUpAfterTheBoundEvenWhenAlwaysEAGAIN() {
+        var opCalls = 0
+        var waitCalls = 0
+
+        let finished = expectation(description: "closeAttempt returned")
+        DispatchQueue.global().async {
+            LibSSH2Transport.closeAttempt(
+                retrying: true,
+                maximumAttempts: 5,
+                op: { opCalls += 1; return LIBSSH2_ERROR_EAGAIN },
+                waitForSocket: { waitCalls += 1 })
+            finished.fulfill()
+        }
+
+        wait(for: [finished], timeout: 3)
+        XCTAssertEqual(opCalls, 5, "bounded: exactly maximumAttempts calls, never more")
+        XCTAssertEqual(waitCalls, 4, "no wasted wait after the last, already-failed attempt")
+    }
+
+    /// A retrying attempt that succeeds partway through must stop immediately
+    /// rather than spending its whole budget.
+    func testRetryingCloseAttemptStopsAsSoonAsItSucceeds() {
+        var opCalls = 0
+
+        let finished = expectation(description: "closeAttempt returned")
+        DispatchQueue.global().async {
+            LibSSH2Transport.closeAttempt(
+                retrying: true,
+                maximumAttempts: 5,
+                op: { opCalls += 1; return opCalls == 2 ? 0 : LIBSSH2_ERROR_EAGAIN },
+                waitForSocket: {})
+            finished.fulfill()
+        }
+
+        wait(for: [finished], timeout: 3)
+        XCTAssertEqual(opCalls, 2, "stops the moment op() stops returning EAGAIN")
     }
 
     // MARK: Fixtures
