@@ -1,0 +1,174 @@
+diff --git a/src/network/network.cc b/src/network/network.cc
+index bb05986..29fd0fb 100644
+--- a/src/network/network.cc
++++ b/src/network/network.cc
+@@ -148,6 +148,13 @@ void Connection::prune_sockets( void )
+   }
+ }
+ 
++Connection::Socket::Socket( int fd, bool adopt )
++  : _fd( fd )
++{
++  fatal_assert( adopt );
++  fatal_assert( fd >= 0 );
++}
++
+ Connection::Socket::Socket( int family )
+   : _fd( socket( family, SOCK_DGRAM, 0 ) )
+ {
+@@ -234,6 +241,7 @@ Connection::Connection( const char *desired_ip, const char *desired_port ) /* se
+     remote_addr(),
+     remote_addr_len( 0 ),
+     server( true ),
++    tunneled( false ),
+     MTU( DEFAULT_SEND_MTU ),
+     key(),
+     session( key ),
+@@ -350,12 +358,43 @@ bool Connection::try_bind( const char *addr, int port_low, int port_high )
+   throw NetworkException( "bind", saved_errno );
+ }
+ 
++Connection::Connection( const char *key_str, int tunnel_fd ) /* client, tunneled */
++  : socks(),
++    has_remote_addr( true ),
++    remote_addr(),
++    remote_addr_len( 0 ),
++    server( false ),
++    tunneled( true ),
++    MTU( DEFAULT_SEND_MTU ),
++    key( key_str ),
++    session( key ),
++    direction( TO_SERVER ),
++    saved_timestamp( -1 ),
++    saved_timestamp_received_at( 0 ),
++    expected_receiver_seq( 0 ),
++    last_heard( -1 ),
++    last_port_choice( -1 ),
++    last_roundtrip_success( -1 ),
++    RTT_hit( false ),
++    SRTT( 1000 ),
++    RTTVAR( 500 ),
++    send_error()
++{
++  socks.push_back( Socket( tunnel_fd, true ) );
++  /* The tunnel's MTU is what applies, and it is smaller than any link's: a
++     tailnet packet is WireGuard inside UDP inside whatever carries it. Take
++     the conservative default rather than deriving one from an address family
++     this connection does not have. */
++  MTU = DEFAULT_SEND_MTU;
++}
++
+ Connection::Connection( const char *key_str, const char *ip, const char *port ) /* client */
+   : socks(),
+     has_remote_addr( false ),
+     remote_addr(),
+     remote_addr_len( 0 ),
+     server( false ),
++    tunneled( false ),
+     MTU( DEFAULT_SEND_MTU ),
+     key( key_str ),
+     session( key ),
+@@ -401,12 +440,14 @@ void Connection::send( const string & s )
+ 
+   string p = session.encrypt( px.toMessage() );
+ 
+-  ssize_t bytes_sent = sendto( sock(), p.data(), p.size(), MSG_DONTWAIT,
+-			       &remote_addr.sa, remote_addr_len );
++  ssize_t bytes_sent = tunneled
++    ? ::send( sock(), p.data(), p.size(), MSG_DONTWAIT )
++    : sendto( sock(), p.data(), p.size(), MSG_DONTWAIT,
++	      &remote_addr.sa, remote_addr_len );
+ 
+   if ( bytes_sent != static_cast<ssize_t>( p.size() ) ) {
+-    /* Make sendto() failure available to the frontend. */
+-    send_error = "sendto: ";
++    /* Make the failure available to the frontend. */
++    send_error = tunneled ? "send: " : "sendto: ";
+     send_error += strerror( errno );
+ 
+     if ( errno == EMSGSIZE ) {
+@@ -420,7 +461,7 @@ void Connection::send( const string & s )
+       has_remote_addr = false;
+       fprintf( stderr, "Server now detached from client.\n" );
+     }
+-  } else { /* client */
++  } else if ( !tunneled ) { /* client */
+     if ( ( now - last_port_choice > PORT_HOP_INTERVAL )
+ 	 && ( now - last_roundtrip_success > PORT_HOP_INTERVAL ) ) {
+       hop_port();
+diff --git a/src/network/network.h b/src/network/network.h
+index 15ba76f..d7f8dd1 100644
+--- a/src/network/network.h
++++ b/src/network/network.h
+@@ -154,6 +154,10 @@ namespace Network {
+     public:
+       int fd( void ) const { return _fd; }
+       Socket( int family );
++      /* Adopt an already-connected datagram socket (a tunnel) rather than
++         opening one. Sloop dials tailnet hosts through libtailscale, which
++         hands back exactly such an fd. */
++      Socket( int fd, bool adopt );
+       ~Socket();
+ 
+       Socket( const Socket & other );
+@@ -166,6 +170,12 @@ namespace Network {
+     socklen_t remote_addr_len;
+ 
+     bool server;
++    /* True when socks holds one adopted, already-connected socket. The peer
++       address then lives in the tunnel rather than in a sockaddr we could
++       name: packets go out with send() instead of sendto(), and port hopping
++       is meaningless because the source port the server sees is the
++       tunnel's. */
++    bool tunneled;
+ 
+     int MTU; /* application datagram MTU */
+ 
+@@ -208,6 +218,8 @@ namespace Network {
+ 
+     Connection( const char *desired_ip, const char *desired_port ); /* server */
+     Connection( const char *key_str, const char *ip, const char *port ); /* client */
++    /* client over a connected datagram tunnel (Sloop: libtailscale) */
++    Connection( const char *key_str, int tunnel_fd );
+ 
+     void send( const string & s );
+     string recv( void );
+diff --git a/src/network/networktransport-impl.h b/src/network/networktransport-impl.h
+index e632509..ceed577 100644
+--- a/src/network/networktransport-impl.h
++++ b/src/network/networktransport-impl.h
+@@ -67,6 +67,20 @@ Transport<MyState, RemoteState>::Transport( MyState &initial_state, RemoteState
+   /* client */
+ }
+ 
++template <class MyState, class RemoteState>
++Transport<MyState, RemoteState>::Transport( MyState &initial_state, RemoteState &initial_remote,
++					    const char *key_str, int tunnel_fd )
++  : connection( key_str, tunnel_fd ),
++    sender( &connection, initial_state ),
++    received_states( 1, TimestampedState<RemoteState>( timestamp(), 0, initial_remote ) ),
++    receiver_quench_timer( 0 ),
++    last_receiver_state( initial_remote ),
++    fragments(),
++    verbose( 0 )
++{
++  /* client, over a tunnel */
++}
++
+ template <class MyState, class RemoteState>
+ void Transport<MyState, RemoteState>::recv( void )
+ {
+diff --git a/src/network/networktransport.h b/src/network/networktransport.h
+index 115ff37..73ee6de 100644
+--- a/src/network/networktransport.h
++++ b/src/network/networktransport.h
+@@ -70,6 +70,9 @@ namespace Network {
+ 	       const char *desired_ip, const char *desired_port );
+     Transport( MyState &initial_state, RemoteState &initial_remote,
+ 	       const char *key_str, const char *ip, const char *port );
++    /* client over a connected datagram tunnel (Sloop: libtailscale) */
++    Transport( MyState &initial_state, RemoteState &initial_remote,
++	       const char *key_str, int tunnel_fd );
+ 
+     /* Send data or an ack if necessary. */
+     void tick( void ) { sender.tick(); }

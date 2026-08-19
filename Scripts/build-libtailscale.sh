@@ -43,6 +43,13 @@ cd libtailscale
 # user at a login they cannot start.
 cp "$ROOT/Scripts/libtailscale-sloop-status.go" ./sloop_status.go
 
+# Upstream bridges every dialed connection to C through a SOCK_STREAM
+# socketpair, which silently destroys UDP message boundaries — two datagrams
+# arrive as one read. Mosh puts one SSP frame per packet, so a tailnet Mosh
+# session would fail at the first coalesced pair. This adds a udp dial that
+# bridges through SOCK_DGRAM instead, where one write is one datagram.
+cp "$ROOT/Scripts/libtailscale-sloop-udp.go" ./sloop_udp.go
+
 # One slice per platform. Go names the iOS device platform "ios"; the simulator
 # is the same GOOS with a simulator sysroot and an explicit -target, since the
 # SDK alone doesn't distinguish them to the linker.
@@ -75,6 +82,12 @@ build_slice () {
 // vocabulary ("NeedsLogin", "Starting", "Running"); AuthURL is empty unless
 // this device is waiting to be authorized.
 extern int TsnetSloopStatus(int sd, char* buf, size_t buflen);
+
+// Added by Sloop (Scripts/libtailscale-sloop-udp.go): dials addr ("host:port")
+// over the tailnet and writes a *datagram* socket fd to conn_out, where one
+// write is one UDP packet. tailscale_dial's own fd is a stream and cannot
+// carry UDP whatever network string it is given.
+extern int TsnetDialUDP(tailscale sd, const char* addr, tailscale_conn* conn_out);
 EOF
 }
 

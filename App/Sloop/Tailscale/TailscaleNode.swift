@@ -112,6 +112,30 @@ final class TailscaleNode: @unchecked Sendable {
         return conn
     }
 
+    /// A connected datagram socket to `host:port` over the tailnet, for Mosh.
+    ///
+    /// Not `tailscale_dial(…, "udp", …)`: that call reaches tsnet intact but
+    /// returns a *stream* fd, and a stream has no message boundaries — two SSP
+    /// packets would arrive as one read and fail to decrypt. `TsnetDialUDP` is
+    /// Sloop's addition to libtailscale (`Scripts/libtailscale-sloop-udp.go`)
+    /// and bridges through a datagram socketpair, so one write stays one
+    /// packet.
+    func dialUDP(host: String, port: Int) throws -> Int32 {
+        lock.lock()
+        defer { lock.unlock() }
+        guard started else {
+            throw NodeError.tailscale("Sloop's tailnet node isn't running.")
+        }
+        var conn: tailscale_conn = -1
+        let address = "\(host):\(port)"
+        guard TsnetDialUDP(handle, address, &conn) == 0 else {
+            throw NodeError.tailscale(
+                "Couldn't open a Mosh connection to \(address) over the tailnet: "
+                + errorMessageLocked())
+        }
+        return conn
+    }
+
     // MARK: - Internals
 
     private func startLocked() throws {

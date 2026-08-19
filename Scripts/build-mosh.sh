@@ -86,6 +86,21 @@ grep -q "thread_local uint64_t millis_cache" mosh/src/util/timestamp.cc \
   || { echo "timestamp patch did not apply — upstream moved"; exit 1; }
 rm -f mosh/src/network/compressor.cc.bak mosh/src/util/timestamp.cc.bak
 
+# Mosh opens its own UDP socket and addresses every packet with sendto(). That
+# is right for a host you can route to, and impossible for one you reach only
+# through a tunnel: Sloop dials tailnet hosts with libtailscale, which hands
+# back a connected datagram fd and no address to name. The patch adds a client
+# constructor that adopts such an fd, sends with send() instead of sendto(),
+# and skips port hopping — hopping the source port means nothing when the port
+# the server sees belongs to the tunnel.
+#
+# A patch file rather than more sed: it is a dozen hunks across two files, and
+# `git apply` fails loudly if upstream moves under it, which is the behaviour
+# we want from every one of these.
+git -C mosh apply "$ROOT/Scripts/patches/mosh-tunnel-fd.patch"
+grep -q "Connection( const char \*key_str, int tunnel_fd )" mosh/src/network/network.h \
+  || { echo "tunnel-fd patch did not apply — upstream moved"; exit 1; }
+
 echo "==> Building HOST protoc (native, protobuf $PROTOBUF_TAG)"
 PB_CMAKE_SRC="protobuf/cmake"; test -f "$PB_CMAKE_SRC/CMakeLists.txt" || PB_CMAKE_SRC="protobuf"
 cmake -S "$PB_CMAKE_SRC" -B build/pb-host -G "Unix Makefiles" \
