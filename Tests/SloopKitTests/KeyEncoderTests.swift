@@ -142,3 +142,37 @@ final class KeyEncoderTests: XCTestCase {
         XCTAssertNil(KeyEncoder.bytes(for: .command(.dismissKeyboard), armedModifiers: [], applicationCursor: false))
     }
 }
+
+/// fn + the top letter row is how this keyboard reaches F1–F12: those keys sit
+/// in the same columns the F-keys occupy on a full keyboard.
+final class FunctionLayerTests: XCTestCase {
+    func testTopRowMapsToTheFunctionKeysInColumnOrder() {
+        XCTAssertEqual(functionKeyNumber(forCharacter: "q"), 1)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "p"), 10)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "["), 11)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "]"), 12)
+    }
+
+    /// Shift is armed often; fn+Q must still be F1 rather than nothing.
+    func testUpperCaseMapsToo() {
+        XCTAssertEqual(functionKeyNumber(forCharacter: "Q"), 1)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "P"), 10)
+    }
+
+    func testKeysOutsideThatRowHaveNoFunctionKey() {
+        for character in "asdfghjklzxcvbnm0123456789-=;'`,./" {
+            XCTAssertNil(functionKeyNumber(forCharacter: character), "\(character)")
+        }
+    }
+
+    /// Every number the mapping can produce must actually encode — an F13 that
+    /// silently sent nothing would look like a dead key.
+    func testEveryMappedFunctionKeyEncodes() {
+        for character in "qwertyuiop[]" {
+            let number = functionKeyNumber(forCharacter: character)!
+            let bytes = KeyEncoder.bytes(for: .function(number), modifiers: [],
+                                         applicationCursor: false)
+            XCTAssertFalse(bytes.isEmpty, "F\(number) encodes to nothing")
+        }
+    }
+}

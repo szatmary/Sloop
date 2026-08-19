@@ -15,8 +15,8 @@ paid for themselves immediately: every serious defect so far was invisible to
 the compiler, the unit tests and CI alike — a public key never passed to
 libssh2 (so *all* key auth failed), a frozen clock that let Mosh send exactly
 one packet per session, and a "C" locale that truncated every multi-byte
-character to its lead byte. Assume the same of what hasn't been run yet: the
-key types below, and Mosh roaming across a network change.
+character to its lead byte. Assume the same of what hasn't been run yet: Mosh
+roaming across a network change, and two Mosh sessions to one host at once.
 
 ### Done and green in CI
 
@@ -27,6 +27,16 @@ key types below, and Mosh roaming across a network change.
   `mosh.xcframework`; an Objective-C++ bridge (`MoshBridge`) over
   `Network::Transport`; `MoshTransport` wired to per-host "Use Mosh" with
   graceful SSH fallback; roaming nudges on network-path change and app resume.
+- **Compact keyboard**: an optional terminal keyboard in ANSI layout —
+  escape and tab where a real keyboard puts them, control at caps lock, an
+  inverted-T arrow cluster, a number pad, and F1-F12 behind `fn`. It replaces
+  the system keyboard rather than stacking a shortcut row above it, which is
+  where the terminal rows it costs come back from. Layout pinned key by key in
+  `KeyboardLayoutTests`.
+- **Command suggestions**: per-host, off by default; next-word completions
+  ranked by frecency over what you've typed on that host, seeded from the
+  host's shell history at connect. On device, never synced, never sent
+  anywhere.
 - **Terminal UX**: multi-session **tabs** (background tabs stay connected),
   **appearance settings** (font/theme/cursor), iPad/Mac **keyboard + menu
   commands** (⌘T/⌘W/⌘⇧[ ]), native macOS **Settings** window.
@@ -37,17 +47,25 @@ key types below, and Mosh roaming across a network change.
   `CloudflareAccessDialer` as a native WebSocket carrier for hosts behind
   Cloudflare Tunnel, `AccessLoginView` for the browser SSO, and a
   Keychain-backed token store; selected per-host, SSH-only (Mosh toggle
-  disabled). Unit-tested; not yet run against a real tunnel.
-- **CI**: SloopKit unit tests, libssh2/protobuf/mosh xcframeworks, base app
+  disabled). Verified against a live Access application from an iPad.
+- **Tailscale**: an embedded `tsnet` node (`Vendor/libtailscale.xcframework`,
+  its own `project.tailscale.yml` variant) — Sloop joins the tailnet itself,
+  so the Tailscale app needn't run and needn't hold iOS's one VPN slot.
+  Verified on an iPad including the device-authorization sheet.
+- **CI** (now on a daily schedule plus tags — the repo is private and macOS
+  minutes bill at 10×; a `recent-changes` gate skips the day's run when nothing
+  landed): SloopKit unit tests, libssh2/protobuf/mosh xcframeworks, base app
   (iOS+macOS), SSH app (iOS+macOS), Mosh app (iOS+macOS), unsigned macOS
   Release + rolling `nightly` GitHub release. All required and green.
 
 ### NOT done / not verifiable here
 
-- **Runtime validation** — SSH (RSA key), Mosh, a Cloudflare Access tunnel, and
-  Sloop's own embedded tailnet node all verified on an iPad.
-  Not yet exercised: Ed25519/ECDSA/passphrase-protected keys, Mosh roaming
-  across Wi-Fi→cellular, and the host-key mismatch path.
+- **Runtime validation** — SSH, Mosh, a Cloudflare Access tunnel, and Sloop's
+  own embedded tailnet node all verified on an iPad; Ed25519, ECDSA and
+  passphrase-protected keys verified through the transport's own libssh2 call
+  (see "Key types" below). Not yet exercised: Mosh roaming across
+  Wi-Fi→cellular, two Mosh sessions to one host at once, and the host-key
+  mismatch path.
 - **Code signing / distribution** — the app is unsigned.
 - **Marketing assets** (App Store screenshots). The app icon itself is DONE:
   `App/Sloop/Assets.xcassets` generated from the SVG master by
@@ -191,6 +209,13 @@ RSA worked fine.
 
 - [x] **RSA** (`ssh-rsa` key file, `rsa-sha2-*` signature) — verified on iPad,
       2026-08-17.
+- [x] **Ed25519**, **ECDSA** (nistp256) and **passphrase-protected** keys —
+      verified 2026-08-18 against a live server through
+      `libssh2_userauth_publickey_frommemory`, the same call and argument order
+      `LibSSH2Transport` makes, with keys installed on the host for the purpose.
+      Ed25519 authenticates with or without a public-key blob, since OpenSSL 3
+      derives one. This is the crypto backend answered; what a device adds is
+      the paste-a-key-into-the-editor path, not the algorithms.
 - [ ] **Ed25519** (`ssh-ed25519`) — NOT yet verified. Needs a host that
       authorizes an Ed25519 key; under OpenSSL the key parses, but no live
       session has used one.

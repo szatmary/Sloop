@@ -105,13 +105,39 @@ side never knows which dialer produced it.
   fd half-closes and `read()` returns 0. Any bug about libssh2 mishandling a
   negative return (a TCP reset, a vanished network) is therefore a
   direct-TCP-path problem; don't go looking for it in the relay.
-- `.tailscale` is a recognized `ConnectionMethod` but not yet a working
-  dialer — `TransportFactory` returns `nil` for it today. Planned as a third
-  dialer over an embedded tailnet node; see [`Docs/ROADMAP.md`](ROADMAP.md).
+- **`TailscaleDialer`**
+  ([`App/Sloop/Tailscale/TailscaleDialer.swift`](../App/Sloop/Tailscale/TailscaleDialer.swift))
+  — Sloop's own tailnet node. `tailscale_dial` hands back an ordinary socket
+  fd, so libssh2 cannot tell a tailnet connection from a direct one and the
+  whole integration fits behind `Dialer`. The node comes up inside the first
+  dial rather than at launch: a user with no tailnet hosts never pays for a
+  WireGuard node, and one who has them expects the first connect to be where
+  "authorize this device" appears. Lives in the app rather than SloopKit
+  because it needs `libtailscale`, which only the `.tailscale` build variant
+  links; other variants compile a stub that says the method is unavailable.
 
-Tunneled hosts are SSH-only: Mosh needs UDP, which Cloudflare Access
-(TCP-over-WebSocket) can't carry and embedded Tailscale hasn't been verified
-to. `SSHHost.connectionMethod` selects the dialer via
+Cloudflare Access hosts are SSH-only: Mosh needs UDP, which a
+TCP-over-WebSocket tunnel can't carry, so `HostEditView` disables "Use Mosh"
+for them.
+
+So are Tailscale hosts, for a reason worth stating plainly: **the `Dialer`
+seam carries the SSH leg only.** Mosh's SSP leg is a UDP socket
+`MoshTransport` opens itself, straight to the hostname, never touching a
+dialer — so a method that works by dialing differently does nothing for it.
+Over Sloop's own tailnet node the SSP packets would go to a `100.64.0.0/10`
+address the OS has no route to, precisely because no system VPN is up. Mosh
+over a tailnet therefore means Direct with the Tailscale app running, which is
+a good pairing anyway: both roam.
+
+`ConnectionMethod.carriesMosh` is the single statement of that rule, and it
+lives on the model because the two places that need it drifted apart — the
+host editor offered Mosh over Tailscale while the connect path silently ran
+SSH, so the toggle stayed on and did nothing. Making the UDP leg tunnel-aware
+(`tailscale_dial(…, "udp", …)` — the C API takes the network string) would
+mean rewiring mosh's `Connection` off `sendto`/`recvfrom` onto an fd: a
+project, not a patch.
+
+`SSHHost.connectionMethod` selects the dialer via
 [`TransportFactory`](../App/Sloop/SSH/TransportFactory.swift); `HostEditView`
 disables the "Use Mosh" toggle whenever the method isn't `.direct`.
 

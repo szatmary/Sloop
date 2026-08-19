@@ -81,6 +81,64 @@ final class MoshOrSSHTransportTests: XCTestCase {
         XCTAssertTrue(notice.contains("isn't built yet"))
     }
 
+    /// "connected (udp 60007)" followed by a blank screen forever is how a
+    /// firewall that passes 22 and drops everything else presents itself. The
+    /// terminal has to say so — nothing else in the stack can.
+    func testSaysSoWhenTheMoshSessionNeverMakesASound() {
+        let mosh = RecordingTransport("mosh")
+        var fire: (() -> Void)?
+        var notice = ""
+        let t = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: { MockCommandRunner(stdout: "MOSH CONNECT 60007 k==\n") },
+            makeSSHTransport: { RecordingTransport("ssh") },
+            makeMoshTransport: { _ in mosh },
+            afterDelay: { _, work in fire = work })
+        t.onData = { notice += String(decoding: $0, as: UTF8.self) }
+        t.start()
+        fire?()
+        XCTAssertTrue(notice.contains("nothing received on UDP port 60007"))
+        // Reports; never kills. Packets can still arrive, and outliving
+        // silence is the point of Mosh.
+        XCTAssertTrue(notice.contains("Still listening"))
+    }
+
+    func testStaysQuietOnceTheSessionHasSaidAnything() {
+        let mosh = RecordingTransport("mosh")
+        var fire: (() -> Void)?
+        var notice = ""
+        let t = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: { MockCommandRunner(stdout: "MOSH CONNECT 60007 k==\n") },
+            makeSSHTransport: { RecordingTransport("ssh") },
+            makeMoshTransport: { _ in mosh },
+            afterDelay: { _, work in fire = work })
+        t.onData = { notice += String(decoding: $0, as: UTF8.self) }
+        t.start()
+        mosh.onData?(ArraySlice(Array("$ ".utf8)))
+        fire?()
+        XCTAssertFalse(notice.contains("nothing received"))
+    }
+
+    /// A tab closed during the wait must not print into a terminal that is
+    /// already gone.
+    func testSaysNothingAboutSilenceAfterTheTabIsClosed() {
+        let mosh = RecordingTransport("mosh")
+        var fire: (() -> Void)?
+        var notice = ""
+        let t = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: { MockCommandRunner(stdout: "MOSH CONNECT 60007 k==\n") },
+            makeSSHTransport: { RecordingTransport("ssh") },
+            makeMoshTransport: { _ in mosh },
+            afterDelay: { _, work in fire = work })
+        t.start()
+        t.onData = { notice += String(decoding: $0, as: UTF8.self) }
+        t.close()
+        fire?()
+        XCTAssertEqual(notice, "")
+    }
+
     func testForwardsIOToActiveTransport() {
         let ssh = RecordingTransport("ssh")
         var received: [UInt8] = []
@@ -175,5 +233,111 @@ final class MoshOrSSHTransportTests: XCTestCase {
 
         XCTAssertFalse(mosh.started, "a closed session must not open a Mosh connection")
         XCTAssertFalse(ssh.started, "nor fall back to an SSH one")
+    }
+}
+
+/// The history import asks the transport to run a command on the connection it
+/// already has. It used to ask by casting to the concrete SSH transport, which
+/// is exactly what a Mosh-enabled host does not hand back — so on those hosts
+/// the import silently did nothing, and the feature looked broken rather than
+/// absent.
+extension MoshOrSSHTransportTests {
+    private final class RunnerTransport: Transport, SessionCommandRunner {
+        var onData: ((ArraySlice<UInt8>) -> Void)?
+        var onOpen: (() -> Void)?
+        var onClose: ((Error?) -> Void)?
+        private(set) var ranCommand: String?
+        func start() {}
+        func send(_ bytes: ArraySlice<UInt8>) {}
+        func resize(cols: Int, rows: Int) {}
+        func close() {}
+        func runOnSession(_ command: String, completion: @escaping (String?) -> Void) {
+            ranCommand = command
+            completion("git status")
+        }
+    }
+
+    func testForwardsACommandToWhicheverTransportIsLive() {
+        let ssh = RunnerTransport()
+        let composite = MoshOrSSHTransport(
+            useMosh: false,
+            makeCommandRunner: { MockCommandRunner() },
+            makeSSHTransport: { ssh })
+        composite.start()
+
+        var output: String?
+        composite.runOnSession("history", completion: { output = $0 })
+        XCTAssertEqual(ssh.ranCommand, "history")
+        XCTAssertEqual(output, "git status")
+    }
+
+    /// A Mosh session's SSH connection existed only long enough to start
+    /// mosh-server. Reporting nil is how the caller learns to stop waiting.
+    func testReportsNothingWhenTheLiveTransportCannotRunCommands() {
+        let mosh = RecordingTransport("mosh")
+        let composite = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: { MockCommandRunner(stdout: "MOSH CONNECT 60001 key==\n") },
+            makeSSHTransport: { RecordingTransport("ssh") },
+            makeMoshTransport: { _ in mosh })
+        composite.start()
+
+        var asked = false
+        var output: String? = "unset"
+        composite.runOnSession("history") { asked = true; output = $0 }
+        XCTAssertTrue(asked)
+        XCTAssertNil(output)
+    }
+}
+
+extension MoshOrSSHTransportTests {
+    /// Mosh hosts get their history from the bootstrap channel, since that
+    /// connection is the only one they ever have.
+    func testTheBootstrapCarriesTheShellHistoryWhenAsked() {
+        let mosh = RecordingTransport("mosh")
+        let composite = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: {
+                MockCommandRunner(stdout: """
+                MOSH CONNECT 60001 key==
+                \(MoshServer.historyMarker)
+                terraform apply
+                """)
+            },
+            makeSSHTransport: { RecordingTransport("ssh") },
+            makeMoshTransport: { _ in mosh })
+
+        var history: String?
+        composite.onShellHistory = { history = $0 }
+        composite.start()
+
+        XCTAssertTrue(mosh.started)
+        XCTAssertEqual(ShellHistoryImporter.commands(fromHistoryOutput: history ?? ""),
+                       ["terraform apply"])
+    }
+
+    /// A host that doesn't want suggestions has its history left alone: no
+    /// callback, so the bootstrap command doesn't ask for it in the first place.
+    func testNoHistoryIsReadWhenNobodyIsListening() {
+        let runner = RecordingCommandRunner(stdout: "MOSH CONNECT 60001 key==\n")
+        let composite = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: { runner },
+            makeSSHTransport: { RecordingTransport("ssh") },
+            makeMoshTransport: { _ in RecordingTransport("mosh") })
+        composite.start()
+
+        XCTAssertEqual(runner.ranCommand, MoshServer.bootstrapCommand,
+                       "the history read must not be appended for a host that didn't ask")
+    }
+
+    private final class RecordingCommandRunner: CommandRunner {
+        private let stdout: String
+        private(set) var ranCommand: String?
+        init(stdout: String) { self.stdout = stdout }
+        func run(_ command: String, completion: @escaping (Result<CommandResult, Error>) -> Void) {
+            ranCommand = command
+            completion(.success(CommandResult(stdout: Data(stdout.utf8), stderr: Data(), exitStatus: 0)))
+        }
     }
 }

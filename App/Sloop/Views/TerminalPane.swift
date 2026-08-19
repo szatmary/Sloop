@@ -29,6 +29,13 @@ struct TerminalPane: View {
             ConnectionStatusBar(state: controller.state) { controller.reconnect() }
             SwiftTermView(controller: controller)
             #if os(iOS)
+            // Above whichever keyboard is in use, and above the smart-keys bar
+            // when there is one — nearest the line being typed, and it takes no
+            // height at all when there's nothing to offer, which is most of the
+            // time.
+            SuggestionBar(suggestions: controller.suggestions,
+                          typed: controller.typedLine,
+                          accept: { controller.acceptSuggestion($0) })
             if chrome == .fullBar {
                 KeyboardAccessoryBar(send: { controller.send($0) },
                                      applicationCursor: { controller.applicationCursor },

@@ -8,8 +8,24 @@ import SloopKit
 /// on iOS, keyboard style). Bound to the shared `AppearanceStore`, so changes
 /// persist and restyle live terminals immediately.
 struct TerminalSettingsView: View {
+    /// Set when the user asks to clear history, so the confirmation can be
+    /// answered before anything is deleted.
+    @State private var clearingHistory = false
+    @State private var clearingFailed: String?
+
     @ObservedObject var store: AppearanceStore
     @Environment(\.dismiss) private var dismiss
+
+    /// Delete every host's history. Reported rather than swallowed: someone
+    /// clearing this is making a decision about what is stored on their device,
+    /// and "done" when it isn't would be the worst possible answer.
+    private func clearHistory() {
+        do {
+            try CommandHistoryStore().forgetEverything()
+        } catch {
+            clearingFailed = error.localizedDescription
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -41,6 +57,34 @@ struct TerminalSettingsView: View {
                     .pickerStyle(.segmented)
                 }
 
+                Section("Suggestions") {
+                    Text("""
+                    As you type, Sloop offers the word that usually comes next, \
+                    taken from the commands you've run on a host and from that \
+                    host's own shell history, which it reads once when you \
+                    connect. Each host has its own switch, in that host's \
+                    settings beside Use Mosh.
+                    """)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Label("""
+                    Those lists of commands stay on this device. They aren't \
+                    synced to iCloud, aren't shared with your other devices, and \
+                    are never sent to a server or to anyone else. There's no \
+                    account and nothing to opt out of, because there is nowhere \
+                    for them to go.
+                    """, systemImage: "lock")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Button(role: .destructive) {
+                        clearingHistory = true
+                    } label: {
+                        Text("Clear Command History")
+                    }
+                }
+
                 #if os(iOS)
                 Section("Keyboard") {
                     Picker("Style", selection: $store.appearance.keyboard) {
@@ -66,6 +110,23 @@ struct TerminalSettingsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .confirmationDialog("Clear command history?",
+                                isPresented: $clearingHistory, titleVisibility: .visible) {
+                Button("Clear History", role: .destructive) { clearHistory() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Deletes the commands Sloop has remembered, on every host. "
+                   + "Suggestions start again from each host's own shell history the "
+                   + "next time you connect.")
+            }
+            .alert("Couldn't Clear History", isPresented: Binding(
+                get: { clearingFailed != nil },
+                set: { if !$0 { clearingFailed = nil } })
+            ) {
+                Button("OK", role: .cancel) { clearingFailed = nil }
+            } message: {
+                Text(clearingFailed ?? "")
             }
         }
     }

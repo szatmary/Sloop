@@ -120,3 +120,23 @@ final class SSHHostCodableTests: XCTestCase {
             try JSONDecoder().decode(SSHHost.self, from: Data(future.utf8)))
     }
 }
+
+extension SSHHostCodableTests {
+    /// Suggestions are per host, and hosts saved before the switch existed
+    /// decode as on — the same default a new host gets.
+    func testSuggestionsDefaultToOnForHostsThatPredateTheSetting() throws {
+        let json = """
+        {"id":"\(UUID().uuidString)","alias":"web","hostname":"example.com",
+         "port":22,"username":"matt","auth":{"password":{}},"useMosh":false}
+        """
+        let host = try JSONDecoder().decode(SSHHost.self, from: Data(json.utf8))
+        XCTAssertTrue(host.suggestions)
+    }
+
+    func testSuggestionsSurviveARoundTrip() throws {
+        var host = SSHHost(alias: "prod", hostname: "prod.example.com", username: "deploy")
+        host.suggestions = false
+        let restored = try JSONDecoder().decode(SSHHost.self, from: JSONEncoder().encode(host))
+        XCTAssertFalse(restored.suggestions, "a host told not to record must stay that way")
+    }
+}

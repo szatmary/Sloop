@@ -17,13 +17,29 @@ public final class TerminalSession: Identifiable, Hashable {
     /// first connect and on every reconnect, which is the point: a dropped
     /// link should land back in `tmux attach`, not at a bare prompt.
     public let onConnectCommand: String?
+
+    /// The saved host this session connects to, when it came from one.
+    ///
+    /// Identity, not configuration: it is what lets a session find the command
+    /// history belonging to *that machine*, rather than one shared across every
+    /// host — which would offer each the other's commands, and each of those is
+    /// a record of what someone did on a particular machine.
+    public let hostID: UUID?
+
+    /// Whether this host wants command suggestions, decided on the host and
+    /// carried here so the session doesn't have to go looking for it.
+    public let suggestsCommands: Bool
     private let makeTransport: () -> Transport
 
     public init(title: String,
                 onConnectCommand: String? = nil,
+                hostID: UUID? = nil,
+                suggestsCommands: Bool = true,
                 makeTransport: @escaping () -> Transport) {
         self.title = title
         self.onConnectCommand = onConnectCommand
+        self.hostID = hostID
+        self.suggestsCommands = suggestsCommands
         self.makeTransport = makeTransport
     }
 
@@ -32,9 +48,11 @@ public final class TerminalSession: Identifiable, Hashable {
     /// factory that builds a fresh connection).
     public convenience init(title: String,
                             onConnectCommand: String? = nil,
+                            hostID: UUID? = nil,
+                            suggestsCommands: Bool = true,
                             transport: Transport) {
-        self.init(title: title, onConnectCommand: onConnectCommand,
-                  makeTransport: { transport })
+        self.init(title: title, onConnectCommand: onConnectCommand, hostID: hostID,
+                  suggestsCommands: suggestsCommands, makeTransport: { transport })
     }
 
     /// Build a fresh transport for this session — used on first connect and on

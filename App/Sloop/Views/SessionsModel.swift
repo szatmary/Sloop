@@ -54,7 +54,8 @@ final class SessionsModel: ObservableObject {
         controllers[session.id] = TerminalController(
             makeTransport: session.newTransport,
             onConnectCommand: session.onConnectCommand,
-            appearance: AppearanceStore.shared.appearance)
+            appearance: AppearanceStore.shared.appearance,
+            suggestionsFor: session.suggestsCommands ? session.hostID : nil)
         open.open(session)
     }
 

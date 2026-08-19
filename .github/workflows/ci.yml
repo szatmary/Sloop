@@ -1,10 +1,24 @@
 name: CI
 
+# Once a day, not once a push.
+#
+# GitHub bills Actions minutes for private repositories, macOS runners at ten
+# times their wall-clock — and nine jobs here run on macOS, four of them
+# building xcframeworks from source. A day of ordinary pushing exhausted the
+# allowance, after which every job failed in three seconds with no runner
+# assigned and empty logs, which looks nothing like a billing limit from the
+# outside.
+#
+# Tags still build, because that is a release. Manual runs are always
+# available, and are how to check a branch before merging it.
 on:
   push:
-    branches: ["**"]
     tags: ["v*"]
-  pull_request:
+  workflow_dispatch:
+  schedule:
+    # 09:00 UTC. Cron has no notion of "if anything changed"; the
+    # `recent-changes` job is that notion.
+    - cron: "0 9 * * *"
 
 # Serialize runs per ref so two pushes to main can't race on the `nightly`
 # release tag (each release step deletes and recreates it). Don't cancel an
@@ -14,9 +28,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # A day with no commits needs no build. One ubuntu-minute decides whether the
+  # rest of this file — which is where the allowance actually goes — runs at
+  # all. A manual run or a tag always proceeds: someone asking for a build has a
+  # reason, and a release must build whatever its history looks like.
+  recent-changes:
+    name: Anything to build?
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          last=$(git log -1 --format=%ct)
+          if [ $(( $(date +%s) - last )) -lt 86400 ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "No commits in the last day; skipping the build."
+          fi
+
   sloopkit-tests:
     name: SloopKit unit tests
     runs-on: macos-14
+    needs: recent-changes
+    if: needs.recent-changes.outputs.build == 'true'
     steps:
       - uses: actions/checkout@v4
       - name: swift test
@@ -30,6 +71,8 @@ jobs:
   sloopkit-tests-linux:
     name: SloopKit unit tests (Linux)
     runs-on: ubuntu-latest
+    needs: recent-changes
+    if: needs.recent-changes.outputs.build == 'true'
     container: swift:5.9
     steps:
       - uses: actions/checkout@v4
@@ -39,6 +82,8 @@ jobs:
   app-build:
     name: Build app (iOS) · Test app (macOS)
     runs-on: macos-15
+    needs: recent-changes
+    if: needs.recent-changes.outputs.build == 'true'
     steps:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
@@ -83,11 +128,14 @@ jobs:
         run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_iOS -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO -quiet
       - name: Build macOS
         run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -quiet
-    needs: [libssh2-xcframework, mosh-xcframework]
+    needs: [recent-changes, libssh2-xcframework, mosh-xcframework]
+    if: needs.recent-changes.outputs.build == 'true'
 
   libssh2-xcframework:
     name: Build libssh2 xcframework
     runs-on: macos-14
+    needs: recent-changes
+    if: needs.recent-changes.outputs.build == 'true'
     steps:
       - uses: actions/checkout@v4
       - name: Build xcframework
@@ -102,6 +150,8 @@ jobs:
   protobuf-xcframework:
     name: Build protobuf xcframework (mosh)
     runs-on: macos-14
+    needs: recent-changes
+    if: needs.recent-changes.outputs.build == 'true'
     # Brick 2a of Mosh: cross-compile protobuf 3.21 (runtime) for the Apple
     # slices; feeds the mosh xcframework. Green and reliable, so it gates.
     steps:
@@ -118,7 +168,8 @@ jobs:
   mosh-xcframework:
     name: Build mosh xcframework
     runs-on: macos-14
-    needs: protobuf-xcframework
+    needs: [recent-changes, protobuf-xcframework]
+    if: needs.recent-changes.outputs.build == 'true'
     # Brick 2b: cross-compile mosh's full client library set (+ merged protobuf)
     # for the Apple slices. Green and reliable, so it gates.
     steps:
@@ -140,7 +191,8 @@ jobs:
   app-build-ssh:
     name: Build app with SSH (iOS · macOS)
     runs-on: macos-15
-    needs: libssh2-xcframework
+    needs: [recent-changes, libssh2-xcframework]
+    if: needs.recent-changes.outputs.build == 'true'
     steps:
       - uses: actions/checkout@v4
       - name: Download libssh2 xcframework
@@ -160,7 +212,8 @@ jobs:
   app-build-mosh:
     name: Build app with Mosh (iOS · macOS)
     runs-on: macos-15
-    needs: [libssh2-xcframework, mosh-xcframework]
+    needs: [recent-changes, libssh2-xcframework, mosh-xcframework]
+    if: needs.recent-changes.outputs.build == 'true'
     # Builds the app with the real Mosh UDP/SSP transport (project.mosh.yml:
     # mosh.xcframework + the MoshBridge bridging header + SLOOP_MOSH). Green on
     # both platforms, so it gates like the other app builds.
@@ -190,7 +243,8 @@ jobs:
   mac-release:
     name: Release build (macOS app + GitHub Release)
     runs-on: macos-15
-    needs: libssh2-xcframework
+    needs: [recent-changes, libssh2-xcframework]
+    if: needs.recent-changes.outputs.build == 'true'
     # Needed so the nightly/tagged release steps can create releases and tags.
     permissions:
       contents: write
