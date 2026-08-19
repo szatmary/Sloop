@@ -146,11 +146,16 @@ final class LibSSH2Transport: Transport {
         libssh2_session_set_blocking(session, 0)
         sshSession = session
 
-        // A remote can open the forwarded-agent channel at any point after
-        // auth completes, so this has to be registered before the handshake
-        // — not just before openShell, where forwarding is requested — or an
-        // early request could arrive with nothing listening for it.
-        //
+        // Handshake
+        let rc = retry(session, sock) { libssh2_session_handshake(session, sock) }
+        guard rc == 0 else { return finish(SSHError.connectionFailed("handshake rc=\(rc)")) }
+
+        // Host-key verification (trust-on-first-use)
+        if let error = verifyHostKey(session) { return finish(error) }
+
+        // Authenticate
+        if let error = authenticate(session, sock) { return finish(error) }
+
         // The AUTHAGENT callback's real type is
         //   (LIBSSH2_SESSION *, LIBSSH2_CHANNEL *, void **) -> Void
         // but callback_set2 takes a generic void(*)(void), so the cast below
@@ -169,28 +174,29 @@ final class LibSSH2Transport: Transport {
             let transport = Unmanaged<LibSSH2Transport>.fromOpaque(box).takeUnretainedValue()
             transport.adoptAgentChannel(channel)
         }
-        _ = libssh2_session_callback_set2(session, LIBSSH2_CALLBACK_AUTHAGENT,
-                                          unsafeBitCast(authAgentCallback, to: (@convention(c) () -> Void).self))
 
-        // Handshake
-        let rc = retry(session, sock) { libssh2_session_handshake(session, sock) }
-        guard rc == 0 else { return finish(SSHError.connectionFailed("handshake rc=\(rc)")) }
-
-        // Host-key verification (trust-on-first-use)
-        if let error = verifyHostKey(session) { return finish(error) }
-
-        // Authenticate
-        if let error = authenticate(session, sock) { return finish(error) }
-
-        // The agent needs a session that has finished authenticating —
-        // AgentSigner derives identities from it — and must exist before
-        // openShell, which is where forwarding is actually requested.
-        if wantsForwarding {
-            forwardedAgent = ForwardedAgent(
-                signer: AgentSigner(session: session, keys: forwardedKeys),
-                confirming: signConfirmer,
-                endpoint: "\(host.hostname):\(host.port)")
-        }
+        // Both halves of agent forwarding go up here, and only here: the
+        // agent needs a session that has finished authenticating (AgentSigner
+        // derives its identities from one) and both must be in place before
+        // openShell, which is where forwarding is actually requested. Nothing
+        // between this point and `authenticate`'s return processes packets,
+        // so the callback cannot miss a channel by going up late — where
+        // registering it before the handshake, as this used to, meant
+        // accepting channels during auth that `adoptAgentChannel` had no
+        // agent to hand them to.
+        Self.startForwarding(
+            wanted: wantsForwarding,
+            buildAgent: {
+                self.forwardedAgent = ForwardedAgent(
+                    signer: AgentSigner(session: session, keys: forwardedKeys),
+                    confirming: signConfirmer,
+                    endpoint: "\(host.hostname):\(host.port)")
+            },
+            registerAuthAgentCallback: {
+                _ = libssh2_session_callback_set2(
+                    session, LIBSSH2_CALLBACK_AUTHAGENT,
+                    unsafeBitCast(authAgentCallback, to: (@convention(c) () -> Void).self))
+            })
 
         // Open a shell channel with a PTY
         guard let channel = openShell(session, sock) else {
@@ -421,10 +427,46 @@ final class LibSSH2Transport: Transport {
         return startShell() == 0
     }
 
+    /// Sets up agent forwarding for a session that does any: the agent first,
+    /// then the AUTHAGENT callback that hands new channels to it — and
+    /// neither when there is nothing to forward.
+    ///
+    /// Registering that callback is a decision, not boilerplate. It is what
+    /// makes libssh2 accept `auth-agent@openssh.com` channels at all:
+    /// `packet_authagent_open` reads `session->authagent` and answers
+    /// CHANNEL_OPEN_FAILURE when it is NULL, so a session that registers it
+    /// unconditionally accepts these channels even on a host it forwards
+    /// nothing to — where `adoptAgentChannel` can only drop them on the
+    /// floor: never read, never answered, never closed, never freed, and not
+    /// counted against `ForwardedAgent.maximumConcurrentChannels`, which is
+    /// to say a remote could open as many as it liked. Leaving it unset is
+    /// what refuses them, and it costs nothing to arrange.
+    ///
+    /// The order is not incidental either: libssh2 can fire the callback from
+    /// inside the very next call that processes packets, so the agent has to
+    /// exist before the callback that feeds it does.
+    ///
+    /// Pure, and its own function, for the same reason `configureChannel` is:
+    /// no unit test can watch libssh2 refuse a channel open, but a test can
+    /// watch which of two closures ran, and in which order.
+    static func startForwarding(wanted: Bool,
+                                buildAgent: () -> Void,
+                                registerAuthAgentCallback: () -> Void) {
+        guard wanted else { return }
+        buildAgent()
+        registerAuthAgentCallback()
+    }
+
     /// Invoked by the AUTHAGENT C callback with the channel libssh2 just
     /// opened for the remote's forwarding request. Only ever called on the
     /// SSH thread, same as everything else in this class — `eventLoop`
     /// services the newly-adopted channel on its own next pass.
+    ///
+    /// `forwardedAgent` is non-nil whenever this can run at all: the callback
+    /// that calls it is registered only alongside an agent (see
+    /// `startForwarding`), and libssh2 refuses these channels outright while
+    /// that callback is unset. The optional chain below is what that
+    /// invariant looks like from here, not a case to handle.
     private func adoptAgentChannel(_ channel: OpaquePointer) {
         forwardedAgent?.adopt(LibSSH2AgentChannel(channel: channel) { [weak self] in
             // Lets the agent channel wait for the socket the same way every

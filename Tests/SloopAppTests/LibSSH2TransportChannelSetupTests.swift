@@ -125,6 +125,42 @@ final class LibSSH2TransportChannelSetupTests: XCTestCase {
                        "regardless of host.forwardsAgent")
     }
 
+    // MARK: startForwarding — the AUTHAGENT callback is a decision
+
+    /// Registering the AUTHAGENT callback is what makes libssh2 accept
+    /// `auth-agent@openssh.com` channels at all (`packet_authagent_open`
+    /// answers CHANNEL_OPEN_FAILURE while `session->authagent` is NULL). A
+    /// session that forwards nothing must therefore not register it: with no
+    /// agent behind it, every channel the remote opened would be accepted and
+    /// then dropped unread, unclosed and unfreed, and not even counted
+    /// against the channel cap.
+    func testNothingIsSetUpWhenThereIsNothingToForward() {
+        var builtAgent = false
+        var registeredCallback = false
+
+        LibSSH2Transport.startForwarding(wanted: false,
+                                         buildAgent: { builtAgent = true },
+                                         registerAuthAgentCallback: { registeredCallback = true })
+
+        XCTAssertFalse(builtAgent)
+        XCTAssertFalse(registeredCallback,
+                       "libssh2 refuses these channels only for as long as the callback is unset")
+    }
+
+    /// And on a session that does forward: the agent first, then the
+    /// callback. libssh2 can fire the callback from inside the very next call
+    /// that processes packets, so one registered ahead of the agent is a
+    /// channel accepted with nothing to hand it to.
+    func testForwardingBuildsTheAgentBeforeRegisteringTheCallback() {
+        var order: [String] = []
+
+        LibSSH2Transport.startForwarding(wanted: true,
+                                         buildAgent: { order.append("agent") },
+                                         registerAuthAgentCallback: { order.append("callback") })
+
+        XCTAssertEqual(order, ["agent", "callback"])
+    }
+
     // MARK: closeAttempt — bounded vs. non-retrying agent-channel close
     //
     // A remote that is connected but unresponsive keeps `libssh2_channel_close`
