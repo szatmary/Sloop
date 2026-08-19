@@ -55,6 +55,51 @@ rejects ad-hoc / self-signed binaries. It requires a paid **Apple Developer
 Program** membership ($99/yr) and a **Developer ID Application** certificate.
 Nothing local reproduces it.
 
+### Running the ad-hoc `nightly` build
+
+The `nightly` GitHub release is ad-hoc signed and not notarized, so Gatekeeper
+blocks it on first launch. Right-click the app → **Open** → **Open**; if macOS
+calls it *"damaged"*, clear the quarantine flag first:
+
+```sh
+xattr -cr /path/to/Sloop.app && open /path/to/Sloop.app
+```
+
+"Damaged" is Gatekeeper on an unnotarized download, not a real problem — it
+goes away with Developer ID signing and notarization. Note that key auth does
+not work at all in an ad-hoc build; see [`KEYS.md`](KEYS.md).
+
+## Building locally, once entitlements exist
+
+The app targets carry `CODE_SIGN_ENTITLEMENTS`
+([`App/Sloop/Sloop.entitlements`](../App/Sloop/Sloop.entitlements), for the
+shared keychain-access-group), so a bare
+
+```sh
+xcodebuild -project Sloop.xcodeproj -scheme Sloop_macOS build
+```
+
+**fails** with *"requires a provisioning profile"* — there is no team selected
+to sign the entitlement with. Three ways around it, depending on what you are
+doing:
+
+- **Interactive development** — open `Sloop.xcodeproj` and pick your team in
+  the target's Signing & Capabilities tab once. Subsequent Xcode and
+  `xcodebuild` invocations reuse it.
+- **Scripted builds that need to run and use the app** — pass a team and let
+  Xcode provision automatically:
+  ```sh
+  xcodebuild -project Sloop.xcodeproj -scheme Sloop_macOS \
+    -allowProvisioningUpdates DEVELOPMENT_TEAM=<your team> CODE_SIGN_STYLE=Automatic build
+  ```
+- **Test-only builds that never touch the shared keychain** — skip signing:
+  ```sh
+  xcodebuild test -project Sloop.xcodeproj -scheme Sloop_macOS \
+    -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
+  ```
+  Key-library keychain calls then fail at runtime with a descriptive error,
+  which is expected.
+
 ## What's already in place
 
 The account exists and the certificates are on this Mac:

@@ -57,7 +57,7 @@ first App Store submission.~~ **Done** — `LICENSE` (full GPL-3.0) and
 `THIRD-PARTY-NOTICES.md` are in the repo root. The remaining licensing task is a
 judgment call, not a file: confirm you accept the low residual risk of shipping
 Mosh (GPL-3.0) via the App Store with corresponding source kept public. See
-`Docs/HANDOFF.md` for the full path to shipping.
+`Docs/LAUNCH.md` for the full path to shipping.
 
 ## Additional terms (§7)
 

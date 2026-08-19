@@ -39,8 +39,8 @@ Sloop's GPL-3.0 (the old OpenSSL/GPL conflict was a 1.x licensing issue). It is
 disclosed in `THIRD-PARTY-NOTICES.md`.
 
 If you ever swap the backend again, re-run the key-type matrix in
-`Docs/HANDOFF.md` ("Key types — required before release"). A backend can pass
-every build and unit test while being unable to use half your keys.
+`Docs/LAUNCH.md` (§6, "Key types"). A backend can pass every build and unit
+test while being unable to use half your keys.
 
 ### No tvOS slices
 

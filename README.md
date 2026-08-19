@@ -68,8 +68,13 @@ swift test
 
 - [`Docs/ARCHITECTURE.md`](Docs/ARCHITECTURE.md) — how the pieces fit
 - [`Docs/ROADMAP.md`](Docs/ROADMAP.md) — milestones toward SSH + Mosh
+- [`Docs/LAUNCH.md`](Docs/LAUNCH.md) — the App Store readiness checklist, and
+  the honest state of what has and hasn't been verified on a device
 - [`Docs/SSH.md`](Docs/SSH.md) — building & wiring libssh2
 - [`Docs/MOSH.md`](Docs/MOSH.md) — the Mosh bootstrap and client
+- [`Docs/KEYS.md`](Docs/KEYS.md) — the shared key library and the `sloop` CLI
+- [`Docs/SIGNING.md`](Docs/SIGNING.md) — signing, notarization, and building
+  locally once entitlements exist
 - [`Docs/LICENSING.md`](Docs/LICENSING.md) — the GPL / App Store question (decide before shipping)
 - [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) — dependencies and their licenses
 

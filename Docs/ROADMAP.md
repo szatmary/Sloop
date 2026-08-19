@@ -63,7 +63,7 @@ top of a working SSH terminal rather than first.
       could: a frozen clock that sent exactly one packet per session, and a "C"
       locale that truncated every multi-byte character to its lead byte.
 
-## M4 — Ship (the remaining finish line — see `Docs/HANDOFF.md`)
+## M4 — Ship (the remaining finish line — see `Docs/LAUNCH.md`)
 
 - [x] Mac menu commands (Terminal menu: new/close/cycle tabs) + macOS Settings.
 - [x] Licensing files: `LICENSE` (GPL-3.0) + `THIRD-PARTY-NOTICES.md`. The
@@ -73,7 +73,7 @@ top of a working SSH terminal rather than first.
       tunnel and Tailscale all connect from an iPad, and Ed25519, ECDSA and
       passphrase-protected keys all authenticate through the transport's own
       call. Remaining: Mosh roaming across Wi-Fi→cellular, and two Mosh
-      sessions to one host at once. Checklist in `Docs/HANDOFF.md`.
+      sessions to one host at once. Checklist in `Docs/LAUNCH.md`.
 - [x] App icon: `AppIcon.appiconset` generated from the SVG master
       (`Scripts/generate-appicon.sh`); launch screen is system-generated.
 - [ ] Code signing + notarization. Releases are ad-hoc signed today;
