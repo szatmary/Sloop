@@ -13,7 +13,8 @@
 ┌─────────────┴───────────────────────────────┴───────────────┐
 │ App/SloopSSH  (framework — needs libssh2/tsnet)             │
 │  LibSSH2Connection  LibSSH2Transport  LibSSH2SFTPClient     │
-│  TransportFactory  SFTPClientFactory  TailscaleNode         │
+│  HostDialer  TransportFactory  SFTPClientFactory            │
+│  TailscaleNode  TailscaleDialer                             │
 │  Keychain stores (credentials, keys, Access tokens)         │
 └──────────────────────┬──────────────────────────────────────┘
                        │  Transport / Dialer / SFTPClient protocols
@@ -51,11 +52,14 @@ protocol Transport: AnyObject {
 Implementations:
 
 - **`LibSSH2Transport`** — a libssh2 shell channel over OpenSSL 3. Lives in
-  `App/Sloop/SSH/` (not SloopKit), and takes a `Dialer` — see "Dialers" below.
+  `App/SloopSSH/` (not SloopKit), and takes a `Dialer` — see "Dialers" below.
 - **`MoshTransport`** — Mosh SSP over UDP, via the `MoshBridge` Objective-C++
   shim over mosh's C++ client core. `MoshBootstrap` parses the `MOSH CONNECT`
   handshake that starts it. Built in the Mosh variant only
-  (`project.mosh.yml`).
+  (`project.mosh.yml`); which one a host gets — and whether it dials for itself
+  or is handed a tunnel socket — is
+  [`MoshTransportFactory`](../App/Sloop/SSH/MoshTransportFactory.swift)'s
+  answer, the sibling of `TransportFactory` for the SSP leg.
 - **`MoshOrSSHTransport`** — composes the two: probes for `mosh-server` over an
   SSH exec channel and activates whichever transport the host can support,
   buffering input and geometry until that's decided. Where Mosh isn't built in,
@@ -66,6 +70,46 @@ real transports worked. It only ever demonstrated this seam.
 
 `SwiftTermView.Coordinator` is the only place the two worlds meet: it implements
 `TerminalViewDelegate` (SwiftTerm → us) and pumps `onData` back into the view.
+
+### Asking a session a question
+
+Some features want to ask the host something over a connection the session
+already holds — the shell-history import
+([`ShellHistoryImporter`](../Sources/SloopKit/Suggest/ShellHistoryImporter.swift))
+is the one that exists. That's
+[`SessionCommandRunner`](../Sources/SloopKit/Suggest/SessionCommandRunner.swift),
+and the rule is **register before `start()`**:
+
+```swift
+public protocol SessionCommandRunner {
+    func requestOnSession(_ command: String, completion: @escaping (String?) -> Void)
+}
+```
+
+Registering, not invoking, because *when* a session can afford to ask differs
+and the caller has no way to know which kind of session it got:
+
+- **SSH** waits until the shell is up, then runs it on a second channel. The
+  connection the user asked for does not queue behind a convenience.
+- **Mosh** folds it into the bootstrap exec via
+  [`MarkedCommandBatch`](../Sources/SloopKit/Terminal/MarkedCommandBatch.swift),
+  which runs N commands in one shell invocation and splits their outputs back
+  apart. That exec is the only SSH connection a Mosh session will ever have, and
+  it closes before the terminal opens — so a question not asked there can never
+  be asked at all.
+
+`MoshOrSSHTransport` queues requests until the probe answers, then either lets
+the bootstrap's output satisfy them or hands them to the SSH transport it fell
+back to. Every completion fires exactly once, `nil` when there was no connection
+to ask on — including a request that arrived after a Mosh session went live, and
+one outstanding when the tab closed.
+
+Letting each caller decide the timing is what forked this in two: `runOnSession`
+for SSH and a separate history-shaped callback for Mosh, which
+`TerminalController` reached by casting to `MoshOrSSHTransport` — the same
+cast-to-a-concrete-transport mistake this protocol's doc comment warns about,
+one layer up. A composing transport can forward a protocol; a cast has no way
+to.
 
 ## Dialers: how the byte stream is established
 
@@ -87,9 +131,6 @@ host-key check, and read/write pump over whatever fd it hands back — the SSH
 side never knows which dialer produced it.
 
 - **`TCPDialer`** — `getaddrinfo` + `connect`, the direct path.
-  `LibSSH2CommandRunner` always uses this one; it's only ever invoked for
-  Mosh's SSH-exec bootstrap, which only runs for `.direct` hosts anyway (see
-  below).
 - **`CloudflareAccessDialer`**
   ([`Sources/SloopKit/Cloudflare/CloudflareAccessDialer.swift`](../Sources/SloopKit/Cloudflare/CloudflareAccessDialer.swift))
   — what `cloudflared access ssh` does, natively: a `URLSessionWebSocketTask`
@@ -106,7 +147,7 @@ side never knows which dialer produced it.
   negative return (a TCP reset, a vanished network) is therefore a
   direct-TCP-path problem; don't go looking for it in the relay.
 - **`TailscaleDialer`**
-  ([`App/Sloop/Tailscale/TailscaleDialer.swift`](../App/Sloop/Tailscale/TailscaleDialer.swift))
+  ([`App/SloopSSH/TailscaleDialer.swift`](../App/SloopSSH/TailscaleDialer.swift))
   — Sloop's own tailnet node. `tailscale_dial` hands back an ordinary socket
   fd, so libssh2 cannot tell a tailnet connection from a direct one and the
   whole integration fits behind `Dialer`. The node comes up inside the first
@@ -149,9 +190,44 @@ can, and it lives on the model because the two places that need it drifted
 apart — the host editor offered Mosh over Tailscale while the connect path
 silently ran SSH, so the toggle stayed on and did nothing.
 
-`SSHHost.connectionMethod` selects the dialer via
-[`TransportFactory`](../App/Sloop/SSH/TransportFactory.swift); `HostEditView`
-disables the "Use Mosh" toggle whenever the method isn't `.direct`.
+`HostEditView` disables the "Use Mosh" toggle whenever
+`connectionMethod.carriesMosh` is false, and resets `useMosh` when the method
+changes — so does the host row's "mosh" badge and the connect path, all reading
+that one property rather than restating the rule.
+
+### Which dialer: one switch, two audiences
+
+[`HostDialer.resolve`](../App/SloopSSH/HostDialer.swift) is the only place that
+maps a `ConnectionMethod` to a `Dialer`. `TransportFactory` (the shell),
+`CommandRunnerFactory` (the Mosh probe) and `SFTPClientFactory` (the File
+Provider) all ask it.
+
+That matters more than it sounds. Every time a caller has decided this for
+itself, the copies have drifted: the Mosh probe once hard-coded `.direct` and a
+`TCPDialer`, so a tailnet host's probe refused to run and every Mosh session
+over the tailnet quietly became an SSH one; the File Provider later grew its own
+switch, which had already begun to diverge on the tailnet role and the hostname
+check.
+
+The callers genuinely disagree about exactly one thing, so it is a parameter
+(`TailnetFallback`) rather than a second switch: in a build that links no
+`libtailscale`, the terminal may fall back to an ordinary dial when the
+Tailscale app's system VPN happens to be up — the user is present and watching
+— while the File Provider refuses, because the system wakes it in the background
+and a route that exists now is not something a saved domain can rely on.
+
+Why a host *can't* be dialed is a type too, `DialerUnavailable`, because the
+same reason must reach two audiences: someone at a terminal inside Sloop
+("go back to the host list") and someone looking at a folder in Files.app that
+won't open ("open Sloop"). It carries `terminalText` and `errorDescription` side
+by side, so a new case can't be added without answering for both, and conforms
+to `UserActionRequiredError` so `FileProviderError` turns it into the
+`notAuthenticated` that makes Files.app show a next step instead of spinning.
+
+Note it is *not* gated on `canImport(CSSH)`, though every caller feeds the
+result to libssh2: nothing about choosing a dialer needs libssh2, and leaving
+the decision buildable everywhere is what lets it be tested in the plain build
+CI actually runs.
 
 ### Getting the Access token
 

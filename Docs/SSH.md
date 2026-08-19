@@ -76,7 +76,7 @@ project. With `Vendor/libssh2.xcframework` present:
 xcodegen generate --spec project.ssh.yml
 ```
 
-`App/Sloop/SSH/TransportFactory.swift` gates on `#if canImport(CSSH)`: with the
+`App/SloopSSH/TransportFactory.swift` gates on `#if canImport(CSSH)`: with the
 plain `project.yml` (no framework) it hands the UI a `MessageTransport`
 explaining SSH isn't built yet; with the SSH spec, `CSSH` resolves and real
 connections go through `LibSSH2Transport`. CI's `app-build-ssh` job downloads the
