@@ -85,6 +85,15 @@ public enum SFTPError: Error, LocalizedError, Hashable, Sendable {
     case noSpace(String)
     case quotaExceeded(String)
     case connectionLost(String)
+    /// Fewer bytes moved than the file holds.
+    ///
+    /// The one failure that can otherwise pass for success: the bytes that did
+    /// arrive are a perfectly valid file, only a shorter one, and nothing in an
+    /// SFTP data stream carries a length to contradict it. No server sends this
+    /// — a client detects it by counting — so it has no `SSH_FX_*` status, and
+    /// the counts travel with it because "stopped at 4 KiB of 900 MiB" is the
+    /// only actionable thing left to say afterwards.
+    case truncated(String, expected: Int64, actual: Int64)
     case unsupported(String)
     /// A status this build has no specific meaning for. The raw code is kept
     /// rather than flattened away: it is the only evidence left when a server
@@ -127,6 +136,7 @@ public enum SFTPError: Error, LocalizedError, Hashable, Sendable {
         case .noSpace:           return ENOSPC
         case .quotaExceeded:     return EDQUOT
         case .connectionLost:    return ECONNRESET
+        case .truncated:         return EIO
         case .unsupported:       return ENOTSUP
         case .protocolFailure:   return EIO
         }
@@ -143,6 +153,8 @@ public enum SFTPError: Error, LocalizedError, Hashable, Sendable {
         case .noSpace(let path):           return "the server is out of space writing \(path)"
         case .quotaExceeded(let path):     return "writing \(path) would exceed your quota"
         case .connectionLost(let path):    return "the connection dropped during \(path)"
+        case .truncated(let path, let expected, let actual):
+            return "\(path) transferred \(actual) of \(expected) bytes"
         case .unsupported(let path):       return "the server doesn't support that operation on \(path)"
         case .protocolFailure(let path, let code):
             return "the server failed on \(path) with SFTP status \(code)"

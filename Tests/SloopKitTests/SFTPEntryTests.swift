@@ -76,6 +76,7 @@ final class SFTPErrorTests: XCTestCase {
         XCTAssertEqual(SFTPError.noSpace("/a").posixCode, ENOSPC)
         XCTAssertEqual(SFTPError.quotaExceeded("/a").posixCode, EDQUOT)
         XCTAssertEqual(SFTPError.connectionLost("/a").posixCode, ECONNRESET)
+        XCTAssertEqual(SFTPError.truncated("/a", expected: 2, actual: 1).posixCode, EIO)
         XCTAssertEqual(SFTPError.unsupported("/a").posixCode, ENOTSUP)
         XCTAssertEqual(SFTPError.protocolFailure("/a", code: 4).posixCode, EIO)
     }
@@ -83,5 +84,16 @@ final class SFTPErrorTests: XCTestCase {
     func testDescriptionNamesThePathSoTheReasonIsActionable() {
         let message = SFTPError.permissionDenied("/etc/shadow").localizedDescription
         XCTAssertTrue(message.contains("/etc/shadow"), message)
+    }
+
+    /// No server sends a "you got a short file" status — a client works it out
+    /// by counting — so the counts are the only evidence a bug report can
+    /// carry, and dropping them would leave "the transfer failed".
+    func testTruncationCarriesTheCountsThatProveIt() {
+        let message = SFTPError.truncated("/home/matt/big.iso", expected: 900, actual: 4)
+            .localizedDescription
+        XCTAssertTrue(message.contains("/home/matt/big.iso"), message)
+        XCTAssertTrue(message.contains("900"), message)
+        XCTAssertTrue(message.contains("4"), message)
     }
 }

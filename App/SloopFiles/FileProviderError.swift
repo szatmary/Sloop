@@ -108,9 +108,14 @@ enum FileProviderError {
         case .isADirectory, .notADirectory, .unsupported:
             return NSError(domain: NSCocoaErrorDomain,
                            code: NSFeatureUnsupportedError, userInfo: info)
-        case .connectionLost, .protocolFailure:
-            // The one class that genuinely *is* transient: retrying after a
-            // dropped link is the right behavior, and the client now redials.
+        case .connectionLost, .protocolFailure, .truncated:
+            // The one class that genuinely *is* transient. A dropped link or a
+            // transfer that stopped short is worth another attempt, and the
+            // attempt can now succeed: the client marks the session broken on a
+            // transport failure, so the next call redials instead of handing
+            // out the dead handle again. `.truncated` belongs here rather than
+            // among the silent successes — the retry is the entire point of
+            // noticing the short transfer.
             return NSError(domain: NSCocoaErrorDomain,
                            code: NSXPCConnectionReplyInvalid, userInfo: info)
         }
