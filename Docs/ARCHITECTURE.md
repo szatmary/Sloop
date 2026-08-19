@@ -91,13 +91,33 @@ side never knows which dialer produced it.
   fd half-closes and `read()` returns 0. Any bug about libssh2 mishandling a
   negative return (a TCP reset, a vanished network) is therefore a
   direct-TCP-path problem; don't go looking for it in the relay.
-- `.tailscale` is a recognized `ConnectionMethod` but not yet a working
-  dialer — `TransportFactory` returns `nil` for it today. Planned as a third
-  dialer over an embedded tailnet node; see [`Docs/ROADMAP.md`](ROADMAP.md).
+- **`TailscaleDialer`**
+  ([`App/Sloop/Tailscale/TailscaleDialer.swift`](../App/Sloop/Tailscale/TailscaleDialer.swift))
+  — Sloop's own tailnet node. `tailscale_dial` hands back an ordinary socket
+  fd, so libssh2 cannot tell a tailnet connection from a direct one and the
+  whole integration fits behind `Dialer`. The node comes up inside the first
+  dial rather than at launch: a user with no tailnet hosts never pays for a
+  WireGuard node, and one who has them expects the first connect to be where
+  "authorize this device" appears. Lives in the app rather than SloopKit
+  because it needs `libtailscale`, which only the `.tailscale` build variant
+  links; other variants compile a stub that says the method is unavailable.
 
-Tunneled hosts are SSH-only: Mosh needs UDP, which Cloudflare Access
-(TCP-over-WebSocket) can't carry and embedded Tailscale hasn't been verified
-to. `SSHHost.connectionMethod` selects the dialer via
+Cloudflare Access hosts are SSH-only: Mosh needs UDP, which a
+TCP-over-WebSocket tunnel can't carry, so `HostEditView` disables "Use Mosh"
+for them.
+
+**Tailscale hosts are a sharper edge.** The `Dialer` seam carries the *SSH*
+leg only; Mosh's UDP leg is a socket `MoshTransport` opens itself, straight to
+the hostname the SSH connection used, bypassing the dialer entirely. So a
+tailnet host reached through Sloop's own node bootstraps fine over tsnet and
+then sends SSP packets to an address the OS can only route when the Tailscale
+*app* is up — the one thing this dialer exists to make unnecessary. Where it
+works today, that app is up (or the host is reachable directly). Routing
+Mosh's UDP through `tailscale_dial(…, "udp", …)` is possible — the C API takes
+the network string — but wants mosh's `Connection` rewired off `sendto`/
+`recvfrom` onto an fd, which is a project, not a patch.
+
+`SSHHost.connectionMethod` selects the dialer via
 [`TransportFactory`](../App/Sloop/SSH/TransportFactory.swift); `HostEditView`
 disables the "Use Mosh" toggle whenever the method isn't `.direct`.
 

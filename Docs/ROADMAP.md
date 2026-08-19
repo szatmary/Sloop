@@ -38,10 +38,16 @@ top of a working SSH terminal rather than first.
       installed via SwiftTerm's `inputView`. Chosen in Terminal Settings;
       Standard remains the default. Spec:
       `Docs/superpowers/specs/2026-08-17-terminal-rows-design.md`.
-- [ ] On-device verification of the dismissible and compact keyboards above —
-      built and tested in the simulator only. The compact layout's row heights
-      are still unmeasured placeholders rather than values checked against real
-      touch targets.
+- [x] On-device verification of the dismissible and compact keyboards, and the
+      ANSI layout they arrived at: tab left of Q, control at caps lock, `[ ] ;
+      ' , . /` in their usual places, an inverted-T arrow cluster, a number pad,
+      and a reverse-L return spanning the middle two rows. Everything else comes
+      from shift, which is what removed the symbol bar and a row of height with
+      it. Pinned key by key in `KeyboardLayoutTests`.
+- [x] Command suggestions — the next word, ranked by how often and how recently
+      it followed what you've typed on that host, seeded once per connection
+      from the host's own shell history. Per host, on the device, never synced
+      and never sent anywhere.
 - [ ] iPad multi-window tabs (separate windows, not the in-app tabs above).
 
 ## M3 — Mosh ✅
@@ -63,10 +69,11 @@ top of a working SSH terminal rather than first.
 - [x] Licensing files: `LICENSE` (GPL-3.0) + `THIRD-PARTY-NOTICES.md`. The
       GPL-3.0/App-Store posture is decided (`Docs/LICENSING.md`); only your
       sign-off on the residual risk remains.
-- [ ] **Runtime validation on real hardware** — SSH, Mosh, and a Cloudflare
-      Access tunnel all connect from an iPad. Remaining:
-      Ed25519/ECDSA/passphrase-protected keys, and Mosh roaming across
-      Wi-Fi→cellular. Checklist in `Docs/HANDOFF.md`.
+- [ ] **Runtime validation on real hardware** — SSH, Mosh, a Cloudflare Access
+      tunnel and Tailscale all connect from an iPad, and Ed25519, ECDSA and
+      passphrase-protected keys all authenticate through the transport's own
+      call. Remaining: Mosh roaming across Wi-Fi→cellular, and two Mosh
+      sessions to one host at once. Checklist in `Docs/HANDOFF.md`.
 - [x] App icon: `AppIcon.appiconset` generated from the SVG master
       (`Scripts/generate-appicon.sh`); launch screen is system-generated.
 - [ ] Code signing + notarization. Releases are ad-hoc signed today;
@@ -76,21 +83,18 @@ top of a working SSH terminal rather than first.
 - [ ] Background-connection handling and reconnect polish (Mosh roaming exists;
       exercise it on-device).
 
-## Tunnels — Cloudflare Access ✅, Tailscale next
+## Tunnels ✅
 
 - [x] `Dialer` seam (`TCPDialer` wraps the existing direct-connect path, no
       behavior change) + `SSHHost.connectionMethod`. See
       [`Docs/ARCHITECTURE.md`](ARCHITECTURE.md).
 - [x] Cloudflare Access: native WebSocket carrier (`CloudflareAccessDialer`),
       browser SSO (`AccessLoginView`), Keychain-backed token store. SSH-only —
-      Mosh needs UDP, which the tunnel can't carry. Unit-tested; **not yet
-      run against a real Cloudflare Tunnel** — see the checklist in
-      [`Docs/HANDOFF.md`](HANDOFF.md).
-- [ ] Tailscale via embedded TailscaleKit — separate plan, gated on a
-      real-device smoke test of the vendored framework before any integration
-      work starts (a past iOS sandbox failure in the same code path,
-      tailscale/tailscale#15410, is closed but unverified against the current
-      release). See
+      Mosh needs UDP, which the tunnel can't carry. Verified against a live
+      Access application from an iPad, 2026-08-17.
+- [x] Tailscale as an embedded tailnet node — Sloop runs `tsnet` itself rather
+      than requiring the Tailscale app, so it needn't hold iOS's single VPN
+      slot. Verified on an iPad, 2026-08-18. See
       [`Docs/superpowers/specs/2026-08-12-tunnel-integrations-design.md`](superpowers/specs/2026-08-12-tunnel-integrations-design.md).
 
 ## Deferred
@@ -169,18 +173,21 @@ top of a working SSH terminal rather than first.
 - **`ssh://` URL scheme** — no `CFBundleURLTypes` in `project.yml`, so tapping
   an `ssh://user@host` link does nothing. It is how people share hosts, and it
   is close to free.
-- **Command suggestions** — designed and planned, not yet built. Instead of a
-  curated snippet library (which every competitor ships and nobody maintains),
-  Sloop reads the terminal *screen* and lets an on-device model pick the
-  commands out of it, so the history is the snippet library and there is
-  nothing to curate. Reading the screen rather than the keystrokes is also what
-  makes it safe: a password is never echoed, so it is structurally absent
-  rather than filtered out. The model may invent commands, not just recall
-  them, so suggestions insert and never execute, and invented ones are marked
-  as such. On-device only — nothing leaves the phone. Requires iOS 26 with
-  Apple Intelligence; a mode for older devices is still open.
+- ~~Command suggestions~~ → DONE, in the form that needs no model: a bar above
+  the keyboard offering the word that usually comes *next*, ranked by how often
+  and how recently it followed what you've typed on that host, and seeded once
+  per connection from the host's own shell history so it is useful on the first
+  command rather than the hundredth. Off by default, per host.
+  `CommandLineTracker` reconstructs the line from the bytes Sloop *sends*, not
+  from the screen — it knows a password prompt only as bytes it can't see the
+  echo of, and it gives up certainty the moment anything ambiguous happens
+  (a control sequence it doesn't model, a screen it isn't driving), so it
+  suggests nothing rather than something wrong. Stored per host, on the device,
+  never synced.
   Spec: `Docs/superpowers/specs/2026-08-18-command-suggestions-design.md`.
-  Plan: `Docs/superpowers/plans/2026-08-18-command-suggestions.md` (7 tasks).
+  The screen-reading, model-powered version in that spec is still open: it can
+  suggest commands never typed before, which frecency by construction cannot,
+  and it wants iOS 26 with Apple Intelligence.
 - ~~Key management~~ → DONE: shared key library synced via iCloud Keychain;
   `sloop import-key` CLI on the Mac (embedded in the app binary). Spec:
   `Docs/superpowers/specs/2026-08-11-key-library-design.md`.
