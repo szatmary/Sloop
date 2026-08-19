@@ -13,6 +13,7 @@ struct HostListView: View {
     @StateObject private var model = HostListModel()
     @ObservedObject private var sessions = SessionsModel.shared
     @ObservedObject private var hostKeyPrompter = HostKeyPrompter.shared
+    @ObservedObject private var agentSignPrompter = AgentSignPrompter.shared
     #if SLOOP_TAILSCALE
     @ObservedObject private var tailscaleAuth = TailscaleAuthPrompter.shared
     #endif
@@ -222,6 +223,9 @@ struct HostListView: View {
             }
             .sheet(item: $hostKeyPrompter.prompt) { prompt in
                 HostKeyPromptView(prompt: prompt)
+            }
+            .sheet(item: $agentSignPrompter.prompt) { prompt in
+                AgentSignPromptView(prompt: prompt)
             }
             #if SLOOP_TAILSCALE
             .sheet(item: $tailscaleAuth.url) { pending in

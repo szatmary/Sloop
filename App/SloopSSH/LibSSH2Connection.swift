@@ -32,6 +32,13 @@ final class LibSSH2Connection {
     private var session: OpaquePointer?
     private var socket: Int32 = -1
 
+    /// Handed to `libssh2_session_init_ex` as the session's `abstract`, which
+    /// is the only context libssh2 gives back to a session callback. Agent
+    /// forwarding needs it: the AUTHAGENT callback fires with nothing but the
+    /// session and this pointer, and has to find its way back to the transport
+    /// that owns the forwarded agent. Set before `open()`, unused otherwise.
+    var abstract: UnsafeMutableRawPointer?
+
     /// libssh2's global init, run exactly once per process.
     ///
     /// It used to be per-connection, paired with a `defer { libssh2_exit() }`.
@@ -70,7 +77,7 @@ final class LibSSH2Connection {
 
         socket = try dialer.dial()
 
-        guard let session = libssh2_session_init_ex(nil, nil, nil, nil) else {
+        guard let session = libssh2_session_init_ex(nil, nil, nil, abstract) else {
             close()
             throw SSHError.connectionFailed("session_init failed")
         }

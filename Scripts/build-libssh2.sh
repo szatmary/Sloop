@@ -145,6 +145,10 @@ build_libssh2 () {
   # because it is the only copy of something Sloop authored and the built
   # xcframework it lands in is gitignored.
   install_file libssh2 module.modulemap "$OUT/$name/include/module.modulemap"
+  # Sloop's own header for libssh2's unpublished signing entry points, shipped
+  # inside the module for the same reason the map is: a framework target has no
+  # bridging header, so this is the only way SloopSSH's Swift can see them.
+  install_file libssh2 libssh2-internal.h "$OUT/$name/include/libssh2-internal.h"
 }
 
 build_slice () {

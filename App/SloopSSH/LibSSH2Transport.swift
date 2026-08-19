@@ -21,6 +21,30 @@ final class LibSSH2Transport: Transport, SessionCommandRunner {
 
     private let connection: LibSSH2Connection
 
+    /// Library keys this host's forwarded agent may sign with. Empty means the
+    /// connection asks for no forwarding at all — `TransportFactory` has
+    /// already resolved the host's selected names through
+    /// `KeyLibrary.forwardedKeys` and dropped any that no longer exist, so an
+    /// empty list here means empty in fact rather than empty in the host file.
+    private let forwardedKeys: [NamedKey]
+    private let signConfirmer: AgentSignConfirming
+    /// Non-nil only while a forwarded agent is running. Touched solely on the
+    /// session thread: built before the channel opens, serviced in the event
+    /// loop, closed when the loop ends.
+    private var forwardedAgent: ForwardedAgent?
+    /// The live session, kept so `adoptAgentChannel` — which libssh2 calls back
+    /// with nothing but the session and the abstract pointer — can hand the
+    /// agent channel a way to wait on the socket.
+    private var sshSession: OpaquePointer?
+
+    /// Whether this connection asks the remote for forwarding at all.
+    ///
+    /// Internal rather than private so a test can assert the rule directly:
+    /// the list `TransportFactory` resolved, not the host's raw selection, is
+    /// what decides — a name whose key has since been deleted must not leave
+    /// forwarding "on" with nothing behind it.
+    var wantsForwarding: Bool { !forwardedKeys.isEmpty }
+
     private let lock = NSLock()
     private var outbound: [UInt8] = []
     private var pendingResize: (cols: Int, rows: Int)?
@@ -40,14 +64,26 @@ final class LibSSH2Transport: Transport, SessionCommandRunner {
     /// session is not safe to use from two threads at once.
     private var pendingCommand: (command: String, completion: (String?) -> Void)?
 
+    private let endpoint: String
+
     init(host: SSHHost,
          credential: Credential,
          dialer: Dialer,
          knownHosts: KnownHostsStore,
-         hostKeyVerifier: HostKeyVerifier = AutoAcceptHostKeyVerifier()) {
+         hostKeyVerifier: HostKeyVerifier = AutoAcceptHostKeyVerifier(),
+         forwardedKeys: [NamedKey] = [],
+         signConfirmer: AgentSignConfirming = DenyingSignConfirmer()) {
         connection = LibSSH2Connection(host: host, credential: credential, dialer: dialer,
                                        knownHosts: knownHosts,
                                        hostKeyVerifier: hostKeyVerifier)
+        self.forwardedKeys = forwardedKeys
+        self.signConfirmer = signConfirmer
+        self.endpoint = "\(host.hostname):\(host.port)"
+        // Must be set before `open()`: libssh2 takes the abstract pointer when
+        // the session is created and never again.
+        if wantsForwarding {
+            connection.abstract = Unmanaged.passUnretained(self).toOpaque()
+        }
     }
 
     func start() {
@@ -91,6 +127,30 @@ final class LibSSH2Transport: Transport, SessionCommandRunner {
         } catch {
             return finish(error)
         }
+        sshSession = session
+
+        Self.startForwarding(
+            wanted: wantsForwarding,
+            buildAgent: {
+                self.forwardedAgent = ForwardedAgent(
+                    signer: AgentSigner(session: session, keys: self.forwardedKeys),
+                    confirming: self.signConfirmer,
+                    endpoint: self.endpoint)
+            },
+            registerAuthAgentCallback: {
+                let authAgentCallback: @convention(c) (OpaquePointer?, OpaquePointer?,
+                                                       UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Void = {
+                    _, channel, abstract in
+                    guard let channel, let box = abstract?.pointee else { return }
+                    Unmanaged<LibSSH2Transport>.fromOpaque(box)
+                        .takeUnretainedValue()
+                        .adoptAgentChannel(channel)
+                }
+                _ = libssh2_session_callback_set2(
+                    session, LIBSSH2_CALLBACK_AUTHAGENT,
+                    unsafeBitCast(authAgentCallback, to: (@convention(c) () -> Void).self))
+            })
+        defer { forwardedAgent?.close() }
 
         guard let channel = openShell(session) else {
             return finish(SSHError.channelFailure("could not open shell"))
@@ -128,21 +188,34 @@ final class LibSSH2Transport: Transport, SessionCommandRunner {
         guard let channel else { return nil }
 
         let term = "xterm-256color"
-        var rc = term.withCString { termPtr in
-            connection.retry {
-                libssh2_channel_request_pty_ex(channel, termPtr, UInt32(term.utf8.count),
-                                               nil, 0, 80, 24, 0, 0)
-            }
-        }
-        guard rc == 0 else { return nil }
-
-        rc = "shell".withCString { shellPtr in
-            connection.retry {
-                libssh2_channel_process_startup(channel, shellPtr, 5, nil, 0)
-            }
-        }
-        return rc == 0 ? channel : nil
+        let configured = Self.configureChannel(
+            requestForwarding: forwardedAgent != nil,
+            requestPTY: {
+                term.withCString { termPtr in
+                    connection.retry {
+                        libssh2_channel_request_pty_ex(channel, termPtr, UInt32(term.utf8.count),
+                                                       nil, 0, 80, 24, 0, 0)
+                    }
+                }
+            },
+            requestAuthAgent: {
+                connection.retry { libssh2_channel_request_auth_agent(channel) }
+            },
+            startShell: {
+                "shell".withCString { shellPtr in
+                    connection.retry {
+                        libssh2_channel_process_startup(channel, shellPtr, 5, nil, 0)
+                    }
+                }
+            },
+            onForwardingFailed: { [weak self] agentRC in
+                let notice = "[sloop] agent forwarding refused by the server "
+                    + "(rc=\(agentRC)) — continuing without it\r\n"
+                self?.onData?(ArraySlice(Array(notice.utf8)))
+            })
+        return configured ? channel : nil
     }
+
 
     /// Open a second channel, run the queued command on it, and read it to the
     /// end. Blocking within this loop iteration is fine and simpler than
@@ -207,6 +280,73 @@ final class LibSSH2Transport: Transport, SessionCommandRunner {
         request.completion(String(decoding: output, as: UTF8.self))
     }
 
+    /// Hand libssh2's newly opened agent channel to the forwarded agent.
+    ///
+    /// Called from libssh2 on the session thread, inside a channel-open it is
+    /// already servicing, so it only stores the channel — everything else
+    /// happens in the event loop.
+    private func adoptAgentChannel(_ channel: OpaquePointer) {
+        forwardedAgent?.adopt(LibSSH2AgentChannel(channel: channel) { [weak self] in
+            self?.connection.waitSocket()
+        })
+    }
+
+    /// PTY, then agent, then shell — OpenSSH's order, and the one servers
+    /// expect. A refused agent request is not fatal: the server may simply
+    /// have AllowAgentForwarding off, and a session without an agent is still
+    /// a session. Returns false only when the PTY or the shell fails.
+    static func configureChannel(requestForwarding: Bool,
+                                 requestPTY: () -> Int32,
+                                 requestAuthAgent: () -> Int32,
+                                 startShell: () -> Int32,
+                                 onForwardingFailed: (Int32) -> Void) -> Bool {
+        guard requestPTY() == 0 else { return false }
+
+        if requestForwarding {
+            let agentRC = requestAuthAgent()
+            if agentRC != 0 { onForwardingFailed(agentRC) }
+        }
+        return startShell() == 0
+    }
+
+    /// The agent must exist before the callback that hands channels to it is
+    /// registered; libssh2 can invoke that callback as soon as it is set.
+    static func startForwarding(wanted: Bool,
+                                buildAgent: () -> Void,
+                                registerAuthAgentCallback: () -> Void) {
+        guard wanted else { return }
+        buildAgent()
+        registerAuthAgentCallback()
+    }
+
+    /// How many EAGAIN retries a "normal" agent-channel close gets before
+    /// giving up. 5 attempts, each preceded by `waitSocket`'s own 200 ms poll
+    /// cap, is up to 1 s worst case: enough for a cooperative peer's
+    /// CHANNEL_CLOSE to arrive without turning a graceful teardown — which
+    /// already means the tab is closing — into a noticeable hang.
+    static let closeRetryAttempts = 5
+
+    /// Close an agent channel, retrying only when the caller says the peer is
+    /// worth waiting for.
+    ///
+    /// A teardown after a hostile or unresponsive peer must not wait at all:
+    /// `service()` runs inside the event loop, so waiting there freezes the
+    /// shell and stops `shouldClose` from ever being polled — the session
+    /// becomes unrecoverable from the user's side.
+    ///
+    /// A pure function over closures rather than a live channel, so both
+    /// policies are testable: a test can hand it an op that always reports
+    /// EAGAIN and count the calls, which is the one thing that distinguishes
+    /// "does not spin" from "spins forever".
+    static func closeAttempt(retrying: Bool, maximumAttempts: Int,
+                             op: () -> Int32, waitForSocket: () -> Void) {
+        guard retrying else { _ = op(); return }
+        for attempt in 0..<maximumAttempts {
+            if op() != LIBSSH2_ERROR_EAGAIN { return }
+            if attempt < maximumAttempts - 1 { waitForSocket() }
+        }
+    }
+
     private func eventLoop(session: OpaquePointer, channel: OpaquePointer) {
         var buffer = [UInt8](repeating: 0, count: 32 * 1024)
 
@@ -262,6 +402,11 @@ final class LibSSH2Transport: Transport, SessionCommandRunner {
                     break
                 }
             }
+
+            // Service the agent channel in the same pass as the shell.
+            // `readData` absorbs its result so a loop that only had agent
+            // traffic does not sleep with a reply already queued.
+            if let forwardedAgent, forwardedAgent.service() { readData = true }
 
             if !readData { connection.waitSocket() }
         }

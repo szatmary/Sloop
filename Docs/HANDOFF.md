@@ -47,6 +47,13 @@ roaming across a network change, and two Mosh sessions to one host at once.
   `CloudflareAccessDialer` as a native WebSocket carrier for hosts behind
   Cloudflare Tunnel, `AccessLoginView` for the browser SSO, and a
   Keychain-backed token store; selected per-host, SSH-only (Mosh toggle
+  disabled). Unit-tested; not yet run against a real tunnel.
+- **Agent forwarding**: a host chooses which library keys its forwarded agent
+  exposes (`SSHHost.forwardedKeys`, editable in the host editor), with an
+  on-device approval prompt before every signature. Unit-tested, including
+  two concurrent forwarded-agent clients; not yet run against a real remote
+  host (see "Agent forwarding" below).
+- **CI**: SloopKit unit tests, libssh2/protobuf/mosh xcframeworks, base app
   disabled). Verified against a live Access application from an iPad.
 - **Tailscale**: an embedded `tsnet` node (`Vendor/libtailscale.xcframework`,
   its own `project.tailscale.yml` variant) — Sloop joins the tailnet itself,
@@ -337,6 +344,36 @@ your behalf:
   host silently starts using the wrong key. If this applies to you: rename
   the affected hosts to be unique before they migrate, or re-pick each
   host's key explicitly in the editor afterward.
+
+## Agent forwarding
+
+A host can expose a subset of the key library to whatever it connects to
+next: `SSHHost.forwardedKeys` names which library keys ride along (empty
+means forwarding is off — `forwardsAgent` derives from it, there is no
+separate stored flag), `KeyLibrary.forwardedKeys(for:keys:)` resolves the
+names to keys at connect time, and `ForwardedAgent` serves them over the
+channel the remote's `SSH_AUTH_SOCK` points at. Chosen per host in the editor
+(`App/Sloop/Views/HostEditView.swift`), which lists every library key with a
+toggle and states plainly what forwarding means: anyone with root on the
+host can use the key for as long as the connection is open, and every use
+prompts on-device first (`AgentSignPrompter`).
+
+Covered by unit tests — including two concurrent forwarded-agent clients
+signing at once — but **never exercised against a real remote host.** Add to
+the on-device checklist:
+
+- [ ] Forward a key to a real host, connect, and confirm `ssh-add -l` **on
+      that host** lists exactly the keys selected in the editor — no more,
+      no fewer.
+- [ ] From that host, `ssh` to a third host using a forwarded key: confirm
+      the approval prompt appears on the device, and the connection succeeds
+      once approved.
+- [ ] Deny that same prompt: confirm the remote `ssh` fails cleanly (a
+      normal auth failure) rather than hanging.
+- [ ] Run two `ssh` calls from the remote at once (two concurrent agent
+      clients): confirm both succeed. This path is unit-tested
+      (`Tests/SloopAppTests/ForwardedAgentTests.swift:240`) but has no live
+      coverage.
 
 ## Where things live
 
