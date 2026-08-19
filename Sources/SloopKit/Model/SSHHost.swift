@@ -105,6 +105,15 @@ public struct SSHHost: Identifiable, Codable, Hashable {
     /// motivates it. Optional so host files written before this existed still
     /// decode; empty and whitespace-only values run nothing.
     public var onConnectCommand: String?
+    /// Names of library keys this host's forwarded agent may use. Empty means
+    /// no forwarding at all.
+    ///
+    /// One list rather than a `Bool` plus a list: those two can disagree, and
+    /// the disagreement that matters — forwarding "on" with nothing selected,
+    /// or "off" with keys still listed — is exactly the state that would make
+    /// the UI and the wire tell different stories.
+    public var forwardedKeys: [String]
+
     /// Whether this host is published to Files.app as a File Provider domain.
     ///
     /// On by default, including for hosts saved before this existed. Opt-in was
@@ -130,6 +139,7 @@ public struct SSHHost: Identifiable, Codable, Hashable {
                 useMosh: Bool = false,
                 connectionMethod: ConnectionMethod = .direct,
                 onConnectCommand: String? = nil,
+                forwardedKeys: [String] = [],
                 showsInFiles: Bool = true,
                 filesRootPath: String? = nil,
                 suggestions: Bool = true) {
@@ -142,6 +152,7 @@ public struct SSHHost: Identifiable, Codable, Hashable {
         self.useMosh = useMosh
         self.connectionMethod = connectionMethod
         self.onConnectCommand = onConnectCommand
+        self.forwardedKeys = forwardedKeys
         self.showsInFiles = showsInFiles
         self.filesRootPath = filesRootPath
         self.suggestions = suggestions
@@ -149,7 +160,7 @@ public struct SSHHost: Identifiable, Codable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case id, alias, hostname, port, username, auth, useMosh, connectionMethod
-        case onConnectCommand, showsInFiles, filesRootPath, suggestions
+        case onConnectCommand, forwardedKeys, showsInFiles, filesRootPath, suggestions
     }
 
     public init(from decoder: Decoder) throws {
@@ -164,6 +175,9 @@ public struct SSHHost: Identifiable, Codable, Hashable {
         connectionMethod = try c.decodeIfPresent(ConnectionMethod.self,
                                                  forKey: .connectionMethod) ?? .direct
         onConnectCommand = try c.decodeIfPresent(String.self, forKey: .onConnectCommand)
+        // decodeIfPresent, like connectionMethod above: host files written
+        // before this field existed decode as "not forwarding".
+        forwardedKeys = try c.decodeIfPresent([String].self, forKey: .forwardedKeys) ?? []
         showsInFiles = try c.decodeIfPresent(Bool.self, forKey: .showsInFiles) ?? true
         filesRootPath = try c.decodeIfPresent(String.self, forKey: .filesRootPath)
         suggestions = try c.decodeIfPresent(Bool.self, forKey: .suggestions) ?? true
@@ -187,6 +201,10 @@ public struct SSHHost: Identifiable, Codable, Hashable {
               !command.isEmpty else { return nil }
         return command
     }
+
+    /// Whether this host forwards an agent at all. Derived, never stored, so
+    /// it cannot contradict the selection.
+    public var forwardsAgent: Bool { !forwardedKeys.isEmpty }
 
     /// A display string like `matt@example.com:22`.
     public var connectionSummary: String {

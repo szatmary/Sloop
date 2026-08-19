@@ -315,6 +315,10 @@ final class HostListModel: ObservableObject {
     func connect(_ host: SSHHost) throws -> TerminalSession {
         let credential = try KeyLibrary.credential(for: host, keys: keys, credentials: credentials)
             ?? Credential()
+        // Resolved here, not inside TransportFactory: this is where the
+        // `keys` store lives, and TransportFactory only ever sees a
+        // resolved `Credential`, not a store to resolve more keys from.
+        let forwardedKeys = try KeyLibrary.forwardedKeys(for: host, keys: keys)
         // Without the known-hosts database there is nothing to check a host key
         // against, and connecting anyway would mean trusting whatever answered.
         guard let knownHosts else {
@@ -330,6 +334,8 @@ final class HostListModel: ObservableObject {
                                  knownHosts: knownHosts,
                                  hostKeyVerifier: HostKeyPrompter.shared,
                                  accessTokens: accessTokens,
+                                 forwardedKeys: forwardedKeys,
+                                 signConfirmer: AgentSignPrompter.shared,
                                  authorizationPresenter: TailscaleAuthPrompter.shared)
         }
 

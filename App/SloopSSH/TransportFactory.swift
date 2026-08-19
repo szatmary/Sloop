@@ -15,6 +15,8 @@ public enum TransportFactory {
                     knownHosts: KnownHostsStore,
                     hostKeyVerifier: HostKeyVerifier,
                     accessTokens: AccessTokenStore,
+                    forwardedKeys: [NamedKey] = [],
+                    signConfirmer: AgentSignConfirming = DenyingSignConfirmer(),
                     authorizationPresenter: TailscaleAuthorizationPresenter
                         = NoAuthorizationPresenter()) -> Transport {
         #if canImport(CSSH)
@@ -23,7 +25,9 @@ public enum TransportFactory {
         case .ready(let dialer):
             return LibSSH2Transport(host: host, credential: credential,
                                     dialer: dialer,
-                                    knownHosts: knownHosts, hostKeyVerifier: hostKeyVerifier)
+                                    knownHosts: knownHosts, hostKeyVerifier: hostKeyVerifier,
+                                    forwardedKeys: forwardedKeys,
+                                    signConfirmer: signConfirmer)
         case .unavailable(let explanation):
             return MessageTransport(message: explanation)
         }

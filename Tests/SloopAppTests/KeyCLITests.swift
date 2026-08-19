@@ -3,6 +3,7 @@
 
 import XCTest
 @testable import Sloop_macOS
+@testable import SloopSSH
 
 final class KeyCLITests: XCTestCase {
     func testParsesImportKeyWithDefaultName() {

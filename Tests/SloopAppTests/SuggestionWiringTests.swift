@@ -4,6 +4,7 @@
 import XCTest
 import SloopKit
 @testable import Sloop_macOS
+@testable import SloopSSH
 
 /// The suggestion machinery is only as good as the bytes it sees, and the app
 /// layer is where those come from. `CommandLineTracker` was fully tested and

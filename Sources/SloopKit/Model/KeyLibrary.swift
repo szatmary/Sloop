@@ -72,4 +72,17 @@ public enum KeyLibrary {
                                      passphrase: credential.passphrase))
         }
     }
+
+    /// The library keys this host exposes to a forwarded agent, in the order
+    /// they were selected. Names with no key behind them are dropped: a key
+    /// deleted from the library after the host was configured should cost that
+    /// one identity, not the whole connection.
+    ///
+    /// Throws if the store can't be read, like `credential(for:keys:credentials:)`
+    /// above and for the same reason: an unreadable library and an empty one are
+    /// not the same answer, and reporting the first as the second would silently
+    /// forward nothing.
+    public static func forwardedKeys(for host: SSHHost, keys: KeyStore) throws -> [NamedKey] {
+        try host.forwardedKeys.compactMap { try keys.key(named: $0) }
+    }
 }

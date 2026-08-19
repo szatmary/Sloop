@@ -15,5 +15,11 @@
 module CSSH {
     header "libssh2.h"
     header "libssh2_sftp.h"
+    // Not upstream's: Sloop's own declarations for libssh2 functions that are
+    // linkable but unpublished (see the header's comment for why signing needs
+    // them). It lives in the module rather than behind a bridging header
+    // because a framework target cannot have one, and SloopSSH — where the
+    // signing code lives — is a framework.
+    header "libssh2-internal.h"
     export *
 }

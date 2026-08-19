@@ -162,6 +162,23 @@ top of a working SSH terminal rather than first.
   Blink, Termius and Prompt all support it. Adjacent to the Cloudflare Access
   tunnel work, which is the same shape of problem: reaching a host you cannot
   route to directly.
+- ~~Agent forwarding~~ → DONE: a host picks which library keys its forwarded
+  agent may expose (`SSHHost.forwardedKeys`, empty means off); the host editor
+  lists the library with a toggle per key and states plainly what forwarding
+  means (anyone with root on the host can use the key while the connection is
+  open; every use prompts on-device first). Covered by unit tests, including
+  concurrent forwarded-agent clients — **but never exercised against a real
+  remote host.** Nothing in the on-device checklist (`Docs/LAUNCH.md`) has
+  confirmed a live `ssh-add -l`, a real approve/deny round trip, or two
+  concurrent `ssh` calls against actual `sshd`. Separately, unrelated to this
+  feature: `AuthMethod.agent` (`Sources/SloopKit/Model/SSHHost.swift`) is
+  still dead scaffolding with zero references anywhere in the codebase — this
+  feature is built on `forwardedKeys`/`forwardsAgent`, not that case. Removed
+  on the separate, unmerged `ssh-url-and-agent` branch; left in place here.
+- **SFTP / file transfer** — and the version that actually matters is a
+  `FileProvider` extension, so a remote host appears in Files.app and any app
+  can open and save to it. Secure ShellFish built its whole identity on that;
+  a transfer sheet inside the app is a much smaller feature.
 - **Agent forwarding, and `ssh-agent` generally** — not implemented. (The
   `AuthMethod.agent` case that used to sit in `SSHHost.swift` promising
   otherwise, with no code behind it anywhere, has been deleted.) Forwarding is
@@ -246,6 +263,17 @@ top of a working SSH terminal rather than first.
   `sloop import-key` CLI on the Mac (embedded in the app binary). Spec:
   `Docs/superpowers/specs/2026-08-11-key-library-design.md`.
 - `ssh-agent` / Secure Enclave keys.
+- **Persist open sessions across app exit** — the tab list (which hosts, their
+  order, the selected tab, scrollback if it's affordable) should survive the
+  app going away and be restored on next launch. The case that matters is the
+  one the user never chooses: iOS killing a backgrounded app to reclaim
+  memory. There is no notification and no chance to run cleanup at that
+  moment, so state has to already be on disk — saving in
+  `applicationWillTerminate` is exactly the hook that does not fire. Write on
+  change (debounced) and on background, not on exit. Note this is session
+  *state*, not live connections: an SSH connection cannot survive the process,
+  so restoring means re-offering the tabs and reconnecting, and Mosh is the
+  one transport that can genuinely resume rather than reconnect.
 - **`CommandRunner`** — non-interactive SSH exec (`{stdout, stderr, exitStatus}`)
   for saved one-shot commands on iOS/Mac. Also the foundation for a watch app.
 - **Apple Watch** — an ops "command runner" (not a terminal), ideally driven

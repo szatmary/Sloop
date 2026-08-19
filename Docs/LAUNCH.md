@@ -125,12 +125,20 @@ character to its lead byte. Assume the same of everything still unchecked.
 
 **Core terminal**
 
+- [ ] **Agent forwarding** — never run against a real remote. On a host with
+      keys selected in Forward Agent, run `ssh-add -l` on the remote and then
+      an `ssh`/`git` operation that uses the key: each signature must raise the
+      confirmation sheet, and refusing must fail that operation rather than the
+      session.
+
 - [ ] SSH **password** login to a real host; interactive shell; resize works.
 - [ ] **Host-key prompt** on an unknown host, and mismatch refused.
 - [ ] **Mosh roaming** — drop Wi-Fi to cellular mid-session, confirm resume.
 - [ ] **Mosh fallback** to SSH on a host without `mosh-server`, with the notice.
 - [ ] **Two Mosh sessions** to one host at once.
-- [ ] **Mosh over the tailnet** — built and working, never run on a device.
+- [x] **Mosh over the tailnet** — verified on an iPad against zbox, 2026-08-19:
+      probe over tsnet, `mosh-server` started, SSP flowing (the no-packet
+      notice never fired).
 - [ ] **Tabs**: several open, switching, background tabs stay connected,
       ⌘T/⌘W/⌘⇧[ ] on iPad and Mac.
 - [ ] **Appearance**: font/theme/cursor apply live and survive relaunch.
