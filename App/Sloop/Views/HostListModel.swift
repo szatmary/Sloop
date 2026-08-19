@@ -329,7 +329,8 @@ final class HostListModel: ObservableObject {
                                  credential: credential,
                                  knownHosts: knownHosts,
                                  hostKeyVerifier: HostKeyPrompter.shared,
-                                 accessTokens: accessTokens)
+                                 accessTokens: accessTokens,
+                                 authorizationPresenter: TailscaleAuthPrompter.shared)
         }
 
         return TerminalSession(title: host.alias,
@@ -351,13 +352,32 @@ final class HostListModel: ObservableObject {
                 MoshTransport(host: host.hostname, bootstrap: bootstrap)
             }
             #endif
+            #if SLOOP_MOSH && SLOOP_TAILSCALE
+            // A tailnet host has no address this process can route to — the SSH
+            // leg goes through tsnet, and so must the SSP leg, or mosh would
+            // send its packets into a network that has never heard of
+            // 100.64.0.0/10.
+            if host.connectionMethod == .tailscale {
+                makeMosh = { bootstrap in
+                    MoshTransport(host: host.hostname, bootstrap: bootstrap) {
+                        // The app's own node, not the File Provider's: they
+                        // are separate processes with separate tailnet state,
+                        // and this session belongs to the app.
+                        try TailscaleNode.node(for: .app).dialUDP(host: host.hostname,
+                                                                  port: bootstrap.udpPort)
+                    }
+                }
+            }
+            #endif
             return MoshOrSSHTransport(
                 useMosh: true,
                 makeCommandRunner: {
                     CommandRunnerFactory.ssh(host: host,
                                              credential: credential,
                                              knownHosts: knownHosts,
-                                             hostKeyVerifier: HostKeyPrompter.shared)
+                                             hostKeyVerifier: HostKeyPrompter.shared,
+                                             accessTokens: accessTokens,
+                                             authorizationPresenter: TailscaleAuthPrompter.shared)
                 },
                 makeSSHTransport: makeSSH,
                 makeMoshTransport: makeMosh)

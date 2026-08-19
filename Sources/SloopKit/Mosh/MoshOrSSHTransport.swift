@@ -2,6 +2,9 @@
 // GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
 
 import Foundation
+#if canImport(os)
+import os
+#endif
 
 /// A `Transport` that implements "prefer Mosh, fall back to SSH".
 ///
@@ -29,6 +32,10 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
     private let makeSSHTransport: () -> Transport
     private let makeMoshTransport: ((MoshBootstrap) -> Transport)?
     private let afterDelay: (TimeInterval, @escaping () -> Void) -> Void
+
+    #if canImport(os)
+    private static let log = Logger(subsystem: "org.szatmary.sloop", category: "mosh")
+    #endif
 
     /// How long a Mosh session may say nothing at all before the terminal
     /// explains what that usually means.
@@ -229,6 +236,22 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
     }
 
     private func emit(_ text: String) {
+        // Also to the system log: these lines are the record of which
+        // transport a session got and why, and on a device the terminal they
+        // are written to may be gone by the time anyone asks. os_log rather
+        // than print so they survive however the app was launched — a print
+        // only reaches a debugger or a console-attached launch.
+        let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        #if canImport(os)
+        Self.log.info("\(line, privacy: .public)")
+        #endif
+        #if DEBUG
+        // A device console shows stdout, not the unified log, and the unified
+        // log can only be collected with root on the Mac. During bring-up the
+        // console is the only channel that actually reaches whoever is holding
+        // the iPad.
+        print(line)
+        #endif
         onData?(ArraySlice(Array(text.utf8)))
     }
 }

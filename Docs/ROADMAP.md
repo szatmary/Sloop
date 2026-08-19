@@ -151,13 +151,9 @@ top of a working SSH terminal rather than first.
   (tailscale/tailscale#15410, `os.Executable()` failing inside the iOS sandbox)
   turned out not to bite. Its own build variant, `project.tailscale.yml`: the Go
   archive is most of 23 MB.
-- **Mosh through a tunnel** — `ConnectionMethod.carriesMosh` is false for both
-  tunnel methods, so a Cloudflare Access or Tailscale host is SSH-only and the
-  editor says so. Cloudflare can't be fixed (TCP inside a WebSocket has nowhere
-  to put a datagram), but Tailscale can: `tailscale_dial` takes a network
-  string, so the SSP leg could run over the tailnet node like the SSH leg does.
-  It needs mosh's `Connection` rewired off `sendto`/`recvfrom` onto an fd.
-  Today the answer is Direct plus the Tailscale app, which roams fine.
+- **Mosh over a Cloudflare Access tunnel** — not possible: TCP inside a
+  WebSocket has nowhere to put a datagram, so those hosts stay SSH-only and the
+  editor says why. (Mosh over Tailscale *is* done — see below.)
 
 - **Jump hosts / ProxyJump** — `SSHConfigParser` reads exactly four keys
   (`Host`, `HostName`, `Port`, `User`). Anyone whose infrastructure sits behind
@@ -225,6 +221,12 @@ top of a working SSH terminal rather than first.
   scheme meant giving up `GENERATE_INFOPLIST_FILE` — `CFBundleURLTypes` is an
   array of dictionaries and has no `INFOPLIST_KEY_` equivalent — so XcodeGen
   now writes a real plist per target from one shared block in `project.yml`.
+- ~~Mosh over the tailnet~~ → DONE: the SSP leg now goes through the same tsnet
+  node as SSH (`TailscaleNode.dialUDP`). Took a datagram socketpair in
+  libtailscale — upstream's stream fd delivered four packets as one read, which
+  mosh cannot decrypt — and a mosh that adopts a connected fd rather than
+  dialing one (`Scripts/patches/mosh-tunnel-fd.patch`). Both roam, which is the
+  pairing a phone wants. Not yet run on a device.
 - ~~Command suggestions~~ → DONE, in the form that needs no model: a bar above
   the keyboard offering the word that usually comes *next*, ranked by how often
   and how recently it followed what you've typed on that host, and seeded once

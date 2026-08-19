@@ -120,22 +120,34 @@ Cloudflare Access hosts are SSH-only: Mosh needs UDP, which a
 TCP-over-WebSocket tunnel can't carry, so `HostEditView` disables "Use Mosh"
 for them.
 
-So are Tailscale hosts, for a reason worth stating plainly: **the `Dialer`
-seam carries the SSH leg only.** Mosh's SSP leg is a UDP socket
-`MoshTransport` opens itself, straight to the hostname, never touching a
-dialer — so a method that works by dialing differently does nothing for it.
-Over Sloop's own tailnet node the SSP packets would go to a `100.64.0.0/10`
-address the OS has no route to, precisely because no system VPN is up. Mosh
-over a tailnet therefore means Direct with the Tailscale app running, which is
-a good pairing anyway: both roam.
+Tailscale hosts carry Mosh, but not through the `Dialer` — **that seam carries
+the SSH leg only.** Mosh's SSP leg is a socket `MoshTransport` gets for itself,
+so reaching a tailnet host meant giving it one that speaks to the tailnet:
+`TailscaleNode.dialUDP` opens the SSP socket through the same tsnet node that
+carries SSH, and `MoshTransport(host:bootstrap:dialTunnel:)` hands the fd to
+mosh instead of an address to dial.
 
-`ConnectionMethod.carriesMosh` is the single statement of that rule, and it
-lives on the model because the two places that need it drifted apart — the
-host editor offered Mosh over Tailscale while the connect path silently ran
-SSH, so the toggle stayed on and did nothing. Making the UDP leg tunnel-aware
-(`tailscale_dial(…, "udp", …)` — the C API takes the network string) would
-mean rewiring mosh's `Connection` off `sendto`/`recvfrom` onto an fd: a
-project, not a patch.
+Two things had to change underneath for that fd to be usable:
+
+- **libtailscale** bridges every dialed connection to C through a `SOCK_STREAM`
+  socketpair, which destroys message boundaries — four packets sent back to
+  back arrive as one 2545-byte read, and mosh puts one SSP frame per packet, so
+  the first coalesced pair fails to decrypt. `Scripts/libtailscale-sloop-udp.go`
+  adds a `udp` dial that bridges through `SOCK_DGRAM`, where one write is one
+  datagram. It sits beside upstream's code rather than patching it, the same
+  way the status export does.
+- **mosh** opens its own socket and addresses every packet with `sendto`, which
+  a connected socket refuses. `Scripts/patches/mosh-tunnel-fd.patch` adds a
+  client `Connection` that adopts a connected fd, sends with `send`, and skips
+  port hopping — hopping the source port means nothing when the port the server
+  sees belongs to the tunnel.
+
+Cloudflare Access cannot be fixed the same way: TCP inside a WebSocket has
+nowhere to put a datagram at all, so `HostEditView` still disables "Use Mosh"
+there. `ConnectionMethod.carriesMosh` is the single statement of which methods
+can, and it lives on the model because the two places that need it drifted
+apart — the host editor offered Mosh over Tailscale while the connect path
+silently ran SSH, so the toggle stayed on and did nothing.
 
 `SSHHost.connectionMethod` selects the dialer via
 [`TransportFactory`](../App/Sloop/SSH/TransportFactory.swift); `HostEditView`

@@ -24,6 +24,7 @@
 #if __has_include("networktransport.h")
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -76,6 +77,9 @@ struct MoshSession {
   std::string ip;
   std::string port;
   std::string key;
+  // >= 0 when the session runs over a tunnel someone else dialed, in which
+  // case ip/port are empty and mosh adopts this socket instead of opening one.
+  int tunnel_fd = -1;
   int cols = 80;
   int rows = 24;
 
@@ -153,8 +157,14 @@ static void mosh_run_loop(MoshSession *s) {
   try {
     Network::UserStream blank;
     Terminal::Complete local_terminal(s->cols, s->rows);
-    MoshTransportType network(blank, local_terminal,
-                              s->key.c_str(), s->ip.c_str(), s->port.c_str());
+    // Held by pointer only so the two constructors can be chosen at runtime;
+    // everything below uses `network` exactly as it would a stack object.
+    std::unique_ptr<MoshTransportType> network_owner(
+        s->tunnel_fd >= 0
+            ? new MoshTransportType(blank, local_terminal, s->key.c_str(), s->tunnel_fd)
+            : new MoshTransportType(blank, local_terminal, s->key.c_str(),
+                                    s->ip.c_str(), s->port.c_str()));
+    MoshTransportType &network = *network_owner;
     network.set_send_delay(1);  // minimal delay on outgoing keystrokes
 
     // Tell the server our initial size.
@@ -316,6 +326,16 @@ MoshSession *mosh_session_create(const char *ip, const char *port, const char *k
   if (!s) return nullptr;
   s->ip = ip ? ip : "";
   s->port = port ? port : "";
+  s->key = key ? key : "";
+  s->cols = cols > 0 ? cols : 80;
+  s->rows = rows > 0 ? rows : 24;
+  return s;
+}
+
+MoshSession *mosh_session_create_fd(int fd, const char *key, int cols, int rows) {
+  MoshSession *s = new (std::nothrow) MoshSession();
+  if (!s) return nullptr;
+  s->tunnel_fd = fd;
   s->key = key ? key : "";
   s->cols = cols > 0 ? cols : 80;
   s->rows = rows > 0 ? rows : 24;

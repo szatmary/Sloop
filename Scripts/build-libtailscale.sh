@@ -46,6 +46,13 @@ cd libtailscale
 # user at a login they cannot start.
 cp "$ROOT/Scripts/libtailscale-sloop-status.go" ./sloop_status.go
 
+# Upstream bridges every dialed connection to C through a SOCK_STREAM
+# socketpair, which silently destroys UDP message boundaries — two datagrams
+# arrive as one read. Mosh puts one SSP frame per packet, so a tailnet Mosh
+# session would fail at the first coalesced pair. This adds a udp dial that
+# bridges through SOCK_DGRAM instead, where one write is one datagram.
+cp "$ROOT/Scripts/libtailscale-sloop-udp.go" ./sloop_udp.go
+
 # One slice per platform. Go names the iOS device platform "ios"; the simulator
 # is the same GOOS with a simulator sysroot and an explicit -target, since the
 # SDK alone doesn't distinguish them to the linker.
@@ -75,6 +82,7 @@ build_slice () {
   mkdir -p "$OUT/$name/Headers"
   cp tailscale.h "$OUT/$name/Headers/"
   append_file libtailscale tailscale-sloop-status.h "$OUT/$name/Headers/tailscale.h"
+  append_file libtailscale tailscale-sloop-udp.h "$OUT/$name/Headers/tailscale.h"
 }
 
 build_slice "ios-arm64"     "ios"    "iphoneos"        "arm64-apple-ios$IOS_TARGET"

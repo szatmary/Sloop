@@ -25,7 +25,7 @@ targets:
         embed: false
     settings:
       base:
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_TAILSCALE
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_TAILSCALE
         SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CTailscale/$(PLATFORM_NAME)
         OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation
   SloopSSH_macOS:
@@ -34,7 +34,7 @@ targets:
         embed: false
     settings:
       base:
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_TAILSCALE
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_TAILSCALE
         SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CTailscale/$(PLATFORM_NAME)
         OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation
 
@@ -55,7 +55,7 @@ targets:
         embed: false
     settings:
       base:
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_TAILSCALE
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_TAILSCALE
         SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CTailscale/$(PLATFORM_NAME)
         OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation
   SloopFiles_macOS:
@@ -64,7 +64,7 @@ targets:
         embed: false
     settings:
       base:
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_TAILSCALE
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_TAILSCALE
         SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CTailscale/$(PLATFORM_NAME)
         OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation
 
@@ -74,7 +74,7 @@ targets:
         embed: false
     settings:
       base:
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_MOSH SLOOP_TAILSCALE
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_MOSH SLOOP_TAILSCALE
         SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CTailscale/$(PLATFORM_NAME)
         # tsnet's Go runtime pulls in the resolver and the Security framework
         # for the system trust store.
@@ -85,6 +85,15 @@ targets:
         embed: false
     settings:
       base:
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_MOSH SLOOP_TAILSCALE
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_MOSH SLOOP_TAILSCALE
         SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CTailscale/$(PLATFORM_NAME)
         OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation
+
+  # The test bundle links SloopSSH, which imports CTailscale in this variant —
+  # so it needs the same include path and conditions the framework builds with,
+  # or the module resolves for the framework and not for the tests that link it.
+  SloopTests:
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_MOSH SLOOP_TAILSCALE
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CTailscale/$(PLATFORM_NAME)

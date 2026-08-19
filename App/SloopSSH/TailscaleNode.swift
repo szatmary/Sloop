@@ -2,6 +2,7 @@
 // GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
 
 import Foundation
+import os
 import SloopKit
 #if SLOOP_TAILSCALE
 import CTailscale
@@ -45,6 +46,8 @@ public final class TailscaleNode: @unchecked Sendable {
     /// authorize again and then clean up in the admin console, so it lives in
     /// the App Group container (backed up, not purgeable) rather than Caches.
     private let role: SloopStorage.TailnetRole
+
+    private static let log = Logger(subsystem: "org.szatmary.sloop", category: "tailnet")
 
     private let lock = NSLock()
     private var handle: tailscale = -1
@@ -136,6 +139,39 @@ public final class TailscaleNode: @unchecked Sendable {
         guard tailscale_dial(handle, "tcp", address, &conn) == 0 else {
             throw NodeError.tailscale("Couldn't reach \(address) over the tailnet: \(errorMessageLocked())")
         }
+        return conn
+    }
+
+    /// A connected datagram socket to `host:port` over the tailnet, for Mosh.
+    ///
+    /// Not `tailscale_dial(…, "udp", …)`: that call reaches tsnet intact but
+    /// returns a *stream* fd, and a stream has no message boundaries — two SSP
+    /// packets would arrive as one read and fail to decrypt. `TsnetDialUDP` is
+    /// Sloop's addition to libtailscale (`Scripts/libtailscale-sloop-udp.go`)
+    /// and bridges through a datagram socketpair, so one write stays one
+    /// packet.
+    public func dialUDP(host: String, port: Int) throws -> Int32 {
+        lock.lock()
+        defer { lock.unlock() }
+        guard started else {
+            throw NodeError.tailscale("Sloop's tailnet node isn't running.")
+        }
+        var conn: tailscale_conn = -1
+        let address = "\(host):\(port)"
+        // Logged, not just thrown: tsnet writes its own progress to stdout, so
+        // a device console that shows the node coming up and then nothing is
+        // ambiguous about whose fault the silence is.
+        Self.log.info("dialing udp \(address, privacy: .public)")
+        DeviceDiagnostics.log("tailnet: dialing udp \(address)")
+        guard TsnetDialUDP(handle, address, &conn) == 0 else {
+            Self.log.error("udp dial failed: \(self.errorMessageLocked(), privacy: .public)")
+            DeviceDiagnostics.log("tailnet: udp dial FAILED — \(errorMessageLocked())")
+            throw NodeError.tailscale(
+                "Couldn't open a Mosh connection to \(address) over the tailnet: "
+                + errorMessageLocked())
+        }
+        Self.log.info("udp fd \(conn) for \(address, privacy: .public)")
+        DeviceDiagnostics.log("tailnet: udp fd \(conn) for \(address)")
         return conn
     }
 
