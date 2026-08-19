@@ -13,21 +13,24 @@ enum CommandRunnerFactory {
     static func ssh(host: SSHHost,
                     credential: Credential,
                     knownHosts: KnownHostsStore,
-                    hostKeyVerifier: HostKeyVerifier) -> CommandRunner {
+                    hostKeyVerifier: HostKeyVerifier,
+                    accessTokens: AccessTokenStore) -> CommandRunner {
         #if canImport(CSSH)
-        // A tunneled host must never get a runner that dials its hostname
-        // directly — that would bypass the tunnel and send credentials to
-        // whatever answers on the host's public port 22. Today the only
-        // caller (the Mosh probe, via HostListModel.connect) already limits
-        // itself to `.direct` hosts, but that guard lives in a different
-        // file; this factory shouldn't depend on it staying that way.
-        guard host.connectionMethod == .direct else {
-            return UnavailableCommandRunner(message:
-                "Command execution isn't available for tunneled hosts — it would bypass the tunnel.")
+        // The same dialer the shell would use — never a direct TCP connect to a
+        // tunneled host's hostname, which would bypass the tunnel and offer the
+        // credential to whatever answers on its public port 22. Asking
+        // `TransportFactory` rather than deciding again here is what stops the
+        // two from drifting: they did, and a tailnet host's Mosh probe refused
+        // to run at all, so every Mosh session over the tailnet quietly became
+        // an SSH one.
+        switch TransportFactory.dialer(for: host, accessTokens: accessTokens) {
+        case .ready(let dialer):
+            return LibSSH2CommandRunner(host: host, credential: credential,
+                                        dialer: dialer,
+                                        knownHosts: knownHosts, hostKeyVerifier: hostKeyVerifier)
+        case .unavailable(let reason):
+            return UnavailableCommandRunner(message: reason)
         }
-        return LibSSH2CommandRunner(host: host, credential: credential,
-                                    dialer: TCPDialer(host: host.hostname, port: host.port),
-                                    knownHosts: knownHosts, hostKeyVerifier: hostKeyVerifier)
         #else
         return UnavailableCommandRunner()
         #endif

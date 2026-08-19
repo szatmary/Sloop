@@ -21,7 +21,7 @@ targets:
         embed: false
     settings:
       base:
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_MOSH SLOOP_TAILSCALE
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_MOSH SLOOP_TAILSCALE
         # tsnet's Go runtime pulls in the resolver and the Security framework
         # for the system trust store.
         OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation
@@ -31,5 +31,5 @@ targets:
         embed: false
     settings:
       base:
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_MOSH SLOOP_TAILSCALE
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_MOSH SLOOP_TAILSCALE
         OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation

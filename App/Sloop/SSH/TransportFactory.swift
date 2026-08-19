@@ -40,13 +40,19 @@ enum TransportFactory {
     /// re-derive *which* nil it was by re-calling `accessURL` and re-switching
     /// over the connection method — two switches to keep in step, one of whose
     /// branches ("a direct host with no dialer") could not happen at all.
-    private enum DialerResolution {
+    enum DialerResolution {
         case ready(Dialer)
         case unavailable(String)
     }
 
-    private static func dialer(for host: SSHHost,
-                               accessTokens: AccessTokenStore) -> DialerResolution {
+    /// The dialer a host is reached through, or why there isn't one.
+    ///
+    /// Not private: the Mosh probe needs the *same* answer for its exec
+    /// channel. It used to make its own, hard-coded to `.direct` and a
+    /// `TCPDialer`, so a tailnet host's probe refused to run and every Mosh
+    /// session on one silently became SSH.
+    static func dialer(for host: SSHHost,
+                       accessTokens: AccessTokenStore) -> DialerResolution {
         switch host.connectionMethod {
         case .direct:
             return .ready(TCPDialer(host: host.hostname, port: host.port))

@@ -250,7 +250,8 @@ final class HostListModel: ObservableObject {
                     CommandRunnerFactory.ssh(host: host,
                                              credential: credential,
                                              knownHosts: knownHosts,
-                                             hostKeyVerifier: HostKeyPrompter.shared)
+                                             hostKeyVerifier: HostKeyPrompter.shared,
+                                             accessTokens: accessTokens)
                 },
                 makeSSHTransport: makeSSH,
                 makeMoshTransport: makeMosh)
