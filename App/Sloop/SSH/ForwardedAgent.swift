@@ -313,10 +313,16 @@ final class LibSSH2AgentChannel: AgentChannel {
     /// with nothing left to drain it. `retrying: false` makes exactly one
     /// attempt — for a peer that may never answer, where waiting even a
     /// bounded amount is a self-inflicted freeze of a still-live shell.
-    /// Either way `libssh2_channel_free` runs regardless of whether the
-    /// close actually completed; a channel struct left in
-    /// `session->channels` because it never got a clean CHANNEL_CLOSE is a
-    /// bounded, known cost, and far better than a frozen terminal.
+    /// Either way `libssh2_channel_free` runs regardless of whether the close
+    /// actually completed. Be precise about what that costs when it fails:
+    /// `_libssh2_channel_free` returns EAGAIN without freeing while the local
+    /// side is still open, and `libssh2_session_free` in turn bails on the
+    /// first channel it cannot free — so a teardown against a peer that never
+    /// sends CHANNEL_CLOSE leaks the whole `LIBSSH2_SESSION`, not merely one
+    /// channel struct. That is still bounded (one session per failed teardown,
+    /// not unbounded growth) and it cannot block, because every call here is
+    /// non-blocking. A frozen terminal the user cannot even close is worse on
+    /// both counts, which is why this trade is made deliberately.
     ///
     /// Only ever called from `ForwardedAgent.service()` or `.close()` — both
     /// run from the event loop, off the AUTHAGENT callback's stack, which is
