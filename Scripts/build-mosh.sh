@@ -46,7 +46,9 @@ done
 export LIBTOOLIZE=glibtoolize
 
 echo "==> Fetching sources"
-git clone --depth 1 --branch "$IOS_CMAKE_TAG" https://github.com/leetal/ios-cmake.git
+# No ios-cmake here: mosh is autotools and protobuf is built for the *host*
+# only, so no CMake toolchain file is ever used. It was cloned on every run and
+# never read.
 git clone --depth 1 --branch "$PROTOBUF_TAG" https://github.com/protocolbuffers/protobuf.git
 git clone https://github.com/mobile-shell/mosh.git
 git -C mosh checkout --quiet "$MOSH_TAG"

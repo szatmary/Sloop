@@ -48,7 +48,10 @@ apply_patches () {
 
   [ -d "$dir" ] || return 0
   local patches=("$dir"/*.patch)
-  [ -e "${patches[0]}" ] || return 0
+  # Both halves are needed. Without nullglob the array holds one unexpanded
+  # glob, so the -e test is what catches an empty directory; with nullglob the
+  # array is empty and `${patches[0]}` under `set -u` aborts the script instead.
+  [ ${#patches[@]} -gt 0 ] && [ -e "${patches[0]}" ] || return 0
 
   for patch in "${patches[@]}"; do
     echo "==> Patching $dep: $(basename "$patch")"

@@ -42,6 +42,15 @@ targetTemplates:
         ARCHS: arm64
         ONLY_ACTIVE_ARCH: "NO"
         SKIP_INSTALL: YES
+        # The appex is signed by its own target and copied without
+        # CodeSignOnCopy, so it inherits nothing from the app — this has to be
+        # set here or the extension ships without it. It matters more here than
+        # anywhere: this is the process holding the SSH credentials and running
+        # the SFTP session, and without the hardened runtime any process running
+        # as the same user can attach to it and read them. Notarization also
+        # rejects a bundle whose nested executables lack it, so the release
+        # script would fail at the notarize step.
+        ENABLE_HARDENED_RUNTIME: YES
 
 targets:
   # libssh2 goes on the framework, not the app: every `import CSSH` now lives in
