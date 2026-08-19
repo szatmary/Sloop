@@ -8,7 +8,6 @@ public enum AuthMethod: Codable, Hashable {
     case password
     /// References a private key stored in the keychain by name.
     case publicKey(name: String)
-    case agent
 }
 
 /// How the byte stream to the host is established. `.direct` is a plain TCP
