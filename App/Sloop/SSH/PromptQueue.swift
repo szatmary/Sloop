@@ -7,50 +7,53 @@ import Foundation
 /// SwiftUI sheet, and blocks each requesting thread until its own request is
 /// answered.
 ///
-/// Shared by `AgentSignPrompter` and `HostKeyPrompter`: both block a
-/// background (SSH) thread while a sheet asks the user something, then return
-/// the answer. Sloop allows several terminal sessions at once
-/// (`SessionsModel`), so more than one SSH thread can ask the same prompter
-/// something around the same moment — two hosts both asking to sign, or two
-/// hosts both presenting an unverified key. A single `@Published` slot cannot
-/// survive that: a second request arriving before the first is answered would
-/// overwrite it, and the first request's `respond` closure would then be
-/// unreachable from anywhere — its semaphore would never signal, and that SSH
-/// thread would hang forever. This queues concurrent requests and shows them
-/// one at a time instead, so a second arrival waits its turn rather than
-/// silently destroying the first.
+/// Shared by `AgentSignPrompter` and `HostKeyPrompter` — not just in the
+/// sense that both are built on this type, but literally: `AgentSignPrompter
+/// .shared` and `HostKeyPrompter.shared` both hand their requests to the same
+/// `PromptQueue.shared` instance. That sharing is load-bearing, not
+/// incidental. `HostListView` presents both prompters' `prompt` through their
+/// own `.sheet(item:)` modifier, on the same view. A host-key prompt (session
+/// A connecting to a new host) and a sign prompt (session B's forwarded agent
+/// asked to sign) can each be triggered from a different SSH thread around
+/// the same moment — two ordinary sessions doing two ordinary things, not a
+/// contrived scenario. If each prompter queued only its own requests,
+/// nothing would stop both `@Published var prompt`s from going non-nil
+/// together, and SwiftUI can only actually present one sheet from one view
+/// at a time — the second `.sheet`'s content is never shown, so nothing ever
+/// calls its `respond`, and that SSH thread hangs forever. Routing every
+/// prompt of every kind through one queue is what makes "at most one prompt
+/// is ever live, of either kind" true, the same way a single prompter's own
+/// queue makes "at most one prompt of THAT kind is ever live" true.
 ///
-/// Generic over `Payload` — the information the sheet needs to show (a key
-/// name and endpoint for a sign request; a kind, endpoint, key type and
-/// fingerprint for a host-key request) — so each prompter keeps its own
-/// `Prompt` type, and therefore its own `@Published var prompt`, which
-/// `HostListView`'s `.sheet(item:)` needs. Only the queuing, the blocking
-/// handoff, and the fail-closed default are shared; the answer itself is
-/// always a plain `Bool` — trust/don't-trust and allow/deny are both, at
-/// bottom, one yes-or-no decision.
+/// Deliberately not generic over a payload type, unlike an earlier version
+/// of this file. Making each prompter instantiate its own
+/// `PromptQueue<ItsOwnPayloadType>` is exactly what made sharing one queue
+/// between the two prompter *types* impossible without inventing a union
+/// payload type to force them onto the same generic instantiation.
+/// Dropping the type parameter removes the need: `request(present:)` takes a
+/// single `(@escaping (Bool) -> Void) -> Void` closure, and that closure
+/// already captures whatever its caller needs (a key name and endpoint; a
+/// kind, endpoint, key type and fingerprint) from its own enclosing scope,
+/// the ordinary way a closure captures anything — the generic parameter was
+/// only ever a payload `PromptQueue` itself forwarded without inspecting,
+/// so threading it through was ceremony, not function.
 ///
-/// Deliberately owns no reference to the prompter it serves, and takes no
-/// closure at construction — only a plain, argument-less `init()` exists.
-/// Each caller passes its own "how do I reach the user" closure into
-/// `request(_:present:)` itself, computed at the call site (inside
-/// `shouldSign`/`shouldTrust`, an ordinary instance method where `self` is
-/// already a fully-initialized, valid reference). An earlier version of this
-/// type instead captured the owning prompter in a closure handed to `init`,
-/// stored in a `lazy var` (needed so the closure could reference `self`
-/// before `self`'s other stored properties existed). That compiled and
-/// usually worked, but `lazy` is not thread-safe: the *first* access to a
-/// lazy property races if it happens from two threads at once, and that is
-/// exactly what two SSH threads calling into a fresh prompter at the same
-/// moment do. Losing that race silently constructed two separate queues, one
-/// per thread — each with its own empty `pending` — which reproduced the
-/// very bug this type exists to fix, intermittently, only under real
-/// concurrency. This shape has no property for that race to hit.
-///
-/// `request(_:present:)` MUST NOT be called on the main thread: it blocks the
+/// `request(present:)` MUST NOT be called on the main thread: it blocks the
 /// calling thread on a semaphore that only the main-queue-confined
 /// presentation can signal, so calling it from main would deadlock the app
 /// against itself.
-final class PromptQueue<Payload> {
+final class PromptQueue {
+    /// The instance `AgentSignPrompter.shared` and `HostKeyPrompter.shared`
+    /// both hand their requests to, so a sign prompt and a host-key prompt
+    /// queue behind each other instead of colliding on `HostListView`'s two
+    /// `.sheet(item:)` modifiers. Tests construct their own `PromptQueue()`
+    /// instead of using this — a fresh, private instance per prompter (the
+    /// default, see below) keeps unrelated tests from leaking state into
+    /// each other through this singleton; a *shared* fresh instance, handed
+    /// explicitly to two prompter instances, is how a test proves
+    /// cross-prompter queuing specifically.
+    static let shared = PromptQueue()
+
     /// Requests waiting their turn, oldest first. Read and mutated only from
     /// blocks already running on the main queue — `enqueue` hops there before
     /// touching it, and so does every completion that follows — so this needs
@@ -62,20 +65,20 @@ final class PromptQueue<Payload> {
     private var pending: [Request] = []
 
     private struct Request {
-        let payload: Payload
         /// How this one request reaches the user — supplied by its caller at
-        /// `request(_:present:)` time, not shared queue-wide, so `presentNext`
-        /// doesn't need any reference back to whichever prompter enqueued it.
-        let present: (Payload, @escaping (Bool) -> Void) -> Void
+        /// `request(present:)` time, already carrying whatever it needs to
+        /// show via ordinary closure capture, so `presentNext` doesn't need
+        /// any reference back to whichever prompter enqueued it.
+        let present: (@escaping (Bool) -> Void) -> Void
         let respond: (Bool) -> Void
     }
 
     /// Called from a background (SSH) thread. Blocks until this specific
     /// request has been answered, and returns exactly that answer.
-    func request(_ payload: Payload, present: @escaping (Payload, @escaping (Bool) -> Void) -> Void) -> Bool {
+    func request(present: @escaping (@escaping (Bool) -> Void) -> Void) -> Bool {
         let semaphore = DispatchSemaphore(value: 0)
         let decision = Decision()
-        enqueue(payload, present: present) { allowed in
+        enqueue(present: present) { allowed in
             // Only an explicit "yes" ever writes to `decision`. Anything else
             // — a refusal, or a bug that fails to answer at all — does not,
             // so it leaves `decision.value` exactly as `Decision` initialized
@@ -91,16 +94,17 @@ final class PromptQueue<Payload> {
     }
 
     /// Adds a request to the queue, and shows it immediately if nothing else
-    /// is currently showing. Always hops to the main queue first, so whether
-    /// the queue "was empty" — and therefore whether this request should be
-    /// presented right away — is decided serially with every other request's,
-    /// regardless of which thread called `request`.
-    private func enqueue(_ payload: Payload,
-                          present: @escaping (Payload, @escaping (Bool) -> Void) -> Void,
+    /// is currently showing — of either kind, since every prompter sharing
+    /// this queue funnels through the same `pending`. Always hops to the
+    /// main queue first, so whether the queue "was empty" — and therefore
+    /// whether this request should be presented right away — is decided
+    /// serially with every other request's, regardless of which thread, or
+    /// which prompter, called `request`.
+    private func enqueue(present: @escaping (@escaping (Bool) -> Void) -> Void,
                           respond: @escaping (Bool) -> Void) {
         DispatchQueue.main.async {
             let wasEmpty = self.pending.isEmpty
-            self.pending.append(Request(payload: payload, present: present, respond: respond))
+            self.pending.append(Request(present: present, respond: respond))
             if wasEmpty {
                 self.presentNext()
             }
@@ -110,10 +114,11 @@ final class PromptQueue<Payload> {
     /// Shows the request at the front of the queue, if there is one. Called
     /// only on the main queue: once from `enqueue`, when a request arrived
     /// with nothing else pending, and once more after each request is
-    /// answered, to move on to whatever arrived behind it.
+    /// answered, to move on to whatever arrived behind it — possibly from a
+    /// different prompter than the one that was just showing.
     private func presentNext() {
         guard let next = pending.first else { return }
-        next.present(next.payload) { allowed in
+        next.present { allowed in
             DispatchQueue.main.async {
                 // Nothing removes an entry from `pending` before its own
                 // answer arrives, and nothing but `enqueue` appends to it, so

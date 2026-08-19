@@ -202,6 +202,7 @@ final class AgentSigner {
 
     // MARK: Test-only verification
 
+    #if DEBUG
     /// Verifies a signature through libssh2's own verify functions.
     ///
     /// Test-only, and deliberately so: nothing in the app verifies its own
@@ -299,6 +300,7 @@ final class AgentSigner {
         }
         return rc == 0
     }
+    #endif
 }
 
 /// Runs `body` with a C string for the passphrase, or NULL when there is none.

@@ -345,7 +345,8 @@ the on-device checklist:
       normal auth failure) rather than hanging.
 - [ ] Run two `ssh` calls from the remote at once (two concurrent agent
       clients): confirm both succeed. This path is unit-tested
-      (`Tests/SloopKitTests`) but has no live coverage.
+      (`Tests/SloopAppTests/ForwardedAgentTests.swift:240`) but has no live
+      coverage.
 
 ## Where things live
 

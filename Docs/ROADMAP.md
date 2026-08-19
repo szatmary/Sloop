@@ -162,7 +162,11 @@ top of a working SSH terminal rather than first.
   concurrent forwarded-agent clients — **but never exercised against a real
   remote host.** Nothing in the on-device checklist (`Docs/HANDOFF.md`) has
   confirmed a live `ssh-add -l`, a real approve/deny round trip, or two
-  concurrent `ssh` calls against actual `sshd`.
+  concurrent `ssh` calls against actual `sshd`. Separately, unrelated to this
+  feature: `AuthMethod.agent` (`Sources/SloopKit/Model/SSHHost.swift`) is
+  still dead scaffolding with zero references anywhere in the codebase — this
+  feature is built on `forwardedKeys`/`forwardsAgent`, not that case. Removed
+  on the separate, unmerged `ssh-url-and-agent` branch; left in place here.
 - **SFTP / file transfer** — and the version that actually matters is a
   `FileProvider` extension, so a remote host appears in Files.app and any app
   can open and save to it. Secure ShellFish built its whole identity on that;
