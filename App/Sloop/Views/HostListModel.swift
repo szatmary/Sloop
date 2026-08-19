@@ -334,9 +334,9 @@ final class HostListModel: ObservableObject {
                                  knownHosts: knownHosts,
                                  hostKeyVerifier: HostKeyPrompter.shared,
                                  accessTokens: accessTokens,
+                                 authorizationPresenter: TailscaleAuthPrompter.shared,
                                  forwardedKeys: forwardedKeys,
-                                 signConfirmer: AgentSignPrompter.shared,
-                                 authorizationPresenter: TailscaleAuthPrompter.shared)
+                                 signConfirmer: AgentSignPrompter.shared)
         }
 
         return TerminalSession(title: host.alias,
