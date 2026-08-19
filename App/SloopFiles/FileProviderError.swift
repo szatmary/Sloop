@@ -30,7 +30,7 @@ enum FileProviderError {
             return notAuthenticated(error)
         case let error as SFTPDomainService.ServiceError:
             switch error {
-            case .noSuchHost, .notPublished, .noCredential:
+            case .noSuchHost, .notPublished, .noCredential, .domainUnavailable:
                 return notAuthenticated(error)
             case .unknownIdentifier:
                 return NSError(domain: NSFileProviderErrorDomain,
@@ -44,11 +44,20 @@ enum FileProviderError {
         // extension cannot run trust-on-first-use, so an unknown or changed key
         // arrives here — and must arrive as "go and look at this in Sloop",
         // never as a transient failure the system will quietly retry forever.
-        case let error as SSHError:
+        // The protocol rather than a list of concrete types: a tailnet node
+        // waiting for device authorization is the same kind of failure and was
+        // missed by the list, so it retried in a loop while embedding a
+        // one-time authorization URL in system error text.
+        case let error as UserActionRequiredError:
             return notAuthenticated(error)
 
         default:
-            return error as NSError
+            // Unrecognized errors must still land in a domain the system
+            // accepts. Anything else is classified transient and retried, which
+            // for a genuine bug means a loop rather than a visible failure.
+            return NSError(domain: NSCocoaErrorDomain, code: NSXPCConnectionReplyInvalid,
+                           userInfo: [NSLocalizedDescriptionKey: error.localizedDescription,
+                                      NSUnderlyingErrorKey: error as NSError])
         }
     }
 

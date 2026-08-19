@@ -17,13 +17,20 @@ final class FileProviderItem: NSObject, NSFileProviderItem {
     private let entry: SFTPEntry
     private let identifier: NSFileProviderItemIdentifier
     private let parent: NSFileProviderItemIdentifier
+    /// Whether the *containing directory* is writable, which is what POSIX
+    /// actually consults for rename, delete and move — not the item's own mode.
+    /// Nil when it hasn't been looked up, in which case those are offered and
+    /// the server has the final say.
+    private let parentIsWritable: Bool?
 
     init(entry: SFTPEntry,
          identifier: NSFileProviderItemIdentifier,
-         parent: NSFileProviderItemIdentifier) {
+         parent: NSFileProviderItemIdentifier,
+         parentIsWritable: Bool? = nil) {
         self.entry = entry
         self.identifier = identifier
         self.parent = parent
+        self.parentIsWritable = parentIsWritable
     }
 
     var itemIdentifier: NSFileProviderItemIdentifier { identifier }
@@ -61,21 +68,33 @@ final class FileProviderItem: NSObject, NSFileProviderItem {
 
     /// What the system may offer the user for this item.
     ///
-    /// Write permission is read off the remote mode rather than granted
-    /// blanket. Offering "rename" on a file in a directory the user cannot
-    /// write produces a failure *after* they have typed a new name, which is a
-    /// worse experience than the option being absent.
+    /// Two different permissions, which an earlier version conflated. Reading
+    /// and writing an item's *contents* depend on that item's mode; renaming,
+    /// deleting and moving it depend on the mode of the directory holding it,
+    /// because those operations modify the directory, not the file. Deriving
+    /// all four from the item's own write bit got both cases backwards: a
+    /// read-only file in a writable home was shown as unrenamable when it is
+    /// renamable, and a writable file in a read-only directory was offered a
+    /// rename that fails only after the user has typed a new name.
+    ///
+    /// The owner bit is the best available approximation — SFTP reports a mode
+    /// and a uid, but nothing about which of them the connected user is — so
+    /// where the answer is unknown the capability is offered and the server
+    /// decides. A refusal from the server is a worse experience than a hidden
+    /// menu item, but a *hidden* action the user is entitled to is worse still.
     var capabilities: NSFileProviderItemCapabilities {
-        let writable = entry.permissions & 0o200 != 0
-        if entry.isDirectory {
-            var capabilities: NSFileProviderItemCapabilities = [.allowsContentEnumerating]
-            if writable { capabilities.insert([.allowsAddingSubItems, .allowsDeleting,
-                                               .allowsRenaming, .allowsReparenting]) }
-            return capabilities
+        let contentsWritable = entry.permissions & 0o200 != 0
+        // Unknown means "not looked up", which must not read as "forbidden".
+        let inWritableDirectory = parentIsWritable ?? true
+
+        var capabilities: NSFileProviderItemCapabilities = entry.isDirectory
+            ? [.allowsContentEnumerating]
+            : [.allowsReading]
+        if !entry.isDirectory, contentsWritable { capabilities.insert(.allowsWriting) }
+        if entry.isDirectory, contentsWritable { capabilities.insert(.allowsAddingSubItems) }
+        if inWritableDirectory {
+            capabilities.insert([.allowsDeleting, .allowsRenaming, .allowsReparenting])
         }
-        var capabilities: NSFileProviderItemCapabilities = [.allowsReading]
-        if writable { capabilities.insert([.allowsWriting, .allowsDeleting,
-                                           .allowsRenaming, .allowsReparenting]) }
         return capabilities
     }
 }

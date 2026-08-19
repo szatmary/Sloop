@@ -30,6 +30,10 @@ final class SFTPDomainService {
         case notPublished(String)
         case noCredential(String)
         case unknownIdentifier(NSFileProviderItemIdentifier)
+        /// The system would not hand out a manager for this domain — it has
+        /// been removed, or the extension is running against a domain the
+        /// system no longer knows.
+        case domainUnavailable
 
         var errorDescription: String? {
             switch self {
@@ -41,6 +45,8 @@ final class SFTPDomainService {
                 return "Sloop has no saved password or key for \(alias). Open Sloop and add one."
             case .unknownIdentifier:
                 return "Files asked for an item Sloop no longer recognizes. Pull to refresh."
+            case .domainUnavailable:
+                return "This location is no longer registered with Files. Reopen Sloop."
             }
         }
     }
@@ -113,6 +119,21 @@ final class SFTPDomainService {
         }
     }
 
+    /// A scratch file on the volume the system expects.
+    ///
+    /// `NSFileProviderManager.temporaryDirectoryURL()` is guaranteed to sit on
+    /// the same volume as the user-visible URL, which is what lets the system
+    /// clone or move the downloaded file into place instead of copying it —
+    /// and what `fetchContents` documents as a requirement.
+    /// `FileManager.default.temporaryDirectory` carries no such guarantee.
+    func temporaryFileURL() throws -> URL {
+        guard let manager = NSFileProviderManager(for: domain) else {
+            throw ServiceError.domainUnavailable
+        }
+        return try manager.temporaryDirectoryURL()
+            .appendingPathComponent(UUID().uuidString)
+    }
+
     func invalidate() {
         queue.sync {
             try? index.save()
@@ -157,11 +178,28 @@ final class SFTPDomainService {
     }
 
     /// Builds the system's view of one entry.
-    func item(for entry: SFTPEntry, _ client: SFTPClient,
-              _ index: SFTPItemIndex) throws -> FileProviderItem {
+    ///
+    /// `parentIsWritable` is passed in rather than looked up here: an
+    /// enumeration builds one item per directory entry and the answer is the
+    /// same for all of them, so statting the parent per item would turn one
+    /// listing into N+1 round trips.
+    func item(for entry: SFTPEntry, _ client: SFTPClient, _ index: SFTPItemIndex,
+              parentIsWritable: Bool? = nil) throws -> FileProviderItem {
         FileProviderItem(entry: entry,
                          identifier: try identifier(for: entry.path, client, index),
                          parent: try identifier(for: RemotePath.parent(entry.path),
-                                                client, index))
+                                                client, index),
+                         parentIsWritable: parentIsWritable)
+    }
+
+    /// Tells the system this domain changed, so it re-enumerates rather than
+    /// waiting for the user to pull to refresh.
+    ///
+    /// Called after Sloop's own mutations. Remote changes still surface only on
+    /// the next enumeration — SFTP cannot push — but there is no reason for the
+    /// extension's *own* writes to wait for that.
+    func signalChange() {
+        guard let manager = NSFileProviderManager(for: domain) else { return }
+        manager.signalEnumerator(for: .workingSet) { _ in }
     }
 }

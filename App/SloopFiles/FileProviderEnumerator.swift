@@ -45,7 +45,14 @@ final class FileProviderEnumerator: NSObject, NSFileProviderEnumerator {
             // every existing item as newly added.
             index.apply(listing: entries, to: directory)
             try index.save()
-            return try entries.map { try service.item(for: $0, client, index) }
+            // One stat for the container, shared by every item in it: rename,
+            // delete and move are governed by the directory's mode, not each
+            // file's. Unknown stays unknown rather than becoming "forbidden".
+            let containerIsWritable = (try? client.stat(directory))
+                .map { $0.permissions & 0o200 != 0 }
+            return try entries.map {
+                try service.item(for: $0, client, index, parentIsWritable: containerIsWritable)
+            }
         } completion: { result in
             switch result {
             case .success(let items):

@@ -116,8 +116,12 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 // A temporary file the system takes ownership of. Never an
                 // in-memory buffer: this extension runs under a memory cap and
                 // the files worth reaching for are the large ones.
-                let destination = FileManager.default.temporaryDirectory
-                    .appendingPathComponent(UUID().uuidString)
+                //
+                // From the provider's own temporary directory, not
+                // FileManager's: the system requires the file be on the same
+                // volume as the user-visible URL so it can clone or move it
+                // atomically, and only this API guarantees that.
+                let destination = try service.temporaryFileURL()
                 try client.read(path, into: destination) { done, total in
                     guard total > 0 else { return }
                     progress.completedUnitCount = Int64(Double(done) / Double(total) * 100)
@@ -159,6 +163,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 throw SFTPError.unsupported(itemTemplate.filename)
             }
             let name = itemTemplate.filename
+            guard RemotePath.isValidName(name) else { throw SFTPError.unsupported(name) }
             let parent = itemTemplate.parentItemIdentifier
 
             service.perform { client, index in
@@ -180,6 +185,9 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 progress.completedUnitCount = 100
                 switch result {
                 case .success(let item):
+                    // Sloop's own writes need not wait for the next
+                    // enumeration; only remote changes do.
+                    service.signalChange()
                     completionHandler(item, [], false, nil)
                 case .failure(let error):
                     completionHandler(nil, [], false, FileProviderError.from(error))
@@ -204,6 +212,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             let service = try requireService()
             let identifier = item.itemIdentifier
             let newName = item.filename
+            guard RemotePath.isValidName(newName) else { throw SFTPError.unsupported(newName) }
             let newParent = item.parentItemIdentifier
 
             service.perform { client, index in
@@ -233,12 +242,19 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                     }
                 }
 
+                // After the write, not between it and the rename: persisting
+                // early recorded a move whose content change had not happened,
+                // and a process kill in that window left the index describing a
+                // state the server was never in.
                 try index.save()
                 return try service.item(for: try client.stat(path), client, index)
             } completion: { result in
                 progress.completedUnitCount = 100
                 switch result {
                 case .success(let item):
+                    // Sloop's own writes need not wait for the next
+                    // enumeration; only remote changes do.
+                    service.signalChange()
                     completionHandler(item, [], false, nil)
                 case .failure(let error):
                     completionHandler(nil, [], false, FileProviderError.from(error))
@@ -258,18 +274,36 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         let progress = Progress(totalUnitCount: 1)
         do {
             let service = try requireService()
+            let recursive = options.contains(.recursive)
             service.perform { client, index in
-                let path = try service.path(for: identifier, client, index)
-                // No recursion. The system deletes item by item; recursing here
-                // would destroy data it never asked to remove, and a
-                // non-empty directory refusing is the server telling the truth.
-                try client.remove(path)
+                let path: String
+                do {
+                    path = try service.path(for: identifier, client, index)
+                } catch {
+                    // "If the deletion targets an item that is unknown from the
+                    // extension because that item may have already been deleted
+                    // remotely, then the extension should report a success."
+                    // Reporting noSuchItem instead meant a delete of something
+                    // already gone could never converge.
+                    return
+                }
+                do {
+                    // Recursive only when the system asks. Unasked, a directory
+                    // that refuses because it is not empty is the server telling
+                    // the truth, and recursing anyway would destroy data nobody
+                    // asked to remove.
+                    try recursive ? client.removeRecursively(path) : client.remove(path)
+                } catch SFTPError.noSuchFile {
+                    // Already gone server-side: the caller's intent is satisfied.
+                }
                 index.forget(path)
                 try index.save()
             } completion: { result in
                 progress.completedUnitCount = 1
                 switch result {
-                case .success: completionHandler(nil)
+                case .success:
+                    service.signalChange()
+                    completionHandler(nil)
                 case .failure(let error): completionHandler(FileProviderError.from(error))
                 }
             }

@@ -193,6 +193,22 @@ final class SFTPItemIndexTests: XCTestCase {
         XCTAssertNotEqual(index.identifier(for: "/a/x"), oldID)
     }
 
+    /// A directory replaced by a file takes its children with it. Leaving them
+    /// indexed means a directory that later reappears at that path hands back
+    /// identifiers the system was already told were deleted.
+    func testAPathThatChangesTypeForgetsWhatWasBeneathIt() {
+        let index = SFTPItemIndex(fileURL: scratch)
+        _ = index.apply(listing: [directory("/a/d")], to: "/a")
+        _ = index.apply(listing: [file("/a/d/x")], to: "/a/d")
+        let childID = index.identifier(for: "/a/d/x")
+
+        // rm -r a/d && touch a/d
+        _ = index.apply(listing: [file("/a/d")], to: "/a")
+
+        XCTAssertNil(index.path(for: childID))
+        XCTAssertEqual(try index.snapshotPaths(of: "/a/d"), [])
+    }
+
     func testChangesInOneDirectoryDoNotDisturbAnother() {
         let index = SFTPItemIndex(fileURL: scratch)
         _ = index.apply(listing: [file("/a/x")], to: "/a")

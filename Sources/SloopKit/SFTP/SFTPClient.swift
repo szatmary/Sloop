@@ -69,6 +69,25 @@ public extension SFTPClient {
     /// tree genuinely holds no socket, and forcing it to declare an empty
     /// method would be ceremony rather than safety.
     func close() {}
+
+    /// Removes `path` and everything beneath it, depth first.
+    ///
+    /// Only for the case where the File Provider system explicitly asks
+    /// (`NSFileProviderDeleteItemOptions.recursive`); `remove` stays
+    /// non-recursive so an ordinary delete cannot take a subtree with it.
+    ///
+    /// SFTP has no recursive delete, so this is a client-side walk — written
+    /// once here rather than in each conformance, since it needs nothing but
+    /// `list` and `remove`.
+    func removeRecursively(_ path: String) throws {
+        let entry = try stat(path)
+        if entry.isDirectory {
+            for child in try list(path) {
+                try removeRecursively(child.path)
+            }
+        }
+        try remove(path)
+    }
 }
 
 /// An in-memory remote filesystem.

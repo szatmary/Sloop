@@ -44,6 +44,31 @@ final class RemotePathTests: XCTestCase {
         XCTAssertTrue(RemotePath.isDescendant("/a", of: "/"))
     }
 
+    /// `/` followed by a combining mark is a single `Character`, so any
+    /// grapheme-based search for the separator misses it. The name then comes
+    /// back containing a slash and the parent points at the wrong directory —
+    /// for a filename the server accepts without complaint.
+    func testASegmentStartingWithACombiningMarkStillSplitsOnTheSeparator() {
+        let path = "/a/\u{0301}b"
+        XCTAssertEqual(RemotePath.normalize(path), path)
+        XCTAssertEqual(RemotePath.name(path), "\u{0301}b")
+        XCTAssertEqual(RemotePath.parent(path), "/a")
+        XCTAssertTrue(RemotePath.isDescendant(path, of: "/a"))
+        XCTAssertEqual(RemotePath.reparent(path, from: "/a", to: "/x"), "/x/\u{0301}b")
+    }
+
+    /// Names arriving from the File Provider system are written by other
+    /// software, unlike names read back from a directory listing.
+    func testNameValidationRejectsWhatWouldEscapeTheDirectory() {
+        XCTAssertTrue(RemotePath.isValidName("notes.txt"))
+        XCTAssertTrue(RemotePath.isValidName("a b\\c%d"))
+        XCTAssertFalse(RemotePath.isValidName(""))
+        XCTAssertFalse(RemotePath.isValidName("."))
+        XCTAssertFalse(RemotePath.isValidName(".."))
+        XCTAssertFalse(RemotePath.isValidName("a/b"))
+        XCTAssertFalse(RemotePath.isValidName("../escape"))
+    }
+
     func testReparentRewritesOnlyThePrefix() {
         XCTAssertEqual(RemotePath.reparent("/a/b/c", from: "/a/b", to: "/x/y"), "/x/y/c")
         XCTAssertEqual(RemotePath.reparent("/a/b", from: "/a/b", to: "/x/y"), "/x/y")

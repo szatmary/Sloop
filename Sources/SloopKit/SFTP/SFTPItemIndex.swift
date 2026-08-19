@@ -212,9 +212,14 @@ public final class SFTPItemIndex: @unchecked Sendable {
             if SFTPEntry.Kind(posixMode: was.mode) != entry.kind {
                 if let staleID = idsByPath[entry.path] {
                     changes.removedIdentifiers.append(staleID)
-                    pathsByID[staleID] = nil
-                    idsByPath[entry.path] = nil
                 }
+                // The whole subtree goes, not just this identifier. A directory
+                // replaced by a file leaves its children indexed against a path
+                // that no longer exists; if a directory later reappears there,
+                // `identifier(for:)` hands back the very ids the system was
+                // told were deleted, and the stale snapshot makes the first
+                // listing of the restored directory report no changes at all.
+                forgetLocked(entry.path)
                 _ = identifierLocked(for: entry.path)
                 changes.added.append(entry)
             } else if was != Snapshot(entry) {

@@ -54,7 +54,11 @@ public final class TailscaleNode: @unchecked Sendable {
         self.role = role
     }
 
-    enum NodeError: LocalizedError {
+    /// `UserActionRequiredError` because neither case clears itself: the node
+    /// needs a person to authorize the device, or a problem fixed in the app.
+    /// Without it the File Provider extension retried the dial forever instead
+    /// of showing the user somewhere to go.
+    enum NodeError: LocalizedError, UserActionRequiredError {
         case tailscale(String)
         case needsAuthorization(URL)
 
