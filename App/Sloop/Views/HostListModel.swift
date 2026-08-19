@@ -215,9 +215,11 @@ final class HostListModel: ObservableObject {
                                onConnectCommand: host.trimmedOnConnectCommand,
                                hostID: host.id,
                                suggestsCommands: host.suggestions) {
-            // Mosh needs UDP, which no tunnel method carries — tunneled hosts
-            // are SSH-only regardless of the saved toggle.
-            guard host.useMosh, host.connectionMethod == .direct else { return makeSSH() }
+            // A tunneled method can't carry Mosh's UDP leg (see
+            // `ConnectionMethod.carriesMosh`), and the editor won't let the
+            // toggle be on for one — this guard covers hosts saved before that
+            // was true.
+            guard host.useMosh, host.connectionMethod.carriesMosh else { return makeSSH() }
             // The real Mosh UDP/SSP transport is only built into the Mosh variant
             // (project.mosh.yml, which defines SLOOP_MOSH); elsewhere
             // `makeMoshTransport` stays nil and the composite transport falls back

@@ -151,6 +151,14 @@ top of a working SSH terminal rather than first.
   (tailscale/tailscale#15410, `os.Executable()` failing inside the iOS sandbox)
   turned out not to bite. Its own build variant, `project.tailscale.yml`: the Go
   archive is most of 23 MB.
+- **Mosh through a tunnel** — `ConnectionMethod.carriesMosh` is false for both
+  tunnel methods, so a Cloudflare Access or Tailscale host is SSH-only and the
+  editor says so. Cloudflare can't be fixed (TCP inside a WebSocket has nowhere
+  to put a datagram), but Tailscale can: `tailscale_dial` takes a network
+  string, so the SSP leg could run over the tailnet node like the SSH leg does.
+  It needs mosh's `Connection` rewired off `sendto`/`recvfrom` onto an fd.
+  Today the answer is Direct plus the Tailscale app, which roams fine.
+
 - **Jump hosts / ProxyJump** — `SSHConfigParser` reads exactly four keys
   (`Host`, `HostName`, `Port`, `User`). Anyone whose infrastructure sits behind
   a bastion cannot connect at all, and an imported `~/.ssh/config` silently

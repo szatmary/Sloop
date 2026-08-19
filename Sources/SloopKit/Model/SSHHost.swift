@@ -31,6 +31,47 @@ public enum ConnectionMethod: String, Codable, Hashable, CaseIterable {
         case .tailscale: return "Tailscale"
         }
     }
+
+    /// Whether a Mosh session can run over this method.
+    ///
+    /// Only the direct path can. The `Dialer` seam carries the *SSH* leg, and
+    /// Mosh's SSP leg is a UDP socket `MoshTransport` opens itself, straight to
+    /// the hostname — it never passes through a dialer, so a method that works
+    /// by dialing differently does nothing for it:
+    ///
+    /// - Cloudflare Access carries TCP inside a WebSocket. There is nowhere for
+    ///   a UDP datagram to go.
+    /// - Tailscale, when Sloop is its own tailnet node, routes only what it
+    ///   dials. The SSP packets would go to a `100.64.0.0/10` address the OS
+    ///   has no route to, because the point of the embedded node is that no
+    ///   system VPN is up. It would need `tailscale_dial(…, "udp", …)` and
+    ///   mosh's `Connection` rewired off `sendto`/`recvfrom` onto that fd.
+    ///   Until then, Mosh over a tailnet means Direct with the Tailscale app
+    ///   running — which is a fine pairing, since both roam.
+    ///
+    /// Lives on the model so the host editor and the connect path can't drift
+    /// apart: they did, and the editor promised Mosh over Tailscale while the
+    /// connect path silently used SSH.
+    public var carriesMosh: Bool {
+        switch self {
+        case .direct: return true
+        case .cloudflareAccess, .tailscale: return false
+        }
+    }
+
+    /// Why Mosh is unavailable, for the host editor to show. `nil` when it is
+    /// available.
+    public var moshUnavailableReason: String? {
+        switch self {
+        case .direct:
+            return nil
+        case .cloudflareAccess:
+            return "Mosh needs UDP, which can't pass through this tunnel — SSH is used instead."
+        case .tailscale:
+            return "Mosh needs UDP, which Sloop's own tailnet node doesn't carry — SSH is used "
+                 + "instead. To use Mosh over your tailnet, choose Direct and run the Tailscale app."
+        }
+    }
 }
 
 /// A saved connection. Persisted as plain JSON via `HostStore`; the matching
@@ -42,7 +83,6 @@ public struct SSHHost: Identifiable, Codable, Hashable {
     public var port: Int
     public var username: String
     public var auth: AuthMethod
-    /// Prefer Mosh when `mosh-server` is available on the host.
     /// Whether Sloop suggests commands on this host, and records them to do
     /// so.
     ///
@@ -52,9 +92,11 @@ public struct SSHHost: Identifiable, Codable, Hashable {
     /// one machine says nothing about the others.
     public var suggestions: Bool = true
 
+    /// Prefer Mosh when `mosh-server` is available on the host — honored only
+    /// when `connectionMethod.carriesMosh`.
     public var useMosh: Bool
-    /// How to reach the host. Tunneled methods are SSH-only (no Mosh — UDP
-    /// can't traverse them).
+    /// How to reach the host. Only `.direct` carries Mosh; see
+    /// `ConnectionMethod.carriesMosh`.
     public var connectionMethod: ConnectionMethod
     /// A command typed into the shell each time this host connects, as if the
     /// user had entered it — `tmux attach || tmux new` being the case that

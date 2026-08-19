@@ -267,7 +267,7 @@ struct HostEditView: View {
 
                     HStack {
                         Toggle("Use Mosh", isOn: $host.useMosh)
-                            .disabled(host.connectionMethod == .cloudflareAccess)
+                            .disabled(!host.connectionMethod.carriesMosh)
                         Button {
                             showingMoshHelp = true
                         } label: {
@@ -276,20 +276,17 @@ struct HostEditView: View {
                         .buttonStyle(.borderless)
                         .accessibilityLabel("What is Mosh?")
                     }
-                    if host.connectionMethod == .cloudflareAccess {
-                        Text("Mosh needs UDP, which can't pass through this tunnel — SSH is used instead.")
+                    if let reason = host.connectionMethod.moshUnavailableReason {
+                        Text(reason)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
             .onChange(of: host.connectionMethod) { _, method in
-                // Only the Access tunnel rules Mosh out — it carries TCP over a
-                // WebSocket and there is nowhere for UDP to go. A tailnet is a
-                // network, so Mosh works over it exactly as it does directly,
-                // which is a good pairing: Tailscale roams between networks and
-                // so does Mosh.
-                if method == .cloudflareAccess { host.useMosh = false }
+                // Leaving the toggle on while the method can't honor it is how
+                // a host ends up quietly running SSH with "Use Mosh" checked.
+                if !method.carriesMosh { host.useMosh = false }
             }
             .navigationTitle(host.hostname.isEmpty ? "New Host" : host.alias)
             #if os(iOS)

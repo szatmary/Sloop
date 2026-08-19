@@ -106,16 +106,22 @@ Cloudflare Access hosts are SSH-only: Mosh needs UDP, which a
 TCP-over-WebSocket tunnel can't carry, so `HostEditView` disables "Use Mosh"
 for them.
 
-**Tailscale hosts are a sharper edge.** The `Dialer` seam carries the *SSH*
-leg only; Mosh's UDP leg is a socket `MoshTransport` opens itself, straight to
-the hostname the SSH connection used, bypassing the dialer entirely. So a
-tailnet host reached through Sloop's own node bootstraps fine over tsnet and
-then sends SSP packets to an address the OS can only route when the Tailscale
-*app* is up — the one thing this dialer exists to make unnecessary. Where it
-works today, that app is up (or the host is reachable directly). Routing
-Mosh's UDP through `tailscale_dial(…, "udp", …)` is possible — the C API takes
-the network string — but wants mosh's `Connection` rewired off `sendto`/
-`recvfrom` onto an fd, which is a project, not a patch.
+So are Tailscale hosts, for a reason worth stating plainly: **the `Dialer`
+seam carries the SSH leg only.** Mosh's SSP leg is a UDP socket
+`MoshTransport` opens itself, straight to the hostname, never touching a
+dialer — so a method that works by dialing differently does nothing for it.
+Over Sloop's own tailnet node the SSP packets would go to a `100.64.0.0/10`
+address the OS has no route to, precisely because no system VPN is up. Mosh
+over a tailnet therefore means Direct with the Tailscale app running, which is
+a good pairing anyway: both roam.
+
+`ConnectionMethod.carriesMosh` is the single statement of that rule, and it
+lives on the model because the two places that need it drifted apart — the
+host editor offered Mosh over Tailscale while the connect path silently ran
+SSH, so the toggle stayed on and did nothing. Making the UDP leg tunnel-aware
+(`tailscale_dial(…, "udp", …)` — the C API takes the network string) would
+mean rewiring mosh's `Connection` off `sendto`/`recvfrom` onto an fd: a
+project, not a patch.
 
 `SSHHost.connectionMethod` selects the dialer via
 [`TransportFactory`](../App/Sloop/SSH/TransportFactory.swift); `HostEditView`
