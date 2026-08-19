@@ -192,6 +192,17 @@ top of a working SSH terminal rather than first.
   `sloop import-key` CLI on the Mac (embedded in the app binary). Spec:
   `Docs/superpowers/specs/2026-08-11-key-library-design.md`.
 - `ssh-agent` / Secure Enclave keys.
+- **Persist open sessions across app exit** — the tab list (which hosts, their
+  order, the selected tab, scrollback if it's affordable) should survive the
+  app going away and be restored on next launch. The case that matters is the
+  one the user never chooses: iOS killing a backgrounded app to reclaim
+  memory. There is no notification and no chance to run cleanup at that
+  moment, so state has to already be on disk — saving in
+  `applicationWillTerminate` is exactly the hook that does not fire. Write on
+  change (debounced) and on background, not on exit. Note this is session
+  *state*, not live connections: an SSH connection cannot survive the process,
+  so restoring means re-offering the tabs and reconnecting, and Mosh is the
+  one transport that can genuinely resume rather than reconnect.
 - **`CommandRunner`** — non-interactive SSH exec (`{stdout, stderr, exitStatus}`)
   for saved one-shot commands on iOS/Mac. Also the foundation for a watch app.
 - **Apple Watch** — an ops "command runner" (not a terminal), ideally driven
