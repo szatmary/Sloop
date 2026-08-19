@@ -47,18 +47,14 @@ public final class HostStore {
     /// which case it must be moved aside before anything is written.
     private var fileUnparseable = false
 
-    /// - Parameter fileURL: override the storage location (used by tests).
-    public init(fileURL: URL? = nil) {
-        if let fileURL {
-            self.url = fileURL
-        } else {
-            let dir = (try? FileManager.default.url(for: .applicationSupportDirectory,
-                                                    in: .userDomainMask,
-                                                    appropriateFor: nil,
-                                                    create: true))
-                ?? URL(fileURLWithPath: NSTemporaryDirectory())
-            self.url = dir.appendingPathComponent("sloop-hosts.json")
-        }
+    /// - Parameter fileURL: where the host list lives. Required, not defaulted:
+    ///   the app and the File Provider extension are separate processes that
+    ///   must read the *same* file, and a default pointing at whichever
+    ///   process's private Application Support directory happened to be asked
+    ///   would leave the extension enumerating an empty host list — every
+    ///   domain reporting that its host no longer exists. See `SloopStorage`.
+    public init(fileURL: URL) {
+        self.url = fileURL
         load()
     }
 

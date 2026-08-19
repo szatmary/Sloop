@@ -1,0 +1,27 @@
+One session per *thread*, not per process: the frozen clock.
+
+timestamp.cc caches the frozen clock in `millis_cache`. Each session freezes the
+clock at the top of its own loop, so with two sessions running, each one reads
+whatever instant the other froze. mosh's RTT and RTO estimates and its timestamp
+echoes are all computed from that value, so the symptom is not a visibly wrong
+clock — it is a transport that mis-measures the network and stops retransmitting
+correctly.
+
+Found by runtime validation against a live mosh-server, not by any test: with
+one session the static is correct, and Sloop only runs two when the user opens a
+second tab.
+
+Same fix and same reasoning as 0001-thread-local-compressor.patch.
+Applies to mosh-1.4.0.
+
+--- a/src/util/timestamp.cc
++++ b/src/util/timestamp.cc
+@@ -58,7 +58,7 @@
+ #define CLOCKTYPE CLOCK_MONOTONIC
+ #endif
+ 
+-static uint64_t millis_cache = -1;
++static thread_local uint64_t millis_cache = -1;
+ 
+ uint64_t frozen_timestamp( void )
+ {

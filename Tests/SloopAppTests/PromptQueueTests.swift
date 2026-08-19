@@ -4,6 +4,7 @@
 import XCTest
 // The macOS app target is named Sloop_macOS, so its module is Sloop_macOS.
 @testable import Sloop_macOS
+@testable import SloopSSH
 
 /// `presentNext` hands each request's answer back through a closure the
 /// presenting view calls to resolve it — `Prompt.respond` in both

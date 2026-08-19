@@ -5,6 +5,7 @@ import Combine
 import XCTest
 // The macOS app target is named Sloop_macOS, so its module is Sloop_macOS.
 @testable import Sloop_macOS
+@testable import SloopSSH
 
 final class AgentSignPrompterTests: XCTestCase {
     /// The SSH thread must not proceed until the user has answered, and must

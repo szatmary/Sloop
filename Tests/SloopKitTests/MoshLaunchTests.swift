@@ -76,3 +76,51 @@ final class MoshLaunchTests: XCTestCase {
         wait(for: [exp], timeout: 1)
     }
 }
+
+extension MoshLaunchTests {
+    /// A Mosh session's only SSH connection is the one that starts
+    /// mosh-server, and it closes before the terminal opens — so the host's
+    /// shell history is read on that same command or not at all.
+    func testBootstrapCanCarryTheHistoryReadWithIt() {
+        let command = MoshServer.bootstrapCommand(includingShellHistory: true)
+        XCTAssertTrue(command.hasPrefix(MoshServer.bootstrapCommand),
+                      "the server must still be started first")
+        XCTAssertTrue(command.contains(".zsh_history"))
+    }
+
+    /// Nothing is read for a host that doesn't want suggestions.
+    func testBootstrapAloneWhenNoHistoryIsWanted() {
+        XCTAssertEqual(MoshServer.bootstrapCommand(includingShellHistory: false),
+                       MoshServer.bootstrapCommand)
+    }
+
+    func testTheServerBannerAndTheHistoryAreSeparated() {
+        let output = """
+        MOSH CONNECT 60001 dGhpcyBpcyBhIGtleQ==
+        \(MoshServer.historyMarker)
+        git status
+        make -j8
+        """
+        let (banner, history) = MoshServer.separateShellHistory(from: output)
+        XCTAssertTrue(banner.contains("MOSH CONNECT 60001"))
+        XCTAssertFalse(banner.contains("git status"), "history must not reach the banner parser")
+        XCTAssertEqual(ShellHistoryImporter.commands(fromHistoryOutput: history ?? ""),
+                       ["git status", "make -j8"])
+    }
+
+    /// A host with no history files prints nothing after the marker, which is
+    /// not the same as a failure.
+    func testNoHistoryIsReportedAsNone() {
+        let (banner, history) = MoshServer.separateShellHistory(
+            from: "MOSH CONNECT 60001 key==\n\(MoshServer.historyMarker)\n\n")
+        XCTAssertTrue(banner.contains("MOSH CONNECT"))
+        XCTAssertNil(history)
+    }
+
+    /// An older server, or a host where the marker never printed, still boots.
+    func testOutputWithoutAMarkerIsAllBanner() {
+        let (banner, history) = MoshServer.separateShellHistory(from: "MOSH CONNECT 60001 key==")
+        XCTAssertEqual(banner, "MOSH CONNECT 60001 key==")
+        XCTAssertNil(history)
+    }
+}

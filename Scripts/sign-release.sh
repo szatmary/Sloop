@@ -87,7 +87,8 @@ codesign --verify --strict --verbose=2 "$APP"
 # entitlement expands to <OTHER>.org.szatmary.sloop.shared while
 # KeychainKeyStore.sharedAccessGroup is hardcoded to KR5WZAG3UE — every
 # key-library call then fails at runtime while the script reports success.
-for group in "$TEAM_ID.org.szatmary.sloop" "$TEAM_ID.org.szatmary.sloop.shared"; do
+for group in "$TEAM_ID.org.szatmary.sloop" "$TEAM_ID.org.szatmary.sloop.shared" \
+             "$TEAM_ID.org.szatmary.sloop.fileprovider"; do
   if ! codesign -d --entitlements - "$APP" 2>/dev/null | grep -q "$group"; then
     echo "error: signed app is missing the '$group' keychain-access-group." >&2
     echo "       The key library will fail at runtime. Check TEAM_ID and the" >&2
@@ -95,6 +96,28 @@ for group in "$TEAM_ID.org.szatmary.sloop" "$TEAM_ID.org.szatmary.sloop.shared";
     exit 1
   fi
 done
+
+# The File Provider extension is where every per-host credential and Cloudflare
+# Access token is now read from, in its own process with its own entitlements.
+# The loop above cannot see it — `codesign -d` reports the app bundle's own
+# signature — so an appex missing these groups authenticates nothing while the
+# app works perfectly and this script reports success.
+APPEX="$APP/Contents/PlugIns/SloopFiles.appex"
+if [ -d "$APPEX" ]; then
+  for group in "$TEAM_ID.org.szatmary.sloop.fileprovider" "$TEAM_ID.org.szatmary.sloop.shared"; do
+    if ! codesign -d --entitlements - "$APPEX" 2>/dev/null | grep -q "$group"; then
+      echo "error: SloopFiles.appex is missing the '$group' keychain-access-group." >&2
+      echo "       Files.app locations will fail to authenticate. Check TEAM_ID." >&2
+      exit 1
+    fi
+  done
+  if ! codesign -d --entitlements - "$APPEX" 2>/dev/null | grep -q "group.org.szatmary.sloop"; then
+    echo "error: SloopFiles.appex is missing the App Group." >&2
+    echo "       It cannot read the host list, so every location reports its" >&2
+    echo "       host as gone." >&2
+    exit 1
+  fi
+fi
 
 # Notarization requires the hardened runtime, and without it any process
 # running as the same user can attach to Sloop and read private keys,
@@ -105,6 +128,20 @@ if ! codesign -d --verbose=2 "$APP" 2>&1 | grep -q "flags=.*runtime"; then
   echo "       Check ENABLE_HARDENED_RUNTIME in project.yml." >&2
   exit 1
 fi
+
+# Every nested executable, not just the app. Notarization rejects the bundle if
+# any of them lacks the hardened runtime, and the appex is signed by its own
+# target — it inherits nothing from the app, so it can be missing it while the
+# check above passes.
+for nested in "$APPEX" "$APP/Contents/Frameworks/SloopSSH.framework"; do
+  [ -e "$nested" ] || continue
+  if ! codesign -d --verbose=2 "$nested" 2>&1 | grep -q "flags=.*runtime"; then
+    echo "error: $(basename "$nested") does not have the hardened runtime." >&2
+    echo "       Notarization will reject the bundle. Check" >&2
+    echo "       ENABLE_HARDENED_RUNTIME for that target." >&2
+    exit 1
+  fi
+done
 
 if [ -n "${SKIP_NOTARIZE:-}" ]; then
   echo "==> Skipping notarization (SKIP_NOTARIZE set). App: $APP"

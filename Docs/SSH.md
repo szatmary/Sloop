@@ -54,6 +54,21 @@ The build script writes a `module.modulemap` into each slice's headers, so the
 xcframework *is* the `CSSH` module — linking it is all that's needed to
 `import CSSH`, no extra include paths.
 
+That modulemap must name **both** `libssh2.h` and `libssh2_sftp.h`. `libssh2.h`
+does not include the SFTP header, so a modulemap listing only the first leaves
+every `libssh2_sftp_*` function and `LIBSSH2_SFTP_ATTRIBUTES` invisible to
+Swift — and `LibSSH2SFTPClient`, which the whole Files.app integration rests
+on, will not compile. An xcframework built before 2026-08-18 (or downloaded
+from a CI run older than that) has the one-header version.
+
+The map itself is checked in at
+[`Scripts/deps/libssh2/files/module.modulemap`](../Scripts/deps/libssh2/files/module.modulemap),
+and the build script copies it into each slice. To repair a stale xcframework
+without a full rebuild, copy that file over
+`Vendor/libssh2.xcframework/*/Headers/module.modulemap` — all three slices.
+See [`Scripts/deps/README.md`](../Scripts/deps/README.md) for why it lives in
+the repository rather than in the script that emits it.
+
 Wiring is captured in `project.ssh.yml`, which layers the framework onto the base
 project. With `Vendor/libssh2.xcframework` present:
 

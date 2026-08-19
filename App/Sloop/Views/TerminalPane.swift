@@ -29,6 +29,13 @@ struct TerminalPane: View {
             ConnectionStatusBar(state: controller.state) { controller.reconnect() }
             SwiftTermView(controller: controller)
             #if os(iOS)
+            // Above whichever keyboard is in use, and above the smart-keys bar
+            // when there is one — nearest the line being typed, and it takes no
+            // height at all when there's nothing to offer, which is most of the
+            // time.
+            SuggestionBar(suggestions: controller.suggestions,
+                          typed: controller.typedLine,
+                          accept: { controller.acceptSuggestion($0) })
             if chrome == .fullBar {
                 KeyboardAccessoryBar(send: { controller.send($0) },
                                      applicationCursor: { controller.applicationCursor },
@@ -60,23 +67,6 @@ struct TerminalPane: View {
         } message: {
             Text("The connection will be closed.")
         }
-        #if os(iOS)
-        // The compact keyboard's own close-tab key has no SwiftUI state of
-        // its own to raise this dialog from — see
-        // `TerminalController.onCloseTabRequested`'s doc comment. Wired once
-        // per pane rather than on every body evaluation.
-        //
-        // Capture the projected binding, `$confirmingClose`, not `self`.
-        // Writing `confirmingClose = true` directly would implicitly capture
-        // `self` (this `TerminalPane` value, including its
-        // `@ObservedObject var controller`), and since this closure is
-        // stored on `controller.onCloseTabRequested`, that closes a retain
-        // cycle: controller → onCloseTabRequested → TerminalPane copy →
-        // ObservedObject → controller. `State`'s projected value closes over
-        // the state's storage location instead, so the closure holds no
-        // reference to the controller (or the view) at all.
-        .onAppear { controller.onCloseTabRequested = { [$confirmingClose] in $confirmingClose.wrappedValue = true } }
-        #endif
     }
 }
 

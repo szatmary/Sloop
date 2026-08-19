@@ -1,0 +1,25 @@
+// The CSSH module: what `import CSSH` resolves to.
+//
+// Copied into every slice's Headers/ by Scripts/build-libssh2.sh, so the
+// xcframework *is* the module and linking it is all that's needed — no extra
+// include paths.
+//
+// Both headers are required. libssh2.h does not include libssh2_sftp.h, so a
+// module map naming only the first leaves every libssh2_sftp_* function and
+// LIBSSH2_SFTP_ATTRIBUTES invisible to Swift, and LibSSH2SFTPClient — which the
+// whole Files.app integration rests on — will not compile. That failure reads
+// like a missing dependency rather than a missing header, which is why this
+// file exists in the repository instead of in a heredoc inside the build
+// script: an xcframework built before 2026-08-18 has the one-header version,
+// and there was previously nothing checked in to compare it against.
+module CSSH {
+    header "libssh2.h"
+    header "libssh2_sftp.h"
+    // Not upstream's: Sloop's own declarations for libssh2 functions that are
+    // linkable but unpublished (see the header's comment for why signing needs
+    // them). It lives in the module rather than behind a bridging header
+    // because a framework target cannot have one, and SloopSSH — where the
+    // signing code lives — is a framework.
+    header "libssh2-internal.h"
+    export *
+}

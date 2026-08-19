@@ -25,12 +25,15 @@
 # Iterate on a single slice with:  SLICES="macos-arm64" Scripts/build-libssh2.sh
 set -euo pipefail
 
+# Shared dependency plumbing: the pinned ios-cmake tag, apply_patches, install_file.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/vendor.sh"
+
 OPENSSL_TAG="openssl-3.5.1"
 LIBSSH2_TAG="libssh2-1.11.1"
-# Pinned: ios.toolchain.cmake is executed CMake code that picks the compiler,
-# sysroot and deployment flags for the crypto we ship. Tracking its default
-# branch would let an upstream commit silently change the shipped binary.
-IOS_CMAKE_TAG="4.6.0"
+# IOS_CMAKE_TAG is pinned in Scripts/lib/vendor.sh, shared with the other
+# scripts that clone ios-cmake — it is executed CMake code that picks the
+# compiler, sysroot and deployment flags for everything we ship, and it used to
+# be pinned here and nowhere else.
 IOS_TARGET="17.0"
 MACOS_TARGET="14.0"
 
@@ -65,8 +68,6 @@ build_openssl () {
   cp -R openssl "openssl-$name"
   (
     cd "openssl-$name"
-    CC="$cc" \
-    CFLAGS="-arch arm64 -isysroot $sysroot $minflag" \
     # --openssldir must NOT point into the build tree. OpenSSL bakes it into
     # libcrypto as OPENSSLDIR and auto-loads $OPENSSLDIR/openssl.cnf on first
     # use, so a build-tree path both leaks the builder's home directory into
@@ -75,10 +76,36 @@ build_openssl () {
     # arbitrary provider module. libssh2 needs none of that machinery, so it
     # is disabled outright and the directory is pointed somewhere that cannot
     # exist.
+    #
+    # This comment lives ABOVE the command, not inside it. It sat between the
+    # CFLAGS line and ./Configure, after a trailing backslash — which continues
+    # the line into `# ...`, ending it. The result was two bare assignments and
+    # no command, so Configure ran with neither CC nor CFLAGS: no -isysroot, no
+    # -arch, no minimum-version flag. iOS slices failed outright ("'string.h'
+    # file not found"), and the macOS slice quietly built against the host SDK
+    # with the host's deployment target instead of 14.0.
+    CC="$cc" \
+    CFLAGS="-arch arm64 -isysroot $sysroot $minflag" \
     ./Configure "$target" \
       no-shared no-tests no-docs no-legacy no-engine \
       no-autoload-config no-module no-dso \
       --prefix="$prefix" --openssldir=/nonexistent
+
+    # Prove the flags reached Configure rather than trusting that they did.
+    # The failure above was silent on macOS for exactly as long as the defaults
+    # happened to work, which is the kind of thing that ships.
+    grep -q -- "-isysroot $sysroot" configdata.pm || {
+      echo "ERROR: OpenSSL was configured without -isysroot for $name." >&2
+      echo "       CC/CFLAGS did not reach ./Configure — check for a comment or" >&2
+      echo "       blank line interrupting the backslash continuation above." >&2
+      exit 1
+    }
+    grep -q -- "$minflag" configdata.pm || {
+      echo "ERROR: OpenSSL was configured without $minflag for $name;" >&2
+      echo "       the slice would carry the host's deployment target." >&2
+      exit 1
+    }
+
     make -j"$(sysctl -n hw.ncpu)" build_libs
     make install_dev
   )
@@ -113,13 +140,15 @@ build_libssh2 () {
      "$prefix/include/libssh2_sftp.h" "$OUT/$name/include/"
 
   # Ship a module map inside the framework headers so Swift can `import CSSH`
-  # once the xcframework is linked — no separate include path needed.
-  cat > "$OUT/$name/include/module.modulemap" <<'MODMAP'
-module CSSH {
-    header "libssh2.h"
-    export *
-}
-MODMAP
+  # once the xcframework is linked — no separate include path needed. The map
+  # is a checked-in file (Scripts/deps/libssh2/files/) rather than a heredoc,
+  # because it is the only copy of something Sloop authored and the built
+  # xcframework it lands in is gitignored.
+  install_file libssh2 module.modulemap "$OUT/$name/include/module.modulemap"
+  # Sloop's own header for libssh2's unpublished signing entry points, shipped
+  # inside the module for the same reason the map is: a framework target has no
+  # bridging header, so this is the only way SloopSSH's Swift can see them.
+  install_file libssh2 libssh2-internal.h "$OUT/$name/include/libssh2-internal.h"
 }
 
 build_slice () {

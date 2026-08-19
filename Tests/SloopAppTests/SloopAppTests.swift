@@ -6,6 +6,9 @@ import SloopKit
 import SwiftTerm
 // The macOS app target is named Sloop_macOS, so its module is Sloop_macOS.
 @testable import Sloop_macOS
+// The transports, dialers and keychain stores live in the framework the app
+// shares with the File Provider extension, not in the app target.
+@testable import SloopSSH
 
 /// Unit tests that run against the built macOS app (`@testable import Sloop`),
 /// exercising app-layer code that the pure-Foundation SloopKit tests can't
@@ -272,25 +275,29 @@ final class SloopAppTests: XCTestCase {
         XCTAssertTrue(text.contains("example.com"), "should name the hostname: \(text)")
     }
 
-    /// `CommandRunnerFactory` must refuse to build a directly-dialing runner
-    /// for a tunneled host on its own terms — not merely because its one
-    /// caller (the Mosh probe in `HostListModel.connect`) happens to restrict
-    /// itself to `.direct` hosts today. If that caller-side guard is ever
-    /// relaxed, this is what stops SSH credentials from going straight to the
-    /// Access hostname's public port 22.
+    /// A tunneled host's runner must use the tunnel, never a direct dial to
+    /// its hostname — that would hand the credential to whatever answers on
+    /// the public port 22. It must also not simply *refuse*: refusing is what
+    /// this did for every non-direct method, which silently disabled the Mosh
+    /// probe on tailnet hosts and turned every Mosh session over the tailnet
+    /// into an SSH one. Both halves are the same rule, and it now lives in
+    /// `TransportFactory.dialer`.
     @MainActor
-    func testCommandRunnerFactoryRefusesTunneledHosts() {
-        let host = SSHHost(alias: "t", hostname: "example.com", username: "u",
-                           connectionMethod: .cloudflareAccess)
+    func testCommandRunnerUsesTheTunnelItsHostNeeds() {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("sloop-app-known-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: tmp) }
+        let knownHosts = KnownHostsStore(fileURL: tmp)
 
-        let runner = CommandRunnerFactory.ssh(host: host,
+        // Cloudflare Access with no stored token: unavailable, and the reason
+        // says what to do about it rather than "not implemented".
+        let access = SSHHost(alias: "t", hostname: "example.com", username: "u",
+                             connectionMethod: .cloudflareAccess)
+        let runner = CommandRunnerFactory.ssh(host: access,
                                               credential: Credential(),
-                                              knownHosts: KnownHostsStore(fileURL: tmp),
-                                              hostKeyVerifier: AutoAcceptHostKeyVerifier())
-
+                                              knownHosts: knownHosts,
+                                              hostKeyVerifier: AutoAcceptHostKeyVerifier(),
+                                              accessTokens: InMemoryAccessTokenStore())
         let done = expectation(description: "run completed")
         runner.run("echo hi") { result in
             switch result {
@@ -300,11 +307,24 @@ final class SloopAppTests: XCTestCase {
                 guard case SSHError.notImplemented(let why) = error else {
                     return XCTFail("expected notImplemented, got \(error)")
                 }
-                XCTAssertTrue(why.contains("tunnel"), why)
+                // The dialer's own words about this host, not a blanket refusal.
+                XCTAssertTrue(why.lowercased().contains("access"), why)
             }
             done.fulfill()
         }
         wait(for: [done], timeout: 1)
+
+        // A tailnet host must get a real runner: the Mosh probe rides it, and
+        // a refusal here is invisible — the session just quietly becomes SSH.
+        let tailnet = SSHHost(alias: "n", hostname: "box.tail.ts.net", username: "u",
+                              connectionMethod: .tailscale)
+        let tailnetRunner = CommandRunnerFactory.ssh(host: tailnet,
+                                                     credential: Credential(),
+                                                     knownHosts: knownHosts,
+                                                     hostKeyVerifier: AutoAcceptHostKeyVerifier(),
+                                                     accessTokens: InMemoryAccessTokenStore())
+        XCTAssertFalse(tailnetRunner is UnavailableCommandRunner,
+                       "a tailnet host's Mosh probe needs a runner, not a refusal")
     }
 
     // MARK: - TokenClearingDialer (stranded-host fix)

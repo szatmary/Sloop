@@ -4,11 +4,11 @@ A free, native terminal for Apple platforms — iPhone, iPad, Mac, and tvOS.
 SSH and Mosh, a real terminal emulator, and proper keyboard support — a
 first-class mobile shell, native and given away.
 
-> **Status: working, unreleased.** SSH (libssh2 + OpenSSL 3) and Mosh both
-> connect on device, with a shared key library synced through iCloud Keychain
-> and host-key pinning. Cloudflare Access tunnels are implemented and unit
-> tested but not yet exercised against a live Access application. Not signed
-> for distribution. See [`Docs/ROADMAP.md`](Docs/ROADMAP.md).
+> **Status: working, unreleased.** SSH (libssh2 + OpenSSL 3), Mosh, Cloudflare
+> Access tunnels and Tailscale all connect from a device, with a shared key
+> library synced through iCloud Keychain and host-key pinning. RSA, Ed25519,
+> ECDSA and passphrase-protected keys all authenticate. Not signed for
+> distribution. See [`Docs/ROADMAP.md`](Docs/ROADMAP.md).
 
 ## Architecture
 
@@ -25,8 +25,18 @@ know whether it's talking to an SSH channel or a Mosh session.
 
 - **Terminal renderer:** [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)
   (MIT), xterm-compatible, native.
+- **Keyboard:** an optional compact keyboard in ANSI layout — tab left of Q,
+  control at caps lock, an inverted-T arrow cluster and a number pad — because
+  the software keyboard is the largest consumer of a phone's screen and the
+  system one has no escape, control or arrows.
+- **Suggestions:** as you type, the word that usually comes next, taken from the
+  commands you've run on that host and from the host's own shell history. Per
+  host, on the device, never sent anywhere.
 - **SSH:** libssh2 over OpenSSL 3, vendored as an `.xcframework` — see [`Docs/SSH.md`](Docs/SSH.md).
 - **Mosh:** cross-compiled client — see [`Docs/MOSH.md`](Docs/MOSH.md).
+- **Tunnels:** Cloudflare Access over an authenticated WebSocket, and Tailscale
+  via an embedded `tsnet` node — Sloop joins the tailnet itself, so the
+  Tailscale app needn't be running and needn't hold the one VPN slot iOS has.
 
 ## Getting started (macOS)
 

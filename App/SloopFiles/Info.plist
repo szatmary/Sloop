@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<!-- Must be present and must be prefixed by the host app's identifier, or
+	     the embedded-binary validation fails the app build. A generated
+	     Info.plist would supply this; a hand-written one has to. -->
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Sloop</string>
+	<key>CFBundlePackageType</key>
+	<string>XPC!</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSExtension</key>
+	<dict>
+		<!-- The non-UI file provider. Sloop publishes no document-picker UI of
+		     its own: Files.app's browser is the entire interface, which is the
+		     point of building this rather than a transfer sheet in the app. -->
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.fileprovider-nonui</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).FileProviderExtension</string>
+		<!-- One SFTP session, driven from one serial queue, because a libssh2
+		     session cannot be used from two threads at once. The system
+		     dispatches fetches and uploads concurrently unless told otherwise,
+		     and those extra calls would queue behind the head reporting no
+		     progress until the system cancelled them. Declaring a depth of 1
+		     makes the concurrency the code actually supports the concurrency the
+		     system uses. -->
+		<key>NSExtensionFileProviderDownloadPipelineDepth</key>
+		<integer>1</integer>
+		<key>NSExtensionFileProviderUploadPipelineDepth</key>
+		<integer>1</integer>
+		<key>NSExtensionFileProviderMetadataOnlyUploadPipelineDepth</key>
+		<integer>1</integer>
+		<key>NSExtensionFileProviderDocumentGroup</key>
+		<string>group.org.szatmary.sloop</string>
+	</dict>
+</dict>
+</plist>

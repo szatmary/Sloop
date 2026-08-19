@@ -15,6 +15,23 @@ public struct KeyModifiers: OptionSet, Hashable, Sendable {
     public static let shift = KeyModifiers(rawValue: 1 << 2)
 }
 
+/// Which function key a character stands for while the fn layer is armed.
+///
+/// The top letter row, because that is where the F-row is: on a full keyboard
+/// F1 sits directly above `1`, which sits directly above `q` — so `q` through
+/// `p` give F1 through F10, and `[` and `]` give F11 and F12, each in the same
+/// column as the key it stands for. The digits were the first attempt and are
+/// wrong for this keyboard: they live on the number pad, nowhere near the row
+/// anyone looks at when they press fn.
+///
+/// Here rather than in the keyboard view so the mapping is testable without a
+/// device, and so there is one answer to "what is fn+i".
+public func functionKeyNumber(forCharacter character: Character) -> Int? {
+    let topRow = Array("qwertyuiop[]")
+    guard let index = topRow.firstIndex(of: Character(character.lowercased())) else { return nil }
+    return index + 1
+}
+
 /// A non-character key on a terminal keyboard.
 public enum TerminalKey: Equatable, Sendable {
     case escape, tab, `return`, backspace, delete
@@ -96,10 +113,11 @@ public enum KeyEncoder {
     /// a terminal receives `A`, never shift+`a`, so `.shift` must never reach
     /// that overload for a character.
     ///
-    /// Returns `nil` for `.modifier` and `.command`: neither emits anything
-    /// to the remote end. Both are the software keyboard's own affordances —
-    /// arming a sticky modifier, dismissing the keyboard — handled by the
-    /// caller, not here.
+    /// Returns `nil` for `.modifier`, `.command` and `.blank`: none emits
+    /// anything to the remote end. The first two are the software keyboard's
+    /// own affordances — arming a sticky modifier, dismissing the keyboard —
+    /// handled by the caller, and the third is a hole in the grid that holds
+    /// the arrow cluster's shape.
     public static func bytes(for value: KeyCap.Value,
                              armedModifiers: KeyModifiers,
                              applicationCursor: Bool) -> [UInt8]? {
@@ -111,7 +129,11 @@ public enum KeyEncoder {
             return bytes(for: resolved, modifiers: armedModifiers.subtracting(.shift))
         case .key(let terminalKey):
             return bytes(for: terminalKey, modifiers: armedModifiers, applicationCursor: applicationCursor)
-        case .modifier, .command:
+        case .chord(let modifiers, let character):
+            // The chord's own modifiers, plus anything armed — ⌃C with shift
+            // armed is still a legitimate thing to type.
+            return bytes(for: character, modifiers: modifiers.union(armedModifiers))
+        case .modifier, .command, .blank, .functionLayer:
             return nil
         }
     }

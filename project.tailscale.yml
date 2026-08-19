@@ -15,13 +15,67 @@ include:
   - project.mosh.yml
 
 targets:
+  # The framework is where TailscaleNode and TailscaleDialer live, so it needs
+  # the library and the flag as much as the app does — without them
+  # `TransportFactory` and `SFTPClientFactory` compile their "this build can't
+  # join a tailnet" branches and tailnet hosts are unreachable everywhere.
+  SloopSSH_iOS:
+    dependencies:
+      - framework: Vendor/libtailscale.xcframework
+        embed: false
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_TAILSCALE
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CTailscale/$(PLATFORM_NAME)
+        OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation
+  SloopSSH_macOS:
+    dependencies:
+      - framework: Vendor/libtailscale.xcframework
+        embed: false
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_TAILSCALE
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CTailscale/$(PLATFORM_NAME)
+        OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation
+
+  # The extension runs its own tsnet node — a second device on the tailnet, with
+  # its own state directory and its own one-time authorization. It cannot share
+  # the app's: two processes driving one node key is a device the control plane
+  # sees flapping between endpoints.
+  #
+  # ⚠️ UNMEASURED. A File Provider extension runs under a hard memory cap and
+  # this adds a ~23 MB Go runtime to it. Whether that survives jetsam during a
+  # large download is the open question this variant exists to answer — see
+  # Docs/superpowers/specs/2026-08-18-sftp-file-provider-design.md. If it does
+  # not, drop these two targets and tailnet hosts fall back to the
+  # "can't join a tailnet" error; nothing else in the design changes.
+  SloopFiles_iOS:
+    dependencies:
+      - framework: Vendor/libtailscale.xcframework
+        embed: false
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_TAILSCALE
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CTailscale/$(PLATFORM_NAME)
+        OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation
+  SloopFiles_macOS:
+    dependencies:
+      - framework: Vendor/libtailscale.xcframework
+        embed: false
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_TAILSCALE
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CTailscale/$(PLATFORM_NAME)
+        OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation
+
   Sloop_iOS:
     dependencies:
       - framework: Vendor/libtailscale.xcframework
         embed: false
     settings:
       base:
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_MOSH SLOOP_TAILSCALE
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_MOSH SLOOP_TAILSCALE
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CTailscale/$(PLATFORM_NAME)
         # tsnet's Go runtime pulls in the resolver and the Security framework
         # for the system trust store.
         OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation
@@ -31,5 +85,15 @@ targets:
         embed: false
     settings:
       base:
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: SLOOP_MOSH SLOOP_TAILSCALE
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_MOSH SLOOP_TAILSCALE
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CTailscale/$(PLATFORM_NAME)
         OTHER_LDFLAGS: -lz -lresolv -framework Security -framework CoreFoundation
+
+  # The test bundle links SloopSSH, which imports CTailscale in this variant —
+  # so it needs the same include path and conditions the framework builds with,
+  # or the module resolves for the framework and not for the tests that link it.
+  SloopTests:
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SLOOP_MOSH SLOOP_TAILSCALE
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CTailscale/$(PLATFORM_NAME)

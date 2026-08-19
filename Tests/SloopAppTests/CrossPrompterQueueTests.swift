@@ -5,6 +5,7 @@ import Combine
 import XCTest
 // The macOS app target is named Sloop_macOS, so its module is Sloop_macOS.
 @testable import Sloop_macOS
+@testable import SloopSSH
 
 /// `PromptQueue` serializes concurrent requests. `HostListView` attaches two
 /// independent `.sheet(item:)` modifiers to the same view — one for

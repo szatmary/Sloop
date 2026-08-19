@@ -25,7 +25,8 @@ public struct TerminalAppearance: Codable, Equatable, Sendable {
     /// Allowed font sizes, in points. Values are clamped into this range.
     public static let fontSizeRange: ClosedRange<Double> = 8...32
 
-    public static let `default` = TerminalAppearance(fontSize: 13, theme: .system, cursor: .block, keyboard: .standard)
+    public static let `default` = TerminalAppearance(fontSize: 13, theme: .system, cursor: .block,
+                                                     keyboard: .standard)
 
     /// Which colors the terminal draws with.
     public enum Theme: String, Codable, CaseIterable, Sendable {

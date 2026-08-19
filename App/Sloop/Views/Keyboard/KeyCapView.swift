@@ -52,6 +52,55 @@ final class KeyCapView: UIControl {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// Whether shift is armed, and whether the function layer is. Both change
+    /// what a tap on this key produces, so both change what it says.
+    private var shiftActive = false
+    private var functionLayerActive = false
+
+    /// Redraw for shift: the character a tap will actually produce goes on the
+    /// face, and the other one drops to the small legend above it.
+    func setShifted(_ isShifted: Bool) {
+        guard shiftActive != isShifted else { return }
+        shiftActive = isShifted
+        refreshLabels()
+    }
+
+    /// Redraw for the function layer: a key that fn turns into F1–F12 says so
+    /// while it's armed. Arming a layer that changes nothing on screen is the
+    /// same bug as arming shift and leaving `,` on a key about to send `<`.
+    func setFunctionLayer(_ isActive: Bool) {
+        guard functionLayerActive != isActive else { return }
+        functionLayerActive = isActive
+        refreshLabels()
+    }
+
+    private func refreshLabels() {
+        guard case .character(let character) = cap.primary, cap.secondary == nil else { return }
+
+        if functionLayerActive, let number = functionKeyNumber(forCharacter: character) {
+            primaryLabel.text = "F\(number)"
+            // One size across the whole F-row: sizing by label length made F12
+            // smaller than F1, so pressing fn turned a straight row of keys
+            // into a ragged one.
+            primaryLabel.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+            secondaryLabel.text = nil
+            return
+        }
+
+        let shifted = KeyboardLayout.shifted(character)
+        guard shifted != character else {
+            if character.isLetter {
+                primaryLabel.text = shiftActive
+                    ? String(character).uppercased()
+                    : String(character)
+            }
+            return
+        }
+        primaryLabel.text = String(shiftActive ? shifted : character)
+        primaryLabel.font = Self.font(forLabel: primaryLabel.text ?? "")
+        secondaryLabel.text = String(shiftActive ? character : shifted)
+    }
+
     /// Highlight a sticky modifier that is currently armed.
     func setArmed(_ isArmed: Bool) {
         backgroundColor = isArmed ? .tintColor : .secondarySystemFill
@@ -61,12 +110,48 @@ final class KeyCapView: UIControl {
     // MARK: Appearance
 
     private func buildUI() {
+        // A blank holds a slot in the grid so the arrow cluster keeps its
+        // shape; it is not a key. No fill, no label, and no touches — a
+        // transparent target that swallowed taps beside the arrows would be
+        // worse than no key at all.
+        if case .blank = cap.primary {
+            isUserInteractionEnabled = false
+            isAccessibilityElement = false
+            return
+        }
         backgroundColor = .secondarySystemFill
         layer.cornerRadius = 5
+        // The reverse-L return key is two caps drawn touching; rounding the
+        // corners where they meet would draw a seam through the middle of it.
+        switch cap.join {
+        case .none:  break
+        case .below: layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        case .above: layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        }
         isMultipleTouchEnabled = false
 
-        primaryLabel.text = Self.label(for: cap.primary)
-        primaryLabel.font = .monospacedSystemFont(ofSize: 17, weight: .regular)
+        // Keys that are an icon rather than a word get one. "⌨︎↓" was two
+        // characters pretending to be a symbol, and rendered like it.
+        if let symbol = Self.symbolName(for: cap.primary) {
+            let image = UIImageView(image: UIImage(systemName: symbol))
+            image.tintColor = .label
+            image.contentMode = .scaleAspectFit
+            image.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(image)
+            NSLayoutConstraint.activate([
+                image.centerXAnchor.constraint(equalTo: centerXAnchor),
+                image.centerYAnchor.constraint(equalTo: centerYAnchor),
+                image.widthAnchor.constraint(equalTo: widthAnchor, multiplier: 0.5),
+                image.heightAnchor.constraint(equalTo: heightAnchor, multiplier: 0.5),
+            ])
+            return
+        }
+
+        // The upper half of the reverse-L return key draws no glyph: it is one
+        // key, and one key has one label. The wider half below carries it,
+        // which is where a keyboard prints it.
+        primaryLabel.text = cap.join == .below ? "" : Self.label(for: cap.primary)
+        primaryLabel.font = Self.font(forLabel: primaryLabel.text ?? "")
         primaryLabel.textAlignment = .center
         primaryLabel.textColor = .label
         primaryLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -77,10 +162,23 @@ final class KeyCapView: UIControl {
             primaryLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
 
-        guard let secondary = cap.secondary else { return }
-        // Shown small and high: it advertises the drag target, so a symbol
-        // behind a gesture is still discoverable rather than folklore.
-        secondaryLabel.text = Self.label(for: secondary)
+        // The small legend above the character, exactly as a physical keycap
+        // prints it: the drag target where a layout has one, otherwise what
+        // shift produces. Without it this keyboard looks like it has no `_`,
+        // `+`, `{` or `}` at all — they are on `-`, `=`, `[` and `]`, and a key
+        // that doesn't say so is a key nobody will find.
+        let legend: String?
+        if let secondary = cap.secondary {
+            legend = Self.label(for: secondary)
+        } else if case .character(let character) = cap.primary,
+                  case let shifted = KeyboardLayout.shifted(character),
+                  shifted != character {
+            legend = String(shifted)
+        } else {
+            legend = nil
+        }
+        guard let legend else { return }
+        secondaryLabel.text = legend
         secondaryLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         secondaryLabel.textColor = .secondaryLabel
         secondaryLabel.textAlignment = .center
@@ -93,16 +191,45 @@ final class KeyCapView: UIControl {
         ])
     }
 
+    /// Key faces are sized to what they carry: a letter gets the full 17pt, a
+    /// word like "home" or a chord like "⌃B" is set smaller so it fits inside
+    /// the cap instead of being clipped by it.
+    private static func font(forLabel label: String) -> UIFont {
+        switch label.count {
+        case 0...2: return .monospacedSystemFont(ofSize: 17, weight: .regular)
+        case 3:     return .monospacedSystemFont(ofSize: 13, weight: .regular)
+        default:    return .monospacedSystemFont(ofSize: 11, weight: .regular)
+        }
+    }
+
+    /// The SF Symbol a key draws instead of text, if it has one.
+    private static func symbolName(for value: KeyCap.Value) -> String? {
+        guard case .command(let command) = value else { return nil }
+        switch command {
+        case .dismissKeyboard: return "keyboard.chevron.compact.down"
+        case .paste, .copy: return nil
+        }
+    }
+
     private static func label(for value: KeyCap.Value) -> String {
         switch value {
         case .character(let c):        return c == " " ? "space" : String(c)
         case .key(let key):            return label(for: key)
         case .modifier(let modifiers): return label(for: modifiers)
+        case .chord(let modifiers, let character):
+            // Lower case: "⌃C" reads as control-shift-c, which is a different
+            // key sequence and a different thing to send.
+            return label(for: modifiers) + String(character).lowercased()
+        case .functionLayer:
+            return "fn"
         case .command(let command):
             switch command {
-            case .dismissKeyboard: return "⌨︎↓"
-            case .closeTab:        return "✕"
+            case .dismissKeyboard:   return "⌨︎↓"
+            case .paste:             return "paste"
+            case .copy:              return "copy"
             }
+        case .blank:
+            return ""
         }
     }
 
@@ -117,10 +244,14 @@ final class KeyCapView: UIControl {
         case .down:        return "↓"
         case .left:        return "←"
         case .right:       return "→"
+        // Words, not the ↖ ⇞ glyphs a Mac prints on these keys. Those are
+        // conventional rather than meaningful — nothing about ↖ says "start of
+        // line" — and a key nobody can read is a key nobody presses. They're
+        // set smaller so they fit; see `font(forLabel:)`.
         case .home:        return "home"
         case .end:         return "end"
-        case .pageUp:      return "pgup"
-        case .pageDown:    return "pgdn"
+        case .pageUp:      return "pg↑"
+        case .pageDown:    return "pg↓"
         case .function(let n): return "F\(n)"
         }
     }
@@ -140,6 +271,12 @@ final class KeyCapView: UIControl {
     /// small secondary label's position as a hint. So this is a parallel
     /// vocabulary, not a reuse of `label(for:)`.
     private func configureAccessibility() {
+        // A blank is a gap, not a key: VoiceOver should walk straight past it
+        // rather than announce an unlabelled keyboard key between the arrows.
+        if case .blank = cap.primary {
+            isAccessibilityElement = false
+            return
+        }
         isAccessibilityElement = true
         accessibilityTraits = .keyboardKey
         accessibilityLabel = Self.accessibilityLabel(for: cap)
@@ -156,11 +293,18 @@ final class KeyCapView: UIControl {
         case .character(let c):        return c == " " ? "space" : String(c)
         case .key(let key):            return accessibilityLabel(for: key)
         case .modifier(let modifiers): return accessibilityLabel(for: modifiers)
+        case .chord(let modifiers, let character):
+            return accessibilityLabel(for: modifiers) + " " + String(character)
+        case .functionLayer:
+            return "function layer"
         case .command(let command):
             switch command {
             case .dismissKeyboard: return "dismiss keyboard"
-            case .closeTab:        return "close tab"
+            case .paste:           return "paste"
+            case .copy:            return "copy"
             }
+        case .blank:
+            return ""
         }
     }
 

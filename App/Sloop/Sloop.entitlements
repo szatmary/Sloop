@@ -2,16 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.org.szatmary.sloop</string>
+	</array>
 	<key>keychain-access-groups</key>
 	<array>
-		<!-- On the Data Protection keychain, the FIRST entry here is the
-		     default access group for any keychain call that doesn't set
-		     kSecAttrAccessGroup explicitly (e.g. KeychainCredentialStore's
-		     per-host credentials). Keep the app's own group first so those
-		     unscoped calls keep resolving to the app's own scope instead of
-		     silently landing in the shared key-library group below. -->
 		<string>$(AppIdentifierPrefix)org.szatmary.sloop</string>
 		<string>$(AppIdentifierPrefix)org.szatmary.sloop.shared</string>
+		<string>$(AppIdentifierPrefix)org.szatmary.sloop.fileprovider</string>
 	</array>
 </dict>
 </plist>

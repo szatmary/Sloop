@@ -3,20 +3,34 @@
 ## Layers
 
 ```
-┌────────────────────────────────────────────┐
-│ App/Sloop  (SwiftUI, per-platform thin UI)  │
-│  SloopApp → HostListView → TerminalScreen   │
-│  SwiftTermView  ⇄  SwiftTerm.TerminalView   │
-│  LibSSH2Transport                           │
-└──────────────────────┬─────────────────────┘
-                       │  Transport protocol
-┌──────────────────────┴─────────────────────┐
-│ SloopKit  (Foundation only, testable)       │
-│  Transport  TerminalSession  OpenSessions   │
-│  MoshBootstrap  MoshOrSSHTransport  Dialer  │
-│  Host  HostStore  Credential  SSHError      │
-└─────────────────────────────────────────────┘
+┌───────────────────────────┐  ┌──────────────────────────────┐
+│ App/Sloop  (SwiftUI)      │  │ App/SloopFiles (extension)   │
+│  SloopApp → HostListView  │  │  FileProviderExtension       │
+│  SwiftTermView ⇄ SwiftTerm│  │  FileProviderEnumerator      │
+│  HostKeyPrompter (UI)     │  │  SFTPDomainService           │
+└─────────────┬─────────────┘  └──────────────┬───────────────┘
+              │        both embed             │
+┌─────────────┴───────────────────────────────┴───────────────┐
+│ App/SloopSSH  (framework — needs libssh2/tsnet)             │
+│  LibSSH2Connection  LibSSH2Transport  LibSSH2SFTPClient     │
+│  TransportFactory  SFTPClientFactory  TailscaleNode         │
+│  Keychain stores (credentials, keys, Access tokens)         │
+└──────────────────────┬──────────────────────────────────────┘
+                       │  Transport / Dialer / SFTPClient protocols
+┌──────────────────────┴──────────────────────────────────────┐
+│ SloopKit  (Foundation only, testable on Linux)              │
+│  Transport  TerminalSession  OpenSessions  Dialer           │
+│  MoshBootstrap  MoshOrSSHTransport  SFTPClient  SFTPEntry   │
+│  SFTPItemIndex  RemotePath  Host  HostStore  SloopStorage   │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+**Why three layers and not two.** SloopKit stays Foundation-only so `swift test`
+runs on Linux CI — libssh2 in it would end that. But `App/Sloop` is the *app
+target's* source list, which an app extension cannot link. The File Provider
+extension needs the transports, dialers, keychain stores and SFTP client, so
+they live in a framework both targets embed. Anything with a view in it stays
+in the app.
 
 ## The Transport seam
 
@@ -91,13 +105,51 @@ side never knows which dialer produced it.
   fd half-closes and `read()` returns 0. Any bug about libssh2 mishandling a
   negative return (a TCP reset, a vanished network) is therefore a
   direct-TCP-path problem; don't go looking for it in the relay.
-- `.tailscale` is a recognized `ConnectionMethod` but not yet a working
-  dialer — `TransportFactory` returns `nil` for it today. Planned as a third
-  dialer over an embedded tailnet node; see [`Docs/ROADMAP.md`](ROADMAP.md).
+- **`TailscaleDialer`**
+  ([`App/Sloop/Tailscale/TailscaleDialer.swift`](../App/Sloop/Tailscale/TailscaleDialer.swift))
+  — Sloop's own tailnet node. `tailscale_dial` hands back an ordinary socket
+  fd, so libssh2 cannot tell a tailnet connection from a direct one and the
+  whole integration fits behind `Dialer`. The node comes up inside the first
+  dial rather than at launch: a user with no tailnet hosts never pays for a
+  WireGuard node, and one who has them expects the first connect to be where
+  "authorize this device" appears. Lives in the app rather than SloopKit
+  because it needs `libtailscale`, which only the `.tailscale` build variant
+  links; other variants compile a stub that says the method is unavailable.
 
-Tunneled hosts are SSH-only: Mosh needs UDP, which Cloudflare Access
-(TCP-over-WebSocket) can't carry and embedded Tailscale hasn't been verified
-to. `SSHHost.connectionMethod` selects the dialer via
+Cloudflare Access hosts are SSH-only: Mosh needs UDP, which a
+TCP-over-WebSocket tunnel can't carry, so `HostEditView` disables "Use Mosh"
+for them.
+
+Tailscale hosts carry Mosh, but not through the `Dialer` — **that seam carries
+the SSH leg only.** Mosh's SSP leg is a socket `MoshTransport` gets for itself,
+so reaching a tailnet host meant giving it one that speaks to the tailnet:
+`TailscaleNode.dialUDP` opens the SSP socket through the same tsnet node that
+carries SSH, and `MoshTransport(host:bootstrap:dialTunnel:)` hands the fd to
+mosh instead of an address to dial.
+
+Two things had to change underneath for that fd to be usable:
+
+- **libtailscale** bridges every dialed connection to C through a `SOCK_STREAM`
+  socketpair, which destroys message boundaries — four packets sent back to
+  back arrive as one 2545-byte read, and mosh puts one SSP frame per packet, so
+  the first coalesced pair fails to decrypt. `Scripts/libtailscale-sloop-udp.go`
+  adds a `udp` dial that bridges through `SOCK_DGRAM`, where one write is one
+  datagram. It sits beside upstream's code rather than patching it, the same
+  way the status export does.
+- **mosh** opens its own socket and addresses every packet with `sendto`, which
+  a connected socket refuses. `Scripts/patches/mosh-tunnel-fd.patch` adds a
+  client `Connection` that adopts a connected fd, sends with `send`, and skips
+  port hopping — hopping the source port means nothing when the port the server
+  sees belongs to the tunnel.
+
+Cloudflare Access cannot be fixed the same way: TCP inside a WebSocket has
+nowhere to put a datagram at all, so `HostEditView` still disables "Use Mosh"
+there. `ConnectionMethod.carriesMosh` is the single statement of which methods
+can, and it lives on the model because the two places that need it drifted
+apart — the host editor offered Mosh over Tailscale while the connect path
+silently ran SSH, so the toggle stayed on and did nothing.
+
+`SSHHost.connectionMethod` selects the dialer via
 [`TransportFactory`](../App/Sloop/SSH/TransportFactory.swift); `HostEditView`
 disables the "Use Mosh" toggle whenever the method isn't `.direct`.
 
@@ -149,6 +201,54 @@ authenticated identity produces `SSHError.accessDenied`.
   cookie was already scoped that broadly by whatever server set it — and
   Cloudflare's edge still rejects a token whose `aud` claim doesn't match the
   application being dialed. Worth knowing, not a bug.
+
+## Files.app: the SFTP seam
+
+`SFTPClient` ([`Sources/SloopKit/SFTP/SFTPClient.swift`](../Sources/SloopKit/SFTP/SFTPClient.swift))
+is the `Transport` trick one subsystem over — a protocol with the libssh2
+implementation behind it, so the whole File Provider extension is written
+against it and tested against `InMemorySFTPClient` on Linux CI. Only
+`LibSSH2SFTPClient` needs a server.
+
+A published host becomes one `NSFileProviderDomain`, its identifier the host's
+UUID. Three things about it are worth knowing before changing anything:
+
+- **Identifiers are not paths.** `NSFileProviderItemIdentifier` must survive a
+  rename; an SFTP path does not. `SFTPItemIndex` mints a stable UUID per path
+  and rewrites the path underneath it, carrying a whole subtree when a directory
+  moves. Using the path as the identifier is the obvious shortcut and corrupts
+  the replica on the first rename — as a wrong answer at runtime, not a build
+  error.
+- **There is no change feed.** SFTP cannot push, so `enumerateChanges` re-lists
+  and diffs against the attributes the index recorded last time. Consequence,
+  by design: a file changed by someone else over SSH appears when Files.app next
+  asks, not the moment it happens. Sloop's own changes are signalled immediately.
+- **The extension cannot ask a question.** It runs while the app does not and has
+  no UI. So it uses `StrictHostKeyVerifier` — never trust-on-first-use — and
+  turns an unknown host key, an expired Access token, a missing credential, or an
+  unauthorized tailnet device into `NSFileProviderError.notAuthenticated` with
+  the sentence that fixes it. That error code is what makes Files.app offer a
+  way forward instead of spinning; `signalErrorResolved` clears it once the app
+  has done the thing. Anything conforming to `UserActionRequiredError` lands
+  there, rather than a hand-kept list of error types — the list had already
+  missed the tailnet case.
+- **Only two error domains exist here.** `NSFileProviderErrorDomain` and
+  `NSCocoaErrorDomain`. The system treats every other domain as transient and
+  retries it forever, so `FileProviderError` maps into those two and never into
+  `NSPOSIXErrorDomain` — which it did at first, on the mistaken belief that
+  Files.app read errno directly. The symptom of getting this wrong is nothing
+  at all: no error, no log, just an operation that never settles.
+
+Shared state lives in the App Group (`SloopStorage`): the host list, known
+hosts, each domain's item index, and tsnet state. Per-host credentials and
+Access tokens live in a keychain access group shared with the extension —
+deliberately *not* the iCloud-synced key-library group, since those items are
+device-only on purpose.
+
+The extension runs **its own tsnet node**, a second device on the tailnet. Two
+processes cannot share one node key: the control plane would see a single device
+flapping between endpoints. Whether a ~23 MB Go runtime fits inside a File
+Provider extension's memory cap is still unmeasured — see `Docs/ROADMAP.md`.
 
 ## Why the split
 

@@ -2,6 +2,7 @@
 // GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
 
 import SwiftUI
+import SloopSSH
 import SloopKit
 
 /// An interactive `HostKeyVerifier`. When the SSH loop meets an unknown host key

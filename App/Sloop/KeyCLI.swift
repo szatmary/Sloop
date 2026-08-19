@@ -3,6 +3,7 @@
 
 import Foundation
 import SloopKit
+import SloopSSH
 
 #if os(macOS)
 /// Key-library subcommands embedded in the app binary, so imports run with

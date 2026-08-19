@@ -1,0 +1,7 @@
+// See ../README.md — kept outside libtailscale.xcframework because Xcode
+// merges every xcframework's Headers into one include/ directory, where a
+// second module.modulemap collides with libssh2's.
+module CTailscale {
+    header "../../libtailscale.xcframework/macos-arm64/Headers/tailscale.h"
+    export *
+}

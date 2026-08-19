@@ -18,6 +18,7 @@ struct HostListView: View {
     @ObservedObject private var tailscaleAuth = TailscaleAuthPrompter.shared
     #endif
     @ObservedObject private var appearance = AppearanceStore.shared
+    @Environment(\.openURL) private var openURL
     @State private var editing: SSHHost?
     @State private var accessLogin: SSHHost?
     /// What to do once the Access login sheet has actually finished closing.
@@ -109,6 +110,22 @@ struct HostListView: View {
                             Button { editing = host } label: {
                                 Label("Edit…", systemImage: "pencil")
                             }
+                            if host.showsInFiles {
+                                // Resolved on tap rather than up front: the URL
+                                // needs a round trip to the File Provider
+                                // system, and doing that for every row on every
+                                // list render would be one per host for a menu
+                                // nobody may open.
+                                Button {
+                                    Task {
+                                        guard let url = await FilesDomainRegistrar
+                                            .userVisibleURL(for: host) else { return }
+                                        openURL(url)
+                                    }
+                                } label: {
+                                    Label("Open in Files", systemImage: "folder")
+                                }
+                            }
                             if host.connectionMethod == .cloudflareAccess {
                                 Button {
                                     run { try model.signOutOfCloudflareAccess(host) }
@@ -128,6 +145,11 @@ struct HostListView: View {
                 }
             }
             .navigationTitle("Sloop")
+            // Off the launch path on purpose — see HostListModel.syncFilesDomains.
+            // Also the repair for domains that drifted while Sloop wasn't
+            // running: a host deleted on another device, or a domain the system
+            // dropped.
+            .task { await model.syncFilesDomains() }
             .toolbar {
                 ToolbarItem {
                     Button { showingSettings = true } label: {
@@ -247,6 +269,7 @@ struct HostListView: View {
                 if new > old { showingTerminal = true }
                 else if new == 0 { showingTerminal = false }
             }
+            .onOpenURL { handle($0) }
         }
     }
 
@@ -302,6 +325,24 @@ struct HostListView: View {
         }
     }
 
+    /// Open an `ssh://user@host` link.
+    ///
+    /// A link that names a host you already saved connects to it — it is a host
+    /// you have already trusted, with a credential you already stored. A link
+    /// that matches nothing opens the editor prefilled instead of connecting,
+    /// so adding a host stays a thing the user does rather than a thing a link
+    /// does to them. Anything that isn't a usable ssh:// URL is ignored: the
+    /// system only hands us the scheme we registered, so this is a malformed
+    /// link rather than a mistake worth interrupting anyone about.
+    private func handle(_ url: URL) {
+        guard let ssh = SSHURL(string: url.absoluteString) else { return }
+        if let existing = model.hosts.first(where: { ssh.matches($0) }) {
+            connect(existing)
+        } else {
+            editing = ssh.makeHost()
+        }
+    }
+
     /// Whether a live session is already open for this host. Sessions are
     /// titled with the host's alias, which is what the terminal tab shows.
     private func isUnderway(_ host: SSHHost) -> Bool {
@@ -322,11 +363,14 @@ struct HostListView: View {
                   let text = String(data: data, encoding: .utf8) else {
                 return "Couldn't read that file as text."
             }
-            let count = model.importConfig(text)
-            switch count {
-            case 0: return "No new hosts found in that config."
-            case 1: return "Imported 1 host."
-            default: return "Imported \(count) hosts."
+            do {
+                switch try model.importConfig(text) {
+                case 0: return "No new hosts found in that config."
+                case 1: return "Imported 1 host."
+                case let count: return "Imported \(count) hosts."
+                }
+            } catch {
+                return error.localizedDescription
             }
         }
     }

@@ -92,16 +92,6 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     @Published private(set) var compactKeyboardActive = false
 
     /// Called when the compact keyboard's close-tab key is tapped.
-    /// `TerminalPane` sets this (once, in `onAppear`) to raise its own
-    /// confirmation dialog before actually closing — the same dialog
-    /// `KeyboardAccessoryBar`'s ✕ already goes through. A plain closure, not
-    /// `@Published`: nothing observes it as state, it's consumed once per tap
-    /// by whichever view wired it, and `CompactKeyboardView` only holds a
-    /// weak reference to this controller, not to the SwiftUI view that owns
-    /// the confirmation state, so a callback stored here is the bridge
-    /// between them.
-    var onCloseTabRequested: () -> Void = {}
-
     /// Tokens for the keyboard show/hide observers, removed in `close()` and
     /// `deinit` so closed/deallocated controllers don't leave dead closures
     /// registered with `NotificationCenter.default` for the life of the process.
@@ -117,11 +107,34 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     private let onConnectCommand: String?
     private var transport: Transport
 
+    /// What the user is typing, and what to offer for it. Both are nil when
+    /// suggestions are switched off — the setting stops the recording, not just
+    /// the display, since the recording is the part worth a choice.
+    private var suggester: CommandSuggester?
+
+    /// The suggestions for the line as it stands, best first. The bar above
+    /// the keyboard observes this.
+    @Published private(set) var suggestions: [String] = []
+
+    /// What we believe has been typed on the current line, so the bar can dim
+    /// it and show the completion in full strength.
+    var typedLine: String { suggester?.typedLine ?? "" }
+
     init(makeTransport: @escaping () -> Transport,
          onConnectCommand: String? = nil,
-         appearance: TerminalAppearance = .default) {
+         appearance: TerminalAppearance = .default,
+         suggestionsFor hostID: UUID? = nil,
+         historyStore: CommandHistoryStore = CommandHistoryStore()) {
         self.makeTransport = makeTransport
         self.onConnectCommand = onConnectCommand
+        // No host, no suggestions: a session with nowhere to keep a history
+        // has nothing to suggest from, and inventing a shared one would offer
+        // each host the other's commands.
+        // The host decides, and passes its decision in as a nil hostID when it
+        // says no — one switch, on the thing it governs.
+        if let hostID {
+            self.suggester = CommandSuggester(hostID: hostID, store: historyStore)
+        }
         self.terminalView = TerminalView(frame: .zero)
         self.transport = makeTransport()
         super.init()
@@ -248,6 +261,19 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     }
 
     private func wire(_ transport: Transport) {
+        // A Mosh session reads the host's history on its bootstrap channel,
+        // which runs before this transport ever opens — so the callback has to
+        // be in place before `start()`, not after `onOpen`.
+        DeviceDiagnostics.log("wire: suggester=\(suggester != nil) "
+                              + "composite=\(transport is MoshOrSSHTransport)")
+        if let suggester, let composite = transport as? MoshOrSSHTransport {
+            composite.onShellHistory = { [weak self] output in
+                suggester.absorb(historyOutput: output) { [weak self] notice in
+                    DispatchQueue.main.async { self?.terminalView.feed(text: notice) }
+                }
+            }
+        }
+
         // `transport` is captured weakly on purpose. This closure is stored ON
         // the transport, so capturing it strongly makes it retain itself: no
         // transport would ever deallocate, and each one holds a `Credential`
@@ -259,10 +285,21 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
                 guard let self, let transport else { return }
                 self.state = .connected
                 self.runOnConnectCommand(on: transport)
+                // After the shell is up, never alongside it: the import rides
+                // a second channel on this same connection, and it is not
+                // allowed to be in the way of the thing the user asked for.
+                self.suggester?.importHistory(over: transport) { [weak self] notice in
+                    self?.terminalView.feed(text: notice)
+                }
             }
         }
-        transport.onData = { [weak terminalView] bytes in
-            DispatchQueue.main.async { terminalView?.feed(byteArray: bytes) }
+        transport.onData = { [weak self, weak terminalView] bytes in
+            DispatchQueue.main.async {
+                terminalView?.feed(byteArray: bytes)
+                // The host redrew the screen; whatever we thought was on the
+                // command line may not be. Cheaper to admit than to guess.
+                self?.refreshSuggestions(hostRedrew: true)
+            }
         }
         transport.onClose = { [weak self] error in
             let reason = error?.localizedDescription
@@ -299,6 +336,41 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
     /// Send bytes to the remote end (used by the smart-keys bar).
     func send(_ bytes: ArraySlice<UInt8>) {
         transport.send(bytes)
+        observeTyping(bytes)
+    }
+
+    /// Accept a suggestion: send only what hasn't been typed yet, as keystrokes.
+    /// The host sees typing, so its own line editing, history and completion all
+    /// behave exactly as they would have.
+    func acceptSuggestion(_ suggestion: String) {
+        guard let suggester else { return }
+        send(ArraySlice(suggester.acceptance(of: suggestion)))
+    }
+
+    /// Feed everything sent to the tracker, and refresh what's on offer.
+    /// Why there is no "don't suggest in full-screen apps" rule here.
+    ///
+    /// There was one, keyed on the alternate screen buffer, meant to keep the
+    /// bar out of vim and htop. tmux uses the alternate buffer too — for the
+    /// whole session — so the rule silenced suggestions inside the very
+    /// workflow this app pushes hardest, `tmux attach` on connect, and the
+    /// feature looked broken on exactly the hosts set up most carefully.
+    ///
+    /// What remains is the tracker's own honesty: a suggestion is offered only
+    /// when the typed line is one it can vouch for, and it stops vouching the
+    /// moment anything it can't model happens. In vim that usually means no
+    /// suggestions anyway, since what gets typed rarely prefixes a command that
+    /// was ever run — and a suggestion is only ever *offered*. Nothing is sent
+    /// until it's tapped.
+    private func observeTyping(_ bytes: ArraySlice<UInt8>) {
+        guard let suggester else { return }
+        suggester.observe(bytes)
+        refreshSuggestions(hostRedrew: false)
+    }
+
+    private func refreshSuggestions(hostRedrew: Bool) {
+        guard let suggester else { return }
+        suggestions = suggester.suggestions()
     }
 
     #if os(iOS)
@@ -345,7 +417,7 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         // the controller (or view) in this closure, so this isn't load-
         // bearing for the retain cycle — but `close()` isn't guaranteed to
         // run on every path, so it's not a substitute for that fix either.
-        onCloseTabRequested = {}
+
         #endif
     }
 
@@ -386,9 +458,14 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
 
     // MARK: TerminalViewDelegate
 
+    /// Everything typed goes through `send(_:)`, never straight to the
+    /// transport. Three calls here bypassed it, which meant the suggestion
+    /// tracker saw the smart-keys bar's output and nothing the user actually
+    /// typed — the bar simply never appeared. One outbound path or the tracker
+    /// is guessing.
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
         guard !armedModifiers.isEmpty else {
-            transport.send(data)
+            send(data)
             return
         }
         let modifiers = armedModifiers
@@ -397,11 +474,11 @@ final class TerminalController: NSObject, ObservableObject, TerminalViewDelegate
         // multi-byte (IME, emoji) input pass through untouched rather than
         // being mangled by a control mask.
         guard data.count == 1, let byte = data.first, byte < 0x80 else {
-            transport.send(data)
+            send(data)
             return
         }
         let character = Character(UnicodeScalar(byte))
-        transport.send(KeyEncoder.bytes(for: character, modifiers: modifiers)[...])
+        send(KeyEncoder.bytes(for: character, modifiers: modifiers)[...])
     }
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         transport.resize(cols: newCols, rows: newRows)

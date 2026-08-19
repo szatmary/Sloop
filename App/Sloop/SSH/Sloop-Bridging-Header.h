@@ -26,7 +26,6 @@
 #endif
 
 #if __has_include(<libssh2.h>)
-#import "libssh2-internal.h"
 #endif
 
 #if __has_include(<tailscale.h>)

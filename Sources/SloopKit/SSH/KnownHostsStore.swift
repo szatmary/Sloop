@@ -76,17 +76,15 @@ public final class KnownHostsStore: @unchecked Sendable {
     /// which case it must be moved aside before anything is written.
     private var fileUnparseable: Bool
 
-    public init(fileURL: URL? = nil) {
-        if let fileURL {
-            self.url = fileURL
-        } else {
-            let dir = (try? FileManager.default.url(for: .applicationSupportDirectory,
-                                                    in: .userDomainMask,
-                                                    appropriateFor: nil,
-                                                    create: true))
-                ?? URL(fileURLWithPath: NSTemporaryDirectory())
-            self.url = dir.appendingPathComponent("sloop-known-hosts.json")
-        }
+    /// - Parameter fileURL: where the database lives. Required, not defaulted:
+    ///   the app and the File Provider extension are separate processes that
+    ///   must consult the *same* file, and a default pointing at whichever
+    ///   process's private Application Support directory happened to be asked
+    ///   would give the extension an empty known-hosts database — which fails
+    ///   closed on every host and reads to the user as "Sloop suddenly distrusts
+    ///   my servers". See `SloopStorage`.
+    public init(fileURL: URL) {
+        self.url = fileURL
 
         self.entries = [:]
         self.unparsedRecords = []

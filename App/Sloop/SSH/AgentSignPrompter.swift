@@ -2,12 +2,7 @@
 // GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
 
 import SwiftUI
-
-/// Asks the user whether a forwarded agent may sign with a given key.
-protocol AgentSignConfirming {
-    /// Called on the SSH thread. Blocks until the user answers.
-    func shouldSign(keyName: String, endpoint: String) -> Bool
-}
+import SloopSSH
 
 /// An interactive `AgentSignConfirming`. When a forwarded agent is asked to
 /// sign, it blocks the SSH thread while a SwiftUI sheet names the key and the

@@ -15,6 +15,9 @@
 # afterwards; the base/SSH/Mosh variants stay lean and don't link this.
 set -euo pipefail
 
+# Shared dependency plumbing: the pinned ios-cmake tag, apply_patches, install_file.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/vendor.sh"
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="$ROOT/.native-tailscale"
 OUT="$WORK/out"
@@ -43,6 +46,13 @@ cd libtailscale
 # user at a login they cannot start.
 cp "$ROOT/Scripts/libtailscale-sloop-status.go" ./sloop_status.go
 
+# Upstream bridges every dialed connection to C through a SOCK_STREAM
+# socketpair, which silently destroys UDP message boundaries — two datagrams
+# arrive as one read. Mosh puts one SSP frame per packet, so a tailnet Mosh
+# session would fail at the first coalesced pair. This adds a udp dial that
+# bridges through SOCK_DGRAM instead, where one write is one datagram.
+cp "$ROOT/Scripts/libtailscale-sloop-udp.go" ./sloop_udp.go
+
 # One slice per platform. Go names the iOS device platform "ios"; the simulator
 # is the same GOOS with a simulator sysroot and an explicit -target, since the
 # SDK alone doesn't distinguish them to the linker.
@@ -57,25 +67,22 @@ build_slice () {
     CGO_CFLAGS="$flags" CGO_LDFLAGS="$flags" \
     go build -buildmode=c-archive -o "$OUT/$name/libtailscale.a" .
 
-  # Headers only, no module map. libssh2.xcframework already ships one at
-  # Headers/module.modulemap, and Xcode copies every xcframework's headers into
-  # the same include/ directory — two of them collide there ("Multiple commands
-  # produce .../include/module.modulemap"). Swift reaches these declarations
-  # through the bridging header instead, which is how the Mosh bridge is wired
-  # too.
+  # Headers only, no module map *inside the xcframework*. libssh2.xcframework
+  # already ships one at Headers/module.modulemap, and Xcode copies every
+  # xcframework's headers into the same include/ directory — two of them collide
+  # there ("Multiple commands produce .../include/module.modulemap").
+  #
+  # The CTailscale module map therefore lives outside, at
+  # Vendor/CTailscale/$(PLATFORM_NAME)/, reached via SWIFT_INCLUDE_PATHS. It
+  # cannot go back to the bridging header that used to serve it: TailscaleNode
+  # moved into the SloopSSH framework so the File Provider extension can reach a
+  # tailnet too, and framework targets cannot use a bridging header. See
+  # Vendor/CTailscale/README.md.
   rm -rf "$OUT/$name/Headers"
   mkdir -p "$OUT/$name/Headers"
   cp tailscale.h "$OUT/$name/Headers/"
-  # Declare the added export alongside upstream's API. cgo emits it as a plain
-  # C symbol, so nothing else is needed to call it.
-  cat >> "$OUT/$name/Headers/tailscale.h" <<'EOF'
-
-// Added by Sloop (Scripts/libtailscale-sloop-status.go): writes
-// "<BackendState>\n<AuthURL>" into buf. BackendState is tsnet's own
-// vocabulary ("NeedsLogin", "Starting", "Running"); AuthURL is empty unless
-// this device is waiting to be authorized.
-extern int TsnetSloopStatus(int sd, char* buf, size_t buflen);
-EOF
+  append_file libtailscale tailscale-sloop-status.h "$OUT/$name/Headers/tailscale.h"
+  append_file libtailscale tailscale-sloop-udp.h "$OUT/$name/Headers/tailscale.h"
 }
 
 build_slice "ios-arm64"     "ios"    "iphoneos"        "arm64-apple-ios$IOS_TARGET"
