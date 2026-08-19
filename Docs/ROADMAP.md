@@ -166,10 +166,9 @@ top of a working SSH terminal rather than first.
   Blink, Termius and Prompt all support it. Adjacent to the Cloudflare Access
   tunnel work, which is the same shape of problem: reaching a host you cannot
   route to directly.
-- **Agent forwarding, and `ssh-agent` generally** — `AuthMethod.agent` is
-  declared in `SSHHost.swift` but has **no implementation anywhere** in the SSH
-  layer or the UI; it currently reads as a supported auth method that silently
-  isn't one. Either implement it or delete the case. Forwarding specifically is
+- **Agent forwarding, and `ssh-agent` generally** — not implemented. (The
+  `AuthMethod.agent` case that used to sit in `SSHHost.swift` promising
+  otherwise, with no code behind it anywhere, has been deleted.) Forwarding is
   what lets `git pull` on the remote use the key held on the phone, which is
   one of the most common reasons to SSH from a phone at all.
 - ~~**SFTP / file transfer**~~ → BUILT, not yet run on a device. A host with
