@@ -230,6 +230,20 @@ final class HostListModel: ObservableObject {
                 MoshTransport(host: host.hostname, bootstrap: bootstrap)
             }
             #endif
+            #if SLOOP_MOSH && SLOOP_TAILSCALE
+            // A tailnet host has no address this process can route to — the SSH
+            // leg goes through tsnet, and so must the SSP leg, or mosh would
+            // send its packets into a network that has never heard of
+            // 100.64.0.0/10.
+            if host.connectionMethod == .tailscale {
+                makeMosh = { bootstrap in
+                    MoshTransport(host: host.hostname, bootstrap: bootstrap) {
+                        try TailscaleNode.shared.dialUDP(host: host.hostname,
+                                                         port: bootstrap.udpPort)
+                    }
+                }
+            }
+            #endif
             return MoshOrSSHTransport(
                 useMosh: true,
                 makeCommandRunner: {

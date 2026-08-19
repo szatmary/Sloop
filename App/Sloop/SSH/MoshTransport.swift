@@ -37,6 +37,12 @@ final class MoshTransport: Transport {
     private let host: String
     private let port: String
     private let key: String
+    /// Supplies an already-connected datagram socket instead of letting mosh
+    /// dial one. Set for hosts Sloop reaches through a tunnel: over the tailnet
+    /// there is no address this process can route to, so the socket has to come
+    /// from the thing that can. Called on `start()`, where a failure can be
+    /// reported as the session closing.
+    private let dialTunnel: (() throws -> Int32)?
 
     private var session: OpaquePointer?
     private var cols: Int = 80
@@ -66,11 +72,36 @@ final class MoshTransport: Transport {
         self.host = host
         self.port = String(bootstrap.udpPort)
         self.key = bootstrap.key
+        self.dialTunnel = nil
+    }
+
+    /// A session over a socket someone else dials — see `dialTunnel`.
+    ///
+    /// - Parameters:
+    ///   - host: only for messages; nothing dials it.
+    ///   - bootstrap: the `MOSH CONNECT <port> <key>` handshake.
+    ///   - dialTunnel: opens the datagram socket to the server's UDP port.
+    init(host: String, bootstrap: MoshBootstrap, dialTunnel: @escaping () throws -> Int32) {
+        self.host = host
+        self.port = String(bootstrap.udpPort)
+        self.key = bootstrap.key
+        self.dialTunnel = dialTunnel
     }
 
     func start() {
         guard session == nil, !closed else { return }
-        guard let s = mosh_session_create(host, port, key, Int32(cols), Int32(rows)) else {
+        let created: OpaquePointer?
+        if let dialTunnel {
+            do {
+                created = mosh_session_create_fd(try dialTunnel(), key, Int32(cols), Int32(rows))
+            } catch {
+                onClose?(error)
+                return
+            }
+        } else {
+            created = mosh_session_create(host, port, key, Int32(cols), Int32(rows))
+        }
+        guard let s = created else {
             onClose?(MoshTransportError.createFailed)
             return
         }

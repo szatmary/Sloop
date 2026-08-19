@@ -40,28 +40,27 @@ public enum ConnectionMethod: String, Codable, Hashable, CaseIterable {
 
     /// Whether a Mosh session can run over this method.
     ///
-    /// Only the direct path can. The `Dialer` seam carries the *SSH* leg, and
-    /// Mosh's SSP leg is a UDP socket `MoshTransport` opens itself, straight to
-    /// the hostname — it never passes through a dialer, so a method that works
-    /// by dialing differently does nothing for it:
+    /// The question is only ever about UDP. Mosh's SSP leg does not pass
+    /// through the `Dialer` that carries SSH — `MoshTransport` gets its own
+    /// socket — so each method has to be able to hand it a datagram path of its
+    /// own:
     ///
     /// - Cloudflare Access carries TCP inside a WebSocket. There is nowhere for
-    ///   a UDP datagram to go.
-    /// - Tailscale, when Sloop is its own tailnet node, routes only what it
-    ///   dials. The SSP packets would go to a `100.64.0.0/10` address the OS
-    ///   has no route to, because the point of the embedded node is that no
-    ///   system VPN is up. It would need `tailscale_dial(…, "udp", …)` and
-    ///   mosh's `Connection` rewired off `sendto`/`recvfrom` onto that fd.
-    ///   Until then, Mosh over a tailnet means Direct with the Tailscale app
-    ///   running — which is a fine pairing, since both roam.
+    ///   a datagram to go, and no amount of plumbing changes that.
+    /// - Tailscale can: `TailscaleNode.dialUDP` opens the SSP socket through
+    ///   the same tsnet node that carries the SSH leg. It took a datagram
+    ///   socketpair in libtailscale (upstream's stream fd smears packets
+    ///   together) and a mosh that adopts a connected fd instead of dialing —
+    ///   both in `Scripts/`. Worth it: Tailscale roams between networks and so
+    ///   does Mosh, which is the pairing a phone actually wants.
     ///
     /// Lives on the model so the host editor and the connect path can't drift
     /// apart: they did, and the editor promised Mosh over Tailscale while the
     /// connect path silently used SSH.
     public var carriesMosh: Bool {
         switch self {
-        case .direct: return true
-        case .cloudflareAccess, .tailscale: return false
+        case .direct, .tailscale: return true
+        case .cloudflareAccess: return false
         }
     }
 
@@ -69,13 +68,10 @@ public enum ConnectionMethod: String, Codable, Hashable, CaseIterable {
     /// available.
     public var moshUnavailableReason: String? {
         switch self {
-        case .direct:
+        case .direct, .tailscale:
             return nil
         case .cloudflareAccess:
             return "Mosh needs UDP, which can't pass through this tunnel — SSH is used instead."
-        case .tailscale:
-            return "Mosh needs UDP, which Sloop's own tailnet node doesn't carry — SSH is used "
-                 + "instead. To use Mosh over your tailnet, choose Direct and run the Tailscale app."
         }
     }
 }

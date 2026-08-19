@@ -34,6 +34,13 @@ typedef void (*MoshCloseCallback)(const char *reason, void *ctx);
 MoshSession *mosh_session_create(const char *ip, const char *port, const char *key,
                                  int cols, int rows);
 
+/// Allocate a session that speaks SSP over an already-connected datagram
+/// socket rather than dialing one. `fd` is owned by the session from this call
+/// on, and is closed when the session is destroyed. Sloop uses this for tailnet
+/// hosts, where the peer has no address this process can route to and
+/// libtailscale supplies the socket instead.
+MoshSession *mosh_session_create_fd(int fd, const char *key, int cols, int rows);
+
 /// Register the output/close callbacks and an opaque context. Call before start.
 void mosh_session_set_callbacks(MoshSession *session,
                                 MoshOutputCallback on_output,
