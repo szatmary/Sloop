@@ -118,8 +118,29 @@ final class PromptQueue {
     /// different prompter than the one that was just showing.
     private func presentNext() {
         guard let next = pending.first else { return }
+        // Guards this one request's resolution against being run more than
+        // once. `respond` reaches here as `Prompt.respond` in both
+        // `AgentSignPromptView` and `HostKeyPromptView` — a bare SwiftUI
+        // `Button` action with nothing stopping it from firing twice (a
+        // double-tap, or Escape landing mid-dismiss). `answered` lives here
+        // rather than on `Request` or `PromptQueue` itself because its job
+        // ends the moment this one request is resolved; a queue-lifetime flag
+        // would have to be reset somewhere; this one simply stops mattering.
+        // Local to this call, but not to any *one* invocation of the closure
+        // below — every invocation across every tap closes over the same
+        // `answered`, which is what lets the first tap's write be seen by a
+        // later one's read.
+        var answered = false
         next.present { allowed in
             DispatchQueue.main.async {
+                // Confined to main exactly like `pending` — this whole block
+                // is itself a block submitted to `DispatchQueue.main`, so two
+                // taps produce two such blocks that run one after the other,
+                // never concurrently. That serialization is what makes a
+                // plain `Bool` enough here: the second block's read of
+                // `answered` is guaranteed to see the first block's write.
+                guard !answered else { return }
+                answered = true
                 // Nothing removes an entry from `pending` before its own
                 // answer arrives, and nothing but `enqueue` appends to it, so
                 // the request we just answered is still the one at the front.
