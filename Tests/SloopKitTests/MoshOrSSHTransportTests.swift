@@ -81,6 +81,64 @@ final class MoshOrSSHTransportTests: XCTestCase {
         XCTAssertTrue(notice.contains("isn't built yet"))
     }
 
+    /// "connected (udp 60007)" followed by a blank screen forever is how a
+    /// firewall that passes 22 and drops everything else presents itself. The
+    /// terminal has to say so — nothing else in the stack can.
+    func testSaysSoWhenTheMoshSessionNeverMakesASound() {
+        let mosh = RecordingTransport("mosh")
+        var fire: (() -> Void)?
+        var notice = ""
+        let t = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: { MockCommandRunner(stdout: "MOSH CONNECT 60007 k==\n") },
+            makeSSHTransport: { RecordingTransport("ssh") },
+            makeMoshTransport: { _ in mosh },
+            afterDelay: { _, work in fire = work })
+        t.onData = { notice += String(decoding: $0, as: UTF8.self) }
+        t.start()
+        fire?()
+        XCTAssertTrue(notice.contains("nothing received on UDP port 60007"))
+        // Reports; never kills. Packets can still arrive, and outliving
+        // silence is the point of Mosh.
+        XCTAssertTrue(notice.contains("Still listening"))
+    }
+
+    func testStaysQuietOnceTheSessionHasSaidAnything() {
+        let mosh = RecordingTransport("mosh")
+        var fire: (() -> Void)?
+        var notice = ""
+        let t = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: { MockCommandRunner(stdout: "MOSH CONNECT 60007 k==\n") },
+            makeSSHTransport: { RecordingTransport("ssh") },
+            makeMoshTransport: { _ in mosh },
+            afterDelay: { _, work in fire = work })
+        t.onData = { notice += String(decoding: $0, as: UTF8.self) }
+        t.start()
+        mosh.onData?(ArraySlice(Array("$ ".utf8)))
+        fire?()
+        XCTAssertFalse(notice.contains("nothing received"))
+    }
+
+    /// A tab closed during the wait must not print into a terminal that is
+    /// already gone.
+    func testSaysNothingAboutSilenceAfterTheTabIsClosed() {
+        let mosh = RecordingTransport("mosh")
+        var fire: (() -> Void)?
+        var notice = ""
+        let t = MoshOrSSHTransport(
+            useMosh: true,
+            makeCommandRunner: { MockCommandRunner(stdout: "MOSH CONNECT 60007 k==\n") },
+            makeSSHTransport: { RecordingTransport("ssh") },
+            makeMoshTransport: { _ in mosh },
+            afterDelay: { _, work in fire = work })
+        t.start()
+        t.onData = { notice += String(decoding: $0, as: UTF8.self) }
+        t.close()
+        fire?()
+        XCTAssertEqual(notice, "")
+    }
+
     func testForwardsIOToActiveTransport() {
         let ssh = RecordingTransport("ssh")
         var received: [UInt8] = []

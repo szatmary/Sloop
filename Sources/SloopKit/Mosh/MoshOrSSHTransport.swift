@@ -28,6 +28,18 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
     private let makeCommandRunner: () -> CommandRunner
     private let makeSSHTransport: () -> Transport
     private let makeMoshTransport: ((MoshBootstrap) -> Transport)?
+    private let afterDelay: (TimeInterval, @escaping () -> Void) -> Void
+
+    /// How long a Mosh session may say nothing at all before the terminal
+    /// explains what that usually means.
+    ///
+    /// Only the *first* packet is timed. Silence later is Mosh working as
+    /// designed — see the "deliberately no server-went-quiet timeout" note in
+    /// `MoshBridge.mm` — but silence from the start is a different animal: the
+    /// bootstrap proved the host is reachable over TCP, so nothing arriving on
+    /// UDP points at a filtered path rather than a dozing peer. Long enough
+    /// that a slow cellular first round trip won't trip it.
+    public static let firstPacketNotice: TimeInterval = 8
 
     /// Receives the host's shell history, read on the Mosh bootstrap channel.
     ///
@@ -59,18 +71,26 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
     /// the mistake is never corrected.
     private var pendingBytes: [UInt8] = []
     private var pendingResize: (cols: Int, rows: Int)?
-    /// Set when the tab is closed before the probe finished, so the completion
-    /// doesn't go on to open a connection nobody owns.
-    private var closedBeforeActivation = false
+    /// Set by `close()`, whatever stage we are at. Before activation it stops
+    /// the probe's completion opening a connection nobody owns; after it, it
+    /// stops anything writing into a terminal that is already gone.
+    private var isClosed = false
+    /// Whether the live transport has ever produced a byte. Distinguishes "the
+    /// session is quiet" from "the session never started".
+    private var sawTransportData = false
 
     public init(useMosh: Bool,
                 makeCommandRunner: @escaping () -> CommandRunner,
                 makeSSHTransport: @escaping () -> Transport,
-                makeMoshTransport: ((MoshBootstrap) -> Transport)? = nil) {
+                makeMoshTransport: ((MoshBootstrap) -> Transport)? = nil,
+                afterDelay: @escaping (TimeInterval, @escaping () -> Void) -> Void = { seconds, work in
+                    DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: work)
+                }) {
         self.useMosh = useMosh
         self.makeCommandRunner = makeCommandRunner
         self.makeSSHTransport = makeSSHTransport
         self.makeMoshTransport = makeMoshTransport
+        self.afterDelay = afterDelay
     }
 
     public func start() {
@@ -91,6 +111,7 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
                 if let makeMosh = self.makeMoshTransport {
                     self.emit("[sloop] mosh: connected (udp \(bootstrap.udpPort))\r\n")
                     self.activate(makeMosh(bootstrap))
+                    self.noticeIfNothingArrives(onUDPPort: bootstrap.udpPort)
                 } else {
                     self.emit("[sloop] mosh: available, but the Mosh transport isn't built yet — using SSH\r\n")
                     self.activate(self.makeSSHTransport())
@@ -131,7 +152,7 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
         // A close during the probe must still take effect: without this the
         // completion activates a fresh connection for a tab the user already
         // closed, which nobody owns and nothing will ever close.
-        if live == nil { closedBeforeActivation = true }
+        isClosed = true
         lock.unlock()
         live?.close()
     }
@@ -139,7 +160,7 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
     /// Adopt `transport` as the live one and forward its callbacks out.
     private func activate(_ transport: Transport) {
         lock.lock()
-        if closedBeforeActivation {
+        if isClosed {
             lock.unlock()
             return
         }
@@ -150,7 +171,10 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
         pendingBytes.removeAll()
         lock.unlock()
 
-        transport.onData = { [weak self] bytes in self?.onData?(bytes) }
+        transport.onData = { [weak self] bytes in
+            self?.noteDataArrived()
+            self?.onData?(bytes)
+        }
         transport.onOpen = { [weak self] in self?.onOpen?() }
         transport.onClose = { [weak self] error in self?.onClose?(error) }
 
@@ -160,6 +184,35 @@ public final class MoshOrSSHTransport: Transport, SessionCommandRunner {
         if let resize { transport.resize(cols: resize.cols, rows: resize.rows) }
         transport.start()
         if !bytes.isEmpty { transport.send(bytes[...]) }
+    }
+
+    private func noteDataArrived() {
+        lock.lock()
+        sawTransportData = true
+        lock.unlock()
+    }
+
+    /// Say something when a Mosh session never makes a sound.
+    ///
+    /// Without this the terminal reads "mosh: connected (udp 60007)" and then
+    /// stays blank forever, which looks like Sloop hanging when it is really
+    /// the network dropping SSP packets — the common causes being a firewall
+    /// that allows 22 and nothing else, and a NAT with no inbound mapping.
+    /// Upstream mosh-client has the same warning for the same reason.
+    ///
+    /// It only reports. Killing the session here would be wrong: packets can
+    /// still turn up, and outlasting silence is the whole point of Mosh.
+    private func noticeIfNothingArrives(onUDPPort port: Int) {
+        afterDelay(Self.firstPacketNotice) { [weak self] in
+            guard let self else { return }
+            lock.lock()
+            let quiet = !sawTransportData && !isClosed
+            lock.unlock()
+            guard quiet else { return }
+            emit("[sloop] mosh: nothing received on UDP port \(port) after "
+                 + "\(Int(Self.firstPacketNotice))s. SSH reached this host, so UDP is likely "
+                 + "blocked between here and it. Still listening — Mosh survives silence.\r\n")
+        }
     }
 
     /// Forward to whichever transport is live, if it can run a command at all.
