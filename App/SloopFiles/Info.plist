@@ -32,8 +32,19 @@
 		<string>com.apple.fileprovider-nonui</string>
 		<key>NSExtensionPrincipalClass</key>
 		<string>$(PRODUCT_MODULE_NAME).FileProviderExtension</string>
-		<key>NSExtensionFileProviderSupportsEnumeration</key>
-		<true/>
+		<!-- One SFTP session, driven from one serial queue, because a libssh2
+		     session cannot be used from two threads at once. The system
+		     dispatches fetches and uploads concurrently unless told otherwise,
+		     and those extra calls would queue behind the head reporting no
+		     progress until the system cancelled them. Declaring a depth of 1
+		     makes the concurrency the code actually supports the concurrency the
+		     system uses. -->
+		<key>NSExtensionFileProviderDownloadPipelineDepth</key>
+		<integer>1</integer>
+		<key>NSExtensionFileProviderUploadPipelineDepth</key>
+		<integer>1</integer>
+		<key>NSExtensionFileProviderMetadataOnlyUploadPipelineDepth</key>
+		<integer>1</integer>
 		<key>NSExtensionFileProviderDocumentGroup</key>
 		<string>group.org.szatmary.sloop</string>
 	</dict>

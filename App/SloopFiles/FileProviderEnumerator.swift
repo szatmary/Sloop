@@ -28,6 +28,15 @@ final class FileProviderEnumerator: NSObject, NSFileProviderEnumerator {
 
     func enumerateItems(for observer: NSFileProviderEnumerationObserver,
                         startingAt page: NSFileProviderPage) {
+        // The working set is the system's own index — what it consults for
+        // Spotlight, Recents, and for changes to already-materialized
+        // directories. SFTP cannot push, so Sloop has nothing to put in it and
+        // enumerates it as empty. Reporting it as an unknown item instead, which
+        // is what happened before, tells the system the container was deleted.
+        guard container != .workingSet else {
+            observer.finishEnumerating(upTo: nil)
+            return
+        }
         service.perform { [service, container] client, index in
             let directory = try service.path(for: container, client, index)
             let entries = try client.list(directory)
@@ -53,6 +62,10 @@ final class FileProviderEnumerator: NSObject, NSFileProviderEnumerator {
 
     func enumerateChanges(for observer: NSFileProviderChangeObserver,
                           from anchor: NSFileProviderSyncAnchor) {
+        guard container != .workingSet else {
+            observer.finishEnumeratingChanges(upTo: anchor, moreComing: false)
+            return
+        }
         service.perform { [service, container] client, index in
             let directory = try service.path(for: container, client, index)
             let changes = index.apply(listing: try client.list(directory), to: directory)

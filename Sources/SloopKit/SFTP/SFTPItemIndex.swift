@@ -117,6 +117,17 @@ public final class SFTPItemIndex: @unchecked Sendable {
         let destination = RemotePath.normalize(destination)
         lock.lock(); defer { lock.unlock() }
 
+        // Anything already sitting at the destination is gone as far as the
+        // index is concerned — the server just overwrote or replaced it. Its
+        // identifier has to be dropped *before* the repoint, or two ids end up
+        // naming one path: `pathsByID` keeps both while `idsByPath` can only
+        // record one, and the pair never resolves. That state is also fatal
+        // rather than merely wrong, because `load` rebuilds `idsByPath` with
+        // `Dictionary(uniqueKeysWithValues:)`, which traps on the duplicate —
+        // inside `init`, where no `try?` can catch it. Saving it once made the
+        // extension crash on every launch for that domain.
+        forgetLocked(destination)
+
         var moved = false
         for (id, path) in pathsByID {
             guard let repointed = RemotePath.reparent(path, from: from, to: destination)
@@ -140,9 +151,15 @@ public final class SFTPItemIndex: @unchecked Sendable {
             moved = true
         }
 
-        // The parent listings on both sides now describe names that moved.
+        // The source parent no longer holds that name. The destination parent's
+        // snapshot is left alone: dropping the *whole* listing there would
+        // discard every other entry's last-seen state, so anything deleted on
+        // the server since the last enumeration could never be diffed again and
+        // its identifier would never be reported removed. The moved item is
+        // simply absent from that snapshot, which the next listing reports as an
+        // addition — the correct answer.
         snapshots[RemotePath.parent(from)]?[from] = nil
-        snapshots[RemotePath.parent(destination)] = nil
+        snapshots[RemotePath.parent(destination)]?[destination] = nil
 
         if moved { _anchor += 1 }
     }
@@ -240,8 +257,21 @@ public final class SFTPItemIndex: @unchecked Sendable {
               let state = try? JSONDecoder().decode(Persisted.self, from: data)
         else { return }
         _anchor = state.anchor
-        pathsByID = state.pathsByID
-        idsByPath = Dictionary(uniqueKeysWithValues: state.pathsByID.map { ($0.value, $0.key) })
         snapshots = state.snapshots
+
+        // `uniqueKeysWithValues` would trap on two identifiers naming one path,
+        // and it would trap *inside init*, where the `try?` above cannot catch
+        // it — turning a recoverable bad file into a crash on every launch. The
+        // producer of that state is fixed (see `move`), but this is the last
+        // line of defense and it should fail soft: keep one identifier per path
+        // and drop the rest, which costs the replica a re-import rather than the
+        // domain's ability to start at all.
+        idsByPath = [:]
+        pathsByID = [:]
+        for (id, path) in state.pathsByID.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
+            guard idsByPath[path] == nil else { continue }
+            idsByPath[path] = id
+            pathsByID[id] = path
+        }
     }
 }

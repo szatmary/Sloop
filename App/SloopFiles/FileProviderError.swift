@@ -21,7 +21,7 @@ enum FileProviderError {
     static func from(_ error: Error) -> NSError {
         switch error {
         case let error as SFTPError:
-            return posix(error.posixCode, describing: error)
+            return fileProvider(error)
 
         // Nothing here can be fixed by retrying, and every case names the one
         // action that fixes it: go to the app. `notAuthenticated` is what makes
@@ -59,9 +59,51 @@ enum FileProviderError {
                            NSUnderlyingErrorKey: error as NSError])
     }
 
-    private static func posix(_ code: Int32, describing error: Error) -> NSError {
-        NSError(domain: NSPOSIXErrorDomain, code: Int(code),
-                userInfo: [NSLocalizedDescriptionKey: error.localizedDescription,
-                           NSUnderlyingErrorKey: error as NSError])
+    /// Maps a server refusal onto the only two domains the system accepts.
+    ///
+    /// `NSFileProviderReplicatedExtension` is explicit: errors must be in
+    /// `NSFileProviderErrorDomain` or `NSCocoaErrorDomain`, and *"any other
+    /// error … will be considered to be transient and will cause the
+    /// [operation] to be retried."*
+    ///
+    /// This originally returned `NSPOSIXErrorDomain` with the errno from
+    /// `SFTPError.posixCode`, on the belief that the system read those directly.
+    /// It does not — POSIX is a third domain, so every one of these was
+    /// classified transient. A file deleted on the server was retried forever
+    /// instead of leaving the replica, and a permissions refusal never reached
+    /// the user at all. The errno mapping still exists and is still tested; it
+    /// is simply not what this boundary speaks.
+    private static func fileProvider(_ error: SFTPError) -> NSError {
+        let info: [String: Any] = [NSLocalizedDescriptionKey: error.localizedDescription,
+                                   NSUnderlyingErrorKey: error as NSError]
+        switch error {
+        case .noSuchFile:
+            // The system's cue to drop the item from the replica rather than
+            // keep asking for it.
+            return NSError(domain: NSFileProviderErrorDomain,
+                           code: NSFileProviderError.noSuchItem.rawValue, userInfo: info)
+        case .alreadyExists:
+            return NSError(domain: NSFileProviderErrorDomain,
+                           code: NSFileProviderError.filenameCollision.rawValue, userInfo: info)
+        case .directoryNotEmpty:
+            // Required by the deleteItem contract so the system restores the
+            // directory it had already removed from disk.
+            return NSError(domain: NSFileProviderErrorDomain,
+                           code: NSFileProviderError.directoryNotEmpty.rawValue, userInfo: info)
+        case .permissionDenied:
+            return NSError(domain: NSCocoaErrorDomain,
+                           code: NSFileReadNoPermissionError, userInfo: info)
+        case .noSpace, .quotaExceeded:
+            return NSError(domain: NSCocoaErrorDomain,
+                           code: NSFileWriteOutOfSpaceError, userInfo: info)
+        case .isADirectory, .notADirectory, .unsupported:
+            return NSError(domain: NSCocoaErrorDomain,
+                           code: NSFeatureUnsupportedError, userInfo: info)
+        case .connectionLost, .protocolFailure:
+            // The one class that genuinely *is* transient: retrying after a
+            // dropped link is the right behavior, and the client now redials.
+            return NSError(domain: NSCocoaErrorDomain,
+                           code: NSXPCConnectionReplyInvalid, userInfo: info)
+        }
     }
 }

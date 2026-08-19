@@ -80,8 +80,25 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
 
     func enumerator(for containerItemIdentifier: NSFileProviderItemIdentifier,
                     request: NSFileProviderRequest) throws -> NSFileProviderEnumerator {
-        FileProviderEnumerator(service: try requireService(),
-                               container: containerItemIdentifier)
+        // Sloop has no trash. Aliasing it to the domain root, as this did,
+        // listed the user's live home directory as Trash — where "Delete
+        // Immediately" would act on real files.
+        guard containerItemIdentifier != .trashContainer else {
+            throw NSError(domain: NSCocoaErrorDomain, code: NSFeatureUnsupportedError,
+                          userInfo: [NSLocalizedDescriptionKey: "Sloop has no trash."])
+        }
+        do {
+            return FileProviderEnumerator(service: try requireService(),
+                                          container: containerItemIdentifier)
+        } catch {
+            // Every other method routes through FileProviderError; this one
+            // threw raw, and it is the *first* call made when the user taps the
+            // location. An unmapped domain reads as transient, so a host with no
+            // credential or an untrusted key was retried indefinitely — a fresh
+            // TCP and SSH handshake each time — instead of showing the sign-in
+            // affordance that `notAuthenticated` produces.
+            throw FileProviderError.from(error)
+        }
     }
 
     // MARK: - Contents
@@ -131,7 +148,16 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         let progress = Progress(totalUnitCount: 100)
         do {
             let service = try requireService()
-            let isDirectory = itemTemplate.contentType == .folder
+            // `conforms(to: .directory)`, not `== .folder`. A package — .rtfd,
+            // .bundle, any document that is a directory underneath — is not
+            // `.folder` but must still be created as one. Treated as a file it
+            // became a 0-byte regular file, and every child the system then
+            // wrote into it failed against a non-directory.
+            let type = itemTemplate.contentType ?? .data
+            let isDirectory = type.conforms(to: .directory)
+            guard !type.conforms(to: .symbolicLink) else {
+                throw SFTPError.unsupported(itemTemplate.filename)
+            }
             let name = itemTemplate.filename
             let parent = itemTemplate.parentItemIdentifier
 

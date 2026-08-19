@@ -72,6 +72,45 @@ final class SFTPItemIndexTests: XCTestCase {
         XCTAssertEqual(index.path(for: deep), "/a/archive/sub/y.txt")
     }
 
+    /// Renaming onto a path the index already knows — the server replaced or
+    /// overwrote it — must retire the old identifier rather than leave two ids
+    /// naming one path. That state is not merely wrong: it round-trips to disk
+    /// and traps in `load`, crashing the extension on every launch.
+    func testMovingOntoAKnownPathRetiresTheIdentifierThatWasThere() throws {
+        let index = SFTPItemIndex(fileURL: scratch)
+        let source = index.identifier(for: "/a/x")
+        let displaced = index.identifier(for: "/a/y")
+
+        index.move(from: "/a/x", to: "/a/y")
+
+        XCTAssertEqual(index.path(for: source), "/a/y")
+        XCTAssertNil(index.path(for: displaced),
+                     "the identifier that used to be at the destination must not survive")
+        XCTAssertEqual(index.identifier(for: "/a/y"), source)
+
+        // The state that used to crash: save, then load.
+        try index.save()
+        let reloaded = SFTPItemIndex(fileURL: scratch)
+        XCTAssertEqual(reloaded.identifier(for: "/a/y"), source)
+    }
+
+    /// A rename must not discard the destination directory's whole snapshot.
+    /// Doing so lost the last-seen state of every sibling, so anything deleted
+    /// on the server beforehand could never be diffed again and its identifier
+    /// was never reported removed — leaving a permanent phantom in the replica.
+    func testRenameKeepsSiblingSnapshotsSoLaterDeletionsAreStillDetected() {
+        let index = SFTPItemIndex(fileURL: scratch)
+        _ = index.apply(listing: [file("/a/x"), file("/a/y")], to: "/a")
+        let goneID = index.identifier(for: "/a/y")
+
+        index.move(from: "/a/x", to: "/a/z")
+
+        // /a/y vanished on the server; only /a/z remains.
+        let changes = index.apply(listing: [file("/a/z")], to: "/a")
+        XCTAssertEqual(changes.removedIdentifiers, [goneID],
+                       "the sibling deleted before the rename must still be reported gone")
+    }
+
     func testRenamingADirectoryLeavesPrefixSiblingsAlone() {
         let index = SFTPItemIndex(fileURL: scratch)
         let sibling = index.identifier(for: "/a/docsignore")

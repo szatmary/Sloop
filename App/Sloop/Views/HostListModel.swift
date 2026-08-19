@@ -93,13 +93,38 @@ final class HostListModel: ObservableObject {
         }
 
         hosts = store?.hosts ?? []
+
+        // FIRST: per-host credentials and Access tokens predate the extension
+        // and landed in the app's private keychain group, which the extension
+        // cannot read at all. Unmigrated, every published host fails to
+        // authenticate with what looks like a wrong password — on a host whose
+        // password is plainly right in the app.
+        //
+        // Before the PEM lift below, not after. `credentials` now reads from the
+        // shared group, so running the lift first found nothing, lifted nothing,
+        // and then recorded itself as complete forever — leaving the key library
+        // permanently missing the keys it exists to hold.
+        var keychainMigrationFailed = false
+        do {
+            try SloopKeychainMigration.migrateToSharedAccessGroup()
+        } catch {
+            keychainMigrationFailed = true
+            libraryError = error.localizedDescription
+        }
+
         // Lift legacy per-host PEMs into the library, but only once per
         // device: KeyLibrary.migrate is idempotent in the sense that it never
         // overwrites an existing entry, but it has no way to know a name is
         // missing *because the user removed it*. Running it unconditionally
         // at every launch would resurrect keys removed via `sloop
         // remove-key`. See migratedLegacyPEMsDefaultsKey.
-        if !defaults.bool(forKey: Self.migratedLegacyPEMsDefaultsKey) {
+        //
+        // Skipped entirely when the host list or the keychain migration is
+        // unavailable. With no hosts it trivially "succeeds" over an empty
+        // array, and the marker below would then record a migration that never
+        // examined anything as done for good.
+        if !defaults.bool(forKey: Self.migratedLegacyPEMsDefaultsKey),
+           !keychainMigrationFailed, store != nil {
             do {
                 try KeyLibrary.migrate(hosts: hosts, credentials: credentials, keys: keys)
                 // Only mark it done if it actually finished. A migration that
@@ -111,17 +136,6 @@ final class HostListModel: ObservableObject {
             }
         }
         refreshLibraryKeys()
-
-        // Per-host credentials and Access tokens predate the extension and
-        // landed in the app's private keychain group, which the extension
-        // cannot read at all. Unmigrated, every published host fails to
-        // authenticate with what looks like a wrong password — on a host whose
-        // password is plainly right in the app.
-        do {
-            try SloopKeychainMigration.migrateToSharedAccessGroup()
-        } catch {
-            libraryError = error.localizedDescription
-        }
     }
 
     /// Brings Files.app's locations in line with the host list.

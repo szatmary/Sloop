@@ -37,6 +37,17 @@ final class GenericPasswordStore: @unchecked Sendable {
     /// on. It MUST match both targets' entitlements files.
     static let sharedAccessGroup = "KR5WZAG3UE.org.szatmary.sloop.fileprovider"
 
+    /// The app's own private group — where these items lived before the shared
+    /// one existed, because it is first in `Sloop.entitlements` and therefore
+    /// the default for any keychain call that names no group.
+    ///
+    /// Named explicitly rather than left implicit. A query with no
+    /// `kSecAttrAccessGroup` does not mean "the default group": it means *every
+    /// group this process is entitled to*. For a read that is merely
+    /// surprising; for `SecItemDelete`, which removes every match, it is
+    /// destructive — see `migrateToSharedAccessGroup`.
+    static let appAccessGroup = "KR5WZAG3UE.org.szatmary.sloop"
+
     /// The two services whose items the extension must be able to read. Named
     /// here rather than defaulted at each call site so the stores and the
     /// migration cannot drift apart — a migration that moved a service nobody
@@ -132,23 +143,33 @@ final class GenericPasswordStore: @unchecked Sendable {
     /// authenticate with what looks like a wrong password, on a host whose
     /// password is plainly right in the app.
     ///
-    /// The old item is deleted only after the new one is written, and an
-    /// account that already exists in the shared group is left alone: whatever
-    /// is there is at least as new as what is being migrated.
+    /// The old item is deleted only after the new one is written and read back,
+    /// and an account that already exists in the shared group is left alone:
+    /// whatever is there is at least as new as what is being migrated.
+    ///
+    /// **Both stores name their access group.** This originally built the
+    /// legacy store with `accessGroup: nil`, meaning to say "the default
+    /// group". A keychain query without `kSecAttrAccessGroup` does not mean
+    /// that — it matches every group the process is entitled to. `SecItemDelete`
+    /// removes *every* match, so the unscoped delete below removed the copy
+    /// `shared.set` had just written one line earlier, along with the original.
+    /// Every saved password, key passphrase and Access token was destroyed on
+    /// the first launch after upgrading, and the migration returned a success
+    /// count while doing it.
     ///
     /// - Returns: how many items were moved.
     @discardableResult
     static func migrateToSharedAccessGroup(service: String) throws -> Int {
-        let legacy = GenericPasswordStore(service: service, accessGroup: nil)
+        let legacy = GenericPasswordStore(service: service, accessGroup: appAccessGroup)
         let shared = GenericPasswordStore(service: service)
 
-        var query: [String: Any] = [
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
+            kSecAttrAccessGroup as String: appAccessGroup,
             kSecReturnAttributes as String: true,
             kSecMatchLimit as String: kSecMatchLimitAll,
         ]
-        query[kSecAttrAccessGroup as String] = nil
 
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -166,6 +187,17 @@ final class GenericPasswordStore: @unchecked Sendable {
             if try shared.data(for: account) != nil { continue }
             guard let data = try legacy.data(for: account) else { continue }
             try shared.set(data, for: account)
+            // Read it back before removing the only other copy. The delete is
+            // irreversible and this is a secret the user cannot regenerate from
+            // anything Sloop holds, so "the write reported success" is not
+            // enough to act on.
+            guard try shared.data(for: account) == data else {
+                throw NSError(domain: NSOSStatusErrorDomain, code: Int(errSecInternalError),
+                              userInfo: [NSLocalizedDescriptionKey:
+                                "the keychain item for '\(account)' did not read back after being "
+                                + "copied into the shared access group, so the original was left "
+                                + "in place rather than deleted"])
+            }
             try legacy.remove(for: account)
             moved += 1
         }

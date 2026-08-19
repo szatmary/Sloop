@@ -32,6 +32,20 @@ final class LibSSH2SFTPClient: SFTPClient, @unchecked Sendable {
     private var session: OpaquePointer?
     private var sftp: OpaquePointer?
 
+    /// Set when a failure was transport-level rather than the server saying no.
+    ///
+    /// The connection is kept for the life of the process, so without this a
+    /// dropped link is permanent: the socket dies, every later call fails, and
+    /// `openLocked` returns the same dead handle because `sftp` is non-nil.
+    /// Files.app reads `ECONNRESET` as transient and retries forever, so the
+    /// domain never recovers until the system happens to kill the extension.
+    ///
+    /// A flag rather than tearing down where the failure is noticed: that code
+    /// runs with the lock held and with the caller's file handle still live in
+    /// a `defer`, so freeing the session there would deadlock or free memory
+    /// about to be used. The next entry point is the safe place.
+    private var isBroken = false
+
     init(host: SSHHost,
          credential: Credential,
          dialer: Dialer,
@@ -52,6 +66,9 @@ final class LibSSH2SFTPClient: SFTPClient, @unchecked Sendable {
     }
 
     private func openLocked() throws {
+        // A session that died mid-operation is discarded here, where no handle
+        // from the failed call is still in scope, and the next few lines redial.
+        if isBroken { discardLocked() }
         guard sftp == nil else { return }
         let session = try connection.open()
         self.session = session
@@ -80,12 +97,21 @@ final class LibSSH2SFTPClient: SFTPClient, @unchecked Sendable {
 
     func close() {
         lock.lock(); defer { lock.unlock() }
-        if let sftp {
+        if let sftp, !isBroken {
+            // Only worth asking politely while the socket is alive. On a dead
+            // one `shutdown` cannot complete, and the EAGAIN loop would spin
+            // against a socket that will never be writable again.
             while libssh2_sftp_shutdown(sftp) == LIBSSH2_ERROR_EAGAIN { connection.waitSocket() }
-            self.sftp = nil
         }
-        connection.close()
+        discardLocked()
+    }
+
+    /// Drops the session without talking to the server. Caller holds the lock.
+    private func discardLocked() {
+        sftp = nil
         session = nil
+        isBroken = false
+        connection.close()
     }
 
     // MARK: - SFTPClient
@@ -135,7 +161,12 @@ final class LibSSH2SFTPClient: SFTPClient, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         let sftp = try subsystem()
 
-        let total = Int64(try statLocked(path, on: sftp, kind: LIBSSH2_SFTP_STAT).filesize)
+        // bitPattern, not Int64(_:) — filesize is unsigned and the trapping
+        // initializer would kill the extension process on any value above
+        // Int64.max, whether the server is lying or merely odd. `entry()`
+        // already reads the same field this way.
+        let total = Int64(bitPattern: try statLocked(path, on: sftp,
+                                                     kind: LIBSSH2_SFTP_STAT).filesize)
         let handle = try open(path, on: sftp, flags: UInt(LIBSSH2_FXF_READ), mode: 0,
                               kind: LIBSSH2_SFTP_OPENFILE)
         defer { closeHandle(handle) }
@@ -217,7 +248,16 @@ final class LibSSH2SFTPClient: SFTPClient, @unchecked Sendable {
         // deletes item by item, and a recursive delete here would destroy data
         // it never asked to remove.
         let attributes = try statLocked(path, on: sftp, kind: LIBSSH2_SFTP_LSTAT)
-        let isDirectory = SFTPEntry.Kind(posixMode: UInt32(truncatingIfNeeded: attributes.permissions)) == .directory
+        // Only trust the mode when the server said it sent one. Absent, the
+        // zero-initialized field reads as a regular file, and "assume file" is
+        // not the safe default here the way it is for a listing — it picks
+        // `unlink` for a directory, which fails for a reason the user cannot
+        // act on. Ask outright instead.
+        guard attributes.flags & UInt(LIBSSH2_SFTP_ATTR_PERMISSIONS) != 0 else {
+            throw SFTPError.unsupported(path)
+        }
+        let isDirectory = SFTPEntry.Kind(
+            posixMode: UInt32(truncatingIfNeeded: attributes.permissions)) == .directory
 
         try perform(path, on: sftp) {
             path.withCString {
