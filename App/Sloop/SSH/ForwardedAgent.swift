@@ -22,9 +22,19 @@ protocol AgentChannel: AnyObject {
     func close()
 }
 
-/// Speaks the ssh-agent wire protocol over a second SSH channel, answering
-/// from a fixed, host-approved set of keys rather than a real ssh-agent
-/// socket.
+/// Speaks the ssh-agent wire protocol over one or more forwarded-agent
+/// channels, answering from a fixed, host-approved set of keys rather than a
+/// real ssh-agent socket.
+///
+/// A remote host does not multiplex its agent traffic onto one channel:
+/// RFC 4254 channels are 1:1 with each `CHANNEL_OPEN`, and every
+/// `auth-agent@openssh.com` request a remote program makes opens its own.
+/// Ordinary concurrent use of a forwarded agent — a parallel `git submodule
+/// update`, an Ansible run with several forks, a script backgrounding a few
+/// `ssh` calls — opens more than one at once. So `ForwardedAgent` tracks a
+/// collection of adopted channels, each with its own `AgentFramer`: sharing
+/// one framer across channels would interleave two remotes' byte streams
+/// into garbage neither could parse.
 ///
 /// Deliberately separate from `LibSSH2Transport`: everything here is
 /// reasoned about — and tested — through `AgentChannel` alone, with no
@@ -32,13 +42,24 @@ protocol AgentChannel: AnyObject {
 /// libssh2 (deriving identities, producing a signature) are already isolated
 /// inside `AgentSigner`.
 final class ForwardedAgent {
+    /// Per-channel state. A class (not a struct) so `service()` can hold a
+    /// stable reference to each entry across the read/parse/write passes
+    /// without juggling array indices that shift as sessions are removed.
+    private final class Session {
+        let channel: AgentChannel
+        var framer = AgentFramer()
+        var outbound: [UInt8] = []
+
+        init(channel: AgentChannel) {
+            self.channel = channel
+        }
+    }
+
     private let signer: AgentSigner
     private let confirming: AgentSignConfirming
     private let endpoint: String
 
-    private var channel: AgentChannel?
-    private var framer = AgentFramer()
-    private var outbound: [UInt8] = []
+    private var sessions: [Session] = []
 
     /// Comfortably larger than any single agent message this app produces or
     /// expects to receive in one read; OpenSSH's own agent client reads in
@@ -51,35 +72,77 @@ final class ForwardedAgent {
         self.endpoint = endpoint
     }
 
-    /// Called with the channel libssh2 just opened for the remote's
-    /// forwarding request. Closes and replaces whatever channel was
-    /// previously adopted, resetting reassembly state with it, so a
-    /// re-adopted agent never mixes bytes from two different channels.
+    /// Called with a channel libssh2 just opened for a remote forwarding
+    /// request. This runs on the SSH thread from **inside** the AUTHAGENT C
+    /// callback — which itself runs from inside libssh2 packet processing,
+    /// already on the stack of the `libssh2_channel_read_ex` call that
+    /// discovered the new channel. So this does the one thing that is safe
+    /// there: append a new `Session` and return. It must never close a
+    /// channel (closing calls into libssh2, which would re-enter libssh2
+    /// from inside libssh2 — undefined behaviour, not just a bug) and must
+    /// never do any of the actual protocol work; `service()` does all of
+    /// that later, off this call's stack, from the event loop.
     func adopt(_ channel: AgentChannel) {
-        close()
-        self.channel = channel
+        sessions.append(Session(channel: channel))
     }
 
-    /// Reads what's available, answers whatever complete requests arrived,
-    /// and flushes whatever replies fit. Returns true if it did anything —
-    /// read a byte, produced a reply, or wrote one — so the caller's poll
-    /// loop can tell a serviced pass from an idle one, and not sleep for
-    /// 200 ms with a reply already sitting in `outbound`.
+    /// Services every adopted channel: reads what's available, answers
+    /// whatever complete requests arrived, and flushes whatever replies fit.
+    /// A channel that hit EOF or a protocol error is closed and dropped here
+    /// — safe because this runs from the event loop, not from inside a
+    /// libssh2 callback — without disturbing any other channel still open.
+    ///
+    /// Returns true if it did anything on any channel — read a byte, produced
+    /// a reply, wrote one, or closed a finished channel — so the caller's
+    /// poll loop can tell a serviced pass from an idle one, and not sleep for
+    /// 200 ms with a reply already sitting in some session's `outbound`.
     @discardableResult
     func service() -> Bool {
-        guard let channel else { return false }
+        guard !sessions.isEmpty else { return false }
         var didWork = false
-        var eof = false
+        // Collected rather than removed in place: `sessions` is being walked
+        // right now, and removing a finished entry mid-iteration would skip
+        // or re-visit a neighbour. Closing and dropping happens in a second
+        // pass over this list once the walk is done.
+        var finished: [Session] = []
+
+        for session in sessions {
+            let (worked, done) = service(session)
+            if worked { didWork = true }
+            if done { finished.append(session) }
+        }
+
+        if !finished.isEmpty {
+            for session in finished { session.channel.close() }
+            sessions.removeAll { candidate in finished.contains { $0 === candidate } }
+            didWork = true
+        }
+
+        return didWork
+    }
+
+    /// Tears down every adopted channel — the whole-transport teardown path,
+    /// not the per-channel EOF path above, so closing here is unconditional.
+    func close() {
+        for session in sessions { session.channel.close() }
+        sessions.removeAll()
+    }
+
+    /// Runs one channel's read/parse/reply passes. Returns whether any work
+    /// happened, and whether the channel is finished (EOF or a protocol
+    /// error) and should be closed and dropped by the caller.
+    private func service(_ session: Session) -> (didWork: Bool, done: Bool) {
+        let channel = session.channel
+        var didWork = false
 
         while true {
             var chunk = [UInt8](repeating: 0, count: Self.readChunkSize)
             let n = channel.read(into: &chunk)
             if n > 0 {
-                framer.append(chunk[0..<n])
+                session.framer.append(chunk[0..<n])
                 didWork = true
             } else if n == 0 {
-                eof = true
-                break
+                return (didWork, true)   // EOF: nothing more will ever arrive
             } else {
                 break   // EAGAIN or a transient error: nothing more right now
             }
@@ -88,14 +151,14 @@ final class ForwardedAgent {
         while true {
             let payload: [UInt8]?
             do {
-                payload = try framer.nextPayload()
+                payload = try session.framer.nextPayload()
             } catch {
                 // The remote's byte stream no longer means anything we can
                 // trust — guessing at a "recovery" risks reading a later
                 // message's bytes as this one's tail. A remote that cannot
-                // frame correctly is not one to keep talking to.
-                close()
-                return true
+                // frame correctly is not one to keep talking to, but this is
+                // one channel among possibly several, so only this one goes.
+                return (true, true)
             }
             guard let payload else { break }
 
@@ -103,33 +166,21 @@ final class ForwardedAgent {
             do {
                 request = try AgentRequest.parse(payload)
             } catch {
-                close()
-                return true
+                return (true, true)
             }
 
-            outbound.append(contentsOf: respond(to: request))
+            session.outbound.append(contentsOf: respond(to: request))
             didWork = true
         }
 
-        while !outbound.isEmpty {
-            let n = channel.write(outbound)
+        while !session.outbound.isEmpty {
+            let n = channel.write(session.outbound)
             guard n > 0 else { break }
-            outbound.removeFirst(n)
+            session.outbound.removeFirst(n)
             didWork = true
         }
 
-        if eof {
-            close()
-            return true
-        }
-        return didWork
-    }
-
-    func close() {
-        channel?.close()
-        channel = nil
-        outbound.removeAll()
-        framer = AgentFramer()
+        return (didWork, false)
     }
 
     private func respond(to request: AgentRequest) -> [UInt8] {
@@ -181,14 +232,18 @@ final class LibSSH2AgentChannel: AgentChannel {
         }
     }
 
-    /// Best-effort, unlike the shell channel's teardown in
-    /// `LibSSH2Transport.run()`: this has no `sock` to retry an EAGAIN close
+    /// Best-effort: unlike the shell channel's teardown in
+    /// `LibSSH2Transport.run()`, this has no `sock` to retry an EAGAIN close
     /// against without threading one through from the transport. A single
     /// close attempt, then freeing the local channel struct regardless, is
     /// enough — freeing doesn't depend on the close packet having actually
     /// gone out, and this channel is never the last thing standing between
     /// the app and a clean disconnect; the shell channel's own teardown, and
     /// the session disconnect after it, still run.
+    ///
+    /// Only ever called from `ForwardedAgent.service()` or `.close()` — both
+    /// run from the event loop, off the AUTHAGENT callback's stack, which is
+    /// what makes calling into libssh2 here safe. `adopt` never calls this.
     func close() {
         _ = libssh2_channel_close(channel)
         libssh2_channel_free(channel)
