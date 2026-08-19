@@ -17,6 +17,7 @@ struct HostListView: View {
     @ObservedObject private var tailscaleAuth = TailscaleAuthPrompter.shared
     #endif
     @ObservedObject private var appearance = AppearanceStore.shared
+    @Environment(\.openURL) private var openURL
     @State private var editing: SSHHost?
     @State private var accessLogin: SSHHost?
     /// What to do once the Access login sheet has actually finished closing.
@@ -107,6 +108,22 @@ struct HostListView: View {
                         .contextMenu {
                             Button { editing = host } label: {
                                 Label("Edit…", systemImage: "pencil")
+                            }
+                            if host.showsInFiles {
+                                // Resolved on tap rather than up front: the URL
+                                // needs a round trip to the File Provider
+                                // system, and doing that for every row on every
+                                // list render would be one per host for a menu
+                                // nobody may open.
+                                Button {
+                                    Task {
+                                        guard let url = await FilesDomainRegistrar
+                                            .userVisibleURL(for: host) else { return }
+                                        openURL(url)
+                                    }
+                                } label: {
+                                    Label("Open in Files", systemImage: "folder")
+                                }
                             }
                             if host.connectionMethod == .cloudflareAccess {
                                 Button {

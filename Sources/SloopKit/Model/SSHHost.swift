@@ -54,11 +54,13 @@ public struct SSHHost: Identifiable, Codable, Hashable {
     public var onConnectCommand: String?
     /// Whether this host is published to Files.app as a File Provider domain.
     ///
-    /// Opt-in per host, not automatic for every saved host: a domain is a
-    /// location the system may enumerate on its own schedule, so publishing
-    /// every host would have Files.app dialing servers the user never asked it
-    /// to — waking tunnels, spending battery, and failing visibly for hosts
-    /// only ever meant for a terminal.
+    /// On by default, including for hosts saved before this existed. Opt-in was
+    /// the original design — a domain is a location the system may enumerate on
+    /// its own schedule, so publishing everything has Files.app reaching servers
+    /// nobody asked it to. In use that reasoning lost to a simpler fact: a host
+    /// added in Sloop and then looked for in Files.app is not there, and nothing
+    /// about the terminal suggests why. Someone who wants a host kept out still
+    /// has the switch; someone who wants it in has to do nothing.
     public var showsInFiles: Bool
     /// The directory that domain is rooted at. Nil means the SFTP session's
     /// default directory, which on essentially every server is the login
@@ -75,7 +77,7 @@ public struct SSHHost: Identifiable, Codable, Hashable {
                 useMosh: Bool = false,
                 connectionMethod: ConnectionMethod = .direct,
                 onConnectCommand: String? = nil,
-                showsInFiles: Bool = false,
+                showsInFiles: Bool = true,
                 filesRootPath: String? = nil) {
         self.id = id
         self.alias = alias
@@ -107,7 +109,7 @@ public struct SSHHost: Identifiable, Codable, Hashable {
         connectionMethod = try c.decodeIfPresent(ConnectionMethod.self,
                                                  forKey: .connectionMethod) ?? .direct
         onConnectCommand = try c.decodeIfPresent(String.self, forKey: .onConnectCommand)
-        showsInFiles = try c.decodeIfPresent(Bool.self, forKey: .showsInFiles) ?? false
+        showsInFiles = try c.decodeIfPresent(Bool.self, forKey: .showsInFiles) ?? true
         filesRootPath = try c.decodeIfPresent(String.self, forKey: .filesRootPath)
     }
 

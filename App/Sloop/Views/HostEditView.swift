@@ -19,6 +19,11 @@ struct HostEditView: View {
     @State private var pastedPassphrase: String = ""
     @State private var saveError: String?
     @State private var showingMoshHelp = false
+    @Environment(\.openURL) private var openURL
+    /// Where "Open in Files" goes, once this host's domain exists. Resolved
+    /// asynchronously because it requires a round trip to the File Provider
+    /// system, and held here because a SwiftUI view builder cannot await.
+    @State private var filesURL: URL?
     @FocusState private var commandFocused: Bool
 
     /// Ready-made on-connect commands. Reattaching to a multiplexer is why
@@ -243,6 +248,18 @@ struct HostEditView: View {
                     Section("Files") {
                         Toggle("Show in Files", isOn: $host.showsInFiles)
                         if host.showsInFiles {
+                            // Only once the domain actually exists. Offering a
+                            // button that opens nothing is worse than not
+                            // offering one — registration happens on save, so
+                            // a host being switched on right now has no domain
+                            // yet and correctly shows nothing.
+                            if let filesURL {
+                                Button {
+                                    openURL(filesURL)
+                                } label: {
+                                    Label("Open in Files", systemImage: "folder")
+                                }
+                            }
                             TextField("Folder (optional)",
                                       text: Binding(get: { host.filesRootPath ?? "" },
                                                     set: { host.filesRootPath = $0 }))
@@ -267,6 +284,11 @@ struct HostEditView: View {
                         }
                     }
                 }
+            }
+            .task(id: host.showsInFiles) {
+                filesURL = host.showsInFiles
+                    ? await FilesDomainRegistrar.userVisibleURL(for: host)
+                    : nil
             }
             .onChange(of: host.connectionMethod) { _, method in
                 // Only the Access tunnel rules Mosh out — it carries TCP over a

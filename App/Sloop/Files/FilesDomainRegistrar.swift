@@ -81,4 +81,36 @@ enum FilesDomainRegistrar {
             NSFileProviderError(.notAuthenticated))
         #endif
     }
+
+    /// A URL that opens Files.app at this host's folder, or nil when there is
+    /// nowhere to send it.
+    ///
+    /// `getUserVisibleURL` returns the real on-disk location of the domain's
+    /// root, somewhere under the system's file-provider storage. That path is
+    /// not openable as a `file://` URL — nothing will handle it — but Files.app
+    /// registers `shareddocuments://`, and the same path under that scheme
+    /// opens the folder in place. Swapping the scheme is the whole trick.
+    ///
+    /// Nil rather than a thrown error: every caller's response is to not offer
+    /// the button, and a host whose domain has not been registered yet is an
+    /// ordinary state, not a fault.
+    static func userVisibleURL(for host: SSHHost) async -> URL? {
+        #if os(iOS) && canImport(FileProvider) && canImport(CSSH)
+        let identifier = NSFileProviderDomainIdentifier(host.id.uuidString)
+        guard let domain = try? await NSFileProviderManager.domains()
+            .first(where: { $0.identifier == identifier }),
+              let manager = NSFileProviderManager(for: domain),
+              let visible = try? await manager.getUserVisibleURL(for: .rootContainer),
+              var components = URLComponents(url: visible, resolvingAgainstBaseURL: false)
+        else { return nil }
+        components.scheme = "shareddocuments"
+        return components.url
+        #else
+        // shareddocuments:// is an iOS scheme. On macOS the equivalent is
+        // revealing the folder in Finder, which is a different affordance than
+        // the one this exists to provide, so it is left unbuilt rather than
+        // approximated.
+        return nil
+        #endif
+    }
 }

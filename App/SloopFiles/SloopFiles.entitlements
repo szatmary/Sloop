@@ -2,21 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- The host list, known-hosts database, per-domain item indexes, and the
-	     extension's own tsnet state all live here. Without this the extension
-	     reads an empty host list and reports every host as gone. -->
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.org.szatmary.sloop</string>
 	</array>
 	<key>keychain-access-groups</key>
 	<array>
-		<!-- Per-host credentials and Cloudflare Access tokens. First in the
-		     array, so unscoped keychain calls resolve here — the same ordering
-		     rule the app's entitlements depend on. -->
 		<string>$(AppIdentifierPrefix)org.szatmary.sloop.fileprovider</string>
-		<!-- The iCloud-synced key library, for hosts that authenticate with a
-		     key rather than a password. -->
 		<string>$(AppIdentifierPrefix)org.szatmary.sloop.shared</string>
 	</array>
 </dict>

@@ -19,19 +19,31 @@ final class SSHHostCodableTests: XCTestCase {
         XCTAssertEqual(host.alias, "box")
     }
 
-    /// A host saved before Files support existed must not arrive already
-    /// published: adding a field should never silently register a File
-    /// Provider domain for every host the user has.
-    func testHostsSavedBeforeFilesSupportAreNotPublished() throws {
+    /// A host saved before Files support existed is published, like every other
+    /// host. Opt-in was the original design and lost to use: a host added in
+    /// Sloop and then looked for in Files.app was simply absent, with nothing
+    /// in the terminal to suggest why. Existing hosts are the ones most likely
+    /// to be looked for, so they must not be the ones left out.
+    func testHostsSavedBeforeFilesSupportArePublishedToo() throws {
         let legacy = """
         {"id":"6F1E2D3C-0000-0000-0000-000000000001","alias":"box",
          "hostname":"box.example.com","port":22,"username":"matt",
          "auth":{"password":{}},"useMosh":false}
         """
         let host = try JSONDecoder().decode(SSHHost.self, from: Data(legacy.utf8))
-        XCTAssertFalse(host.showsInFiles)
+        XCTAssertTrue(host.showsInFiles)
         XCTAssertNil(host.filesRootPath)
         XCTAssertNil(host.trimmedFilesRootPath)
+    }
+
+    /// The switch still has to survive a round trip in the *off* position —
+    /// that is the whole reason it was kept when the default flipped.
+    func testAHostExcludedFromFilesStaysExcluded() throws {
+        let host = SSHHost(alias: "box", hostname: "box.example.com", username: "matt",
+                           showsInFiles: false)
+        let decoded = try JSONDecoder().decode(
+            SSHHost.self, from: try JSONEncoder().encode(host))
+        XCTAssertFalse(decoded.showsInFiles)
     }
 
     func testFilesFieldsRoundTrip() throws {
