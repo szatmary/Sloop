@@ -218,9 +218,13 @@ top of a working SSH terminal rather than first.
         change feed. Worth a line in the user-facing docs when there are any.
 - **Port forwarding** — local forwarding especially: reaching a remote dev
   server from mobile Safari.
-- **`ssh://` URL scheme** — no `CFBundleURLTypes` in `project.yml`, so tapping
-  an `ssh://user@host` link does nothing. It is how people share hosts, and it
-  is close to free.
+- ~~`ssh://` URL scheme~~ → DONE: tapping an `ssh://user@host` link opens
+  Sloop. A link naming a host you already saved connects to it; one that
+  matches nothing opens the host editor prefilled, so adding a host stays
+  something you do rather than something a link does to you. Registering the
+  scheme meant giving up `GENERATE_INFOPLIST_FILE` — `CFBundleURLTypes` is an
+  array of dictionaries and has no `INFOPLIST_KEY_` equivalent — so XcodeGen
+  now writes a real plist per target from one shared block in `project.yml`.
 - ~~Command suggestions~~ → DONE, in the form that needs no model: a bar above
   the keyboard offering the word that usually comes *next*, ranked by how often
   and how recently it followed what you've typed on that host, and seeded once

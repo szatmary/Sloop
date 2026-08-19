@@ -5,6 +5,10 @@
 DerivedData/
 build/
 .build/
+# Written by `xcodegen generate` from the infoPlistProperties block in
+# project.yml — edit that, not these.
+App/Info-iOS.plist
+App/Info-macOS.plist
 
 # SwiftPM
 Package.resolved
