@@ -348,33 +348,6 @@ final class HostListModel: ObservableObject {
             // toggle be on for one — this guard covers hosts saved before that
             // was true.
             guard host.useMosh, host.connectionMethod.carriesMosh else { return makeSSH() }
-            // The real Mosh UDP/SSP transport is only built into the Mosh variant
-            // (project.mosh.yml, which defines SLOOP_MOSH); elsewhere
-            // `makeMoshTransport` stays nil and the composite transport falls back
-            // to SSH after probing.
-            var makeMosh: ((MoshBootstrap) -> Transport)? = nil
-            #if SLOOP_MOSH
-            makeMosh = { bootstrap in
-                MoshTransport(host: host.hostname, bootstrap: bootstrap)
-            }
-            #endif
-            #if SLOOP_MOSH && SLOOP_TAILSCALE
-            // A tailnet host has no address this process can route to — the SSH
-            // leg goes through tsnet, and so must the SSP leg, or mosh would
-            // send its packets into a network that has never heard of
-            // 100.64.0.0/10.
-            if host.connectionMethod == .tailscale {
-                makeMosh = { bootstrap in
-                    MoshTransport(host: host.hostname, bootstrap: bootstrap) {
-                        // The app's own node, not the File Provider's: they
-                        // are separate processes with separate tailnet state,
-                        // and this session belongs to the app.
-                        try TailscaleNode.node(for: .app).dialUDP(host: host.hostname,
-                                                                  port: bootstrap.udpPort)
-                    }
-                }
-            }
-            #endif
             return MoshOrSSHTransport(
                 useMosh: true,
                 makeCommandRunner: {
@@ -386,7 +359,10 @@ final class HostListModel: ObservableObject {
                                              authorizationPresenter: TailscaleAuthPrompter.shared)
                 },
                 makeSSHTransport: makeSSH,
-                makeMoshTransport: makeMosh)
+                // Nil in a build without mosh.xcframework, which the composite
+                // reads as "probe, then use SSH" — the terminal still says which
+                // mode the session got.
+                makeMoshTransport: MoshTransportFactory.make(for: host))
         }
     }
 }

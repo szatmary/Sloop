@@ -179,7 +179,8 @@ final class SloopAppTests: XCTestCase {
                                              credential: Credential(),
                                              knownHosts: KnownHostsStore(fileURL: tmp),
                                              hostKeyVerifier: AutoAcceptHostKeyVerifier(),
-                                             accessTokens: InMemoryAccessTokenStore())
+                                             accessTokens: InMemoryAccessTokenStore(),
+                                             authorizationPresenter: NoAuthorizationPresenter())
         XCTAssertNotNil(transport as AnyObject)
 
         #if !canImport(CSSH)
@@ -212,7 +213,8 @@ final class SloopAppTests: XCTestCase {
                                              credential: Credential(),
                                              knownHosts: KnownHostsStore(fileURL: tmp),
                                              hostKeyVerifier: AutoAcceptHostKeyVerifier(),
-                                             accessTokens: InMemoryAccessTokenStore())
+                                             accessTokens: InMemoryAccessTokenStore(),
+                                             authorizationPresenter: NoAuthorizationPresenter())
         var text = ""
         transport.onData = { text += String(decoding: $0, as: UTF8.self) }
         transport.start()
@@ -240,7 +242,8 @@ final class SloopAppTests: XCTestCase {
                                              credential: Credential(),
                                              knownHosts: KnownHostsStore(fileURL: tmp),
                                              hostKeyVerifier: AutoAcceptHostKeyVerifier(),
-                                             accessTokens: InMemoryAccessTokenStore())
+                                             accessTokens: InMemoryAccessTokenStore(),
+                                             authorizationPresenter: NoAuthorizationPresenter())
         var text = ""
         transport.onData = { text += String(decoding: $0, as: UTF8.self) }
         transport.start()
@@ -266,7 +269,8 @@ final class SloopAppTests: XCTestCase {
                                              credential: Credential(),
                                              knownHosts: KnownHostsStore(fileURL: tmp),
                                              hostKeyVerifier: AutoAcceptHostKeyVerifier(),
-                                             accessTokens: InMemoryAccessTokenStore())
+                                             accessTokens: InMemoryAccessTokenStore(),
+                                             authorizationPresenter: NoAuthorizationPresenter())
         var text = ""
         transport.onData = { text += String(decoding: $0, as: UTF8.self) }
         transport.start()
@@ -297,7 +301,8 @@ final class SloopAppTests: XCTestCase {
                                               credential: Credential(),
                                               knownHosts: knownHosts,
                                               hostKeyVerifier: AutoAcceptHostKeyVerifier(),
-                                              accessTokens: InMemoryAccessTokenStore())
+                                              accessTokens: InMemoryAccessTokenStore(),
+                                             authorizationPresenter: NoAuthorizationPresenter())
         let done = expectation(description: "run completed")
         runner.run("echo hi") { result in
             switch result {
@@ -314,17 +319,30 @@ final class SloopAppTests: XCTestCase {
         }
         wait(for: [done], timeout: 1)
 
-        // A tailnet host must get a real runner: the Mosh probe rides it, and
-        // a refusal here is invisible — the session just quietly becomes SSH.
+        // A tailnet host that *can* be reached must get a real runner: the Mosh
+        // probe rides it, and a refusal here is invisible — the session just
+        // quietly becomes SSH.
         let tailnet = SSHHost(alias: "n", hostname: "box.tail.ts.net", username: "u",
                               connectionMethod: .tailscale)
         let tailnetRunner = CommandRunnerFactory.ssh(host: tailnet,
                                                      credential: Credential(),
                                                      knownHosts: knownHosts,
                                                      hostKeyVerifier: AutoAcceptHostKeyVerifier(),
-                                                     accessTokens: InMemoryAccessTokenStore())
+                                                     accessTokens: InMemoryAccessTokenStore(),
+                                                     authorizationPresenter: NoAuthorizationPresenter())
+        #if SLOOP_TAILSCALE
         XCTAssertFalse(tailnetRunner is UnavailableCommandRunner,
                        "a tailnet host's Mosh probe needs a runner, not a refusal")
+        #else
+        // This build links no libtailscale, so whether the host is reachable at
+        // all depends on the Tailscale app's system VPN being up — a property
+        // of the machine the test runs on, which it must read rather than
+        // assume. Asserted unconditionally, this failed on every developer
+        // machine without Tailscale running, which is why the SSH variant's
+        // test run has been red on main.
+        XCTAssertEqual(tailnetRunner is UnavailableCommandRunner, !TailnetPresence.isConnected,
+                       "a reachable tailnet host needs a runner; an unreachable one needs a reason")
+        #endif
     }
 
     // MARK: - TokenClearingDialer (stranded-host fix)

@@ -26,8 +26,6 @@ enum FileProviderError {
         // Nothing here can be fixed by retrying, and every case names the one
         // action that fixes it: go to the app. `notAuthenticated` is what makes
         // Files.app say so rather than silently spinning.
-        case let error as SFTPClientFactory.Unavailable:
-            return notAuthenticated(error)
         case let error as SFTPDomainService.ServiceError:
             switch error {
             case .noSuchHost, .notPublished, .noCredential, .domainUnavailable:
@@ -47,7 +45,9 @@ enum FileProviderError {
         // The protocol rather than a list of concrete types: a tailnet node
         // waiting for device authorization is the same kind of failure and was
         // missed by the list, so it retried in a loop while embedding a
-        // one-time authorization URL in system error text.
+        // one-time authorization URL in system error text. `DialerUnavailable`
+        // and `SFTPClientFactory.Unavailable` land here for the same reason,
+        // which is why neither needs a case of its own.
         case let error as UserActionRequiredError:
             return notAuthenticated(error)
 

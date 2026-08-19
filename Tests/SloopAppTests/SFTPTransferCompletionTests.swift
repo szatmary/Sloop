@@ -51,7 +51,7 @@ final class SFTPTransferCompletionTests: XCTestCase {
     /// compare against, and reading the absence as zero would fail every
     /// download from such a server.
     func testAnUnreportedSizeIsNotCheckedAgainst() throws {
-        try LibSSH2SFTPClient.verifyComplete(path: "/a", expected: nil as UInt64?, transferred: 0)
+        try LibSSH2SFTPClient.verifyComplete(path: "/a", expected: nil, transferred: 0)
     }
 }
 

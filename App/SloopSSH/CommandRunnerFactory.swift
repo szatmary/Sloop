@@ -11,12 +11,11 @@ import SloopKit
 /// compile and behave predictably during the libssh2 bring-up.
 public enum CommandRunnerFactory {
     public static func ssh(host: SSHHost,
-                    credential: Credential,
-                    knownHosts: KnownHostsStore,
-                    hostKeyVerifier: HostKeyVerifier,
-                    accessTokens: AccessTokenStore,
-                    authorizationPresenter: TailscaleAuthorizationPresenter
-                        = NoAuthorizationPresenter()) -> CommandRunner {
+                           credential: Credential,
+                           knownHosts: KnownHostsStore,
+                           hostKeyVerifier: HostKeyVerifier,
+                           accessTokens: AccessTokenStore,
+                           authorizationPresenter: TailscaleAuthorizationPresenter) -> CommandRunner {
         #if canImport(CSSH)
         // The same dialer the shell would use — never a direct TCP connect to a
         // tunneled host's hostname, which would bypass the tunnel and offer the
@@ -25,14 +24,16 @@ public enum CommandRunnerFactory {
         // two from drifting: they did, and a tailnet host's Mosh probe refused
         // to run at all, so every Mosh session over the tailnet quietly became
         // an SSH one.
-        switch TransportFactory.dialer(for: host, accessTokens: accessTokens,
-                                       authorizationPresenter: authorizationPresenter) {
-        case .ready(let dialer):
+        do {
             return LibSSH2CommandRunner(host: host, credential: credential,
-                                        dialer: dialer,
+                                        dialer: try TransportFactory.dialer(
+                                            for: host, accessTokens: accessTokens,
+                                            authorizationPresenter: authorizationPresenter),
                                         knownHosts: knownHosts, hostKeyVerifier: hostKeyVerifier)
-        case .unavailable(let reason):
-            return UnavailableCommandRunner(message: reason)
+        } catch let reason as DialerUnavailable {
+            return UnavailableCommandRunner(message: reason.terminalText)
+        } catch {
+            return UnavailableCommandRunner(message: error.localizedDescription)
         }
         #else
         return UnavailableCommandRunner()

@@ -491,13 +491,15 @@ private struct HostRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(host.alias).font(.headline)
-                    // Gated on the Access tunnel rather than on .direct: that
-                    // tunnel carries TCP over a WebSocket and cannot carry Mosh,
-                    // so a host decoded with both set (JSON predating the
-                    // editor's reset-on-change) really does connect over SSH and
-                    // "mosh" would misrepresent it. A tailnet carries UDP like
-                    // any other network, so there the badge is true.
-                    if host.useMosh && host.connectionMethod != .cloudflareAccess {
+                    // The model's own answer, not this view's reconstruction of
+                    // it. A host decoded with both set (JSON predating the
+                    // editor's reset-on-change) really does connect over SSH,
+                    // and "mosh" would misrepresent it — `carriesMosh` is where
+                    // that rule lives, and the connect path reads the same one.
+                    // Spelled out here as `!= .cloudflareAccess`, it was a
+                    // second copy that happened to agree, and would have started
+                    // lying the day a fourth connection method appeared.
+                    if host.useMosh && host.connectionMethod.carriesMosh {
                         Flair("mosh", .tint)
                     }
                     // A switch, so a new connection method has to answer "and
