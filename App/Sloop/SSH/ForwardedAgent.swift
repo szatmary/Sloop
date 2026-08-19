@@ -72,6 +72,62 @@ final class ForwardedAgent {
     /// similarly-sized chunks.
     private static let readChunkSize = 4096
 
+    /// How many bytes of replies one `service()` pass will queue for a single
+    /// channel before it stops answering and gets on with writing what it
+    /// already has.
+    ///
+    /// The remote picks both how many requests it sends and how expensive
+    /// each answer is: `REQUEST_IDENTITIES` costs it five bytes on the wire
+    /// and is answered with every offered key's blob and comment, so a stream
+    /// of them amplifies its input into this app's memory by two or three
+    /// orders of magnitude. A pass that parsed to exhaustion before writing a
+    /// single byte turned 200 KiB of them against four RSA-3072 keys into
+    /// 67 MiB queued on ONE channel, and nothing in that arrangement was the
+    /// remote's ceiling — it was simply how much it had chosen to send.
+    ///
+    /// 256 KiB is `AgentFramer.maximumFrameLength` (`AgentProtocol.swift`),
+    /// the size OpenSSH's own agent allows a single message: far more than
+    /// the few KiB of answers any real client has outstanding at once, and
+    /// with `maximumConcurrentChannels` it puts the reply side under the same
+    /// 4 MiB ceiling that cap already puts on buffered input. It bounds the
+    /// input side too, because this pass only reads when it has no
+    /// reassembled request left to answer: every message it parses produces
+    /// at least a nine-byte reply, so a pass cannot read more than roughly
+    /// this many bytes of complete requests, plus the one partly-arrived
+    /// frame the framer may still be holding. Internal, not private, so a
+    /// test can assert against the bound without hardcoding it twice.
+    static let maximumQueuedReplyBytes = 256 * 1024
+
+    /// How many signature requests one `service()` pass will act on for a
+    /// single channel.
+    ///
+    /// Each one blocks the SSH thread inside `AgentSignConfirming.shouldSign`
+    /// until the user answers a sheet they cannot dismiss. `service()` runs
+    /// from `LibSSH2Transport.eventLoop`, which polls `shouldClose` only
+    /// between passes — so a pass that answered every queued sign request
+    /// would hand the user N sheets to tap through with no way to close the
+    /// tab until the last one was answered, which is a remote deciding how
+    /// long the user stays trapped. One per pass is the smallest bound that
+    /// still makes progress, and a larger one buys nothing: a prompt already
+    /// costs a human answer, so batching two before returning to the event
+    /// loop adds no throughput and spends exactly the closability this bound
+    /// exists to protect. The rest stay framed and are answered on the
+    /// following passes, in order.
+    static let maximumSignRequestsPerPass = 1
+
+    /// How many times `close()` looks again for channels that arrived while
+    /// it was closing others.
+    ///
+    /// One round covers everything adopted when teardown began; the extra two
+    /// are for the re-entrant arrivals a close can trigger, which in practice
+    /// is none or one. A remote that produces a fresh channel for every close
+    /// it sees is not going to stop being asked nicely, and each further
+    /// round is another full pass of libssh2 calls spent on a peer that is
+    /// demonstrably not cooperating — so this gives up rather than let the
+    /// remote choose when teardown ends. Internal for the same reason as the
+    /// caps above.
+    static let closeDrainRounds = 3
+
     /// Caps how many forwarded-agent channels can be adopted at once. Each
     /// session carries its own `AgentFramer`, which will buffer up to
     /// `AgentFramer.maximumFrameLength` (256 KiB, `AgentProtocol.swift`) of
@@ -181,38 +237,64 @@ final class ForwardedAgent {
 
     /// Tears down every adopted channel — the whole-transport teardown path,
     /// not the per-channel EOF path above, so closing here is unconditional.
-    /// `retrying: true`: this only runs once, from `LibSSH2Transport.run()`'s
-    /// own teardown `defer`, after `eventLoop` has already returned — the
-    /// shell is not live to freeze, so a short, BOUNDED wait for each
-    /// channel's own CHANNEL_CLOSE (see `LibSSH2Transport.closeAttempt`) is
-    /// worth spending to leave things tidy, unlike the paths in `service()`
-    /// above that run while the shell is still interactive.
+    /// This only runs once, from `LibSSH2Transport.run()`'s own teardown
+    /// `defer`, after `eventLoop` has already returned.
+    ///
+    /// Snapshotted and removed by reference identity, exactly like the
+    /// over-cap path above, and for exactly the same reason: a close can
+    /// re-enter libssh2 packet processing and fire the AUTHAGENT callback
+    /// mid-close, appending a brand-new session while this is walking the
+    /// old ones. The blanket `removeAll()` this used to end with discarded
+    /// that arrival without ever closing it — and an unclosed channel is one
+    /// `libssh2_channel_free` never frees, which is what makes
+    /// `libssh2_session_free` bail and leak the whole `LIBSSH2_SESSION` (see
+    /// `LibSSH2AgentChannel.close`). So each round closes precisely what it
+    /// snapshotted, removes precisely that, and looks again for whatever
+    /// turned up while it was working.
     func close() {
-        for session in sessions { session.channel.close(retrying: true) }
-        sessions.removeAll()
+        for round in 0..<Self.closeDrainRounds {
+            guard !sessions.isEmpty else { return }
+            let closing = sessions
+
+            // `retrying: true` on the first round only. That round holds the
+            // channels that existed when teardown began, and the shell is no
+            // longer live to freeze, so a short, BOUNDED wait for each
+            // channel's own CHANNEL_CLOSE (see
+            // `LibSSH2Transport.closeAttempt`) is worth spending to leave
+            // things tidy. A channel that turns up *during* teardown is the
+            // same abnormal case as one that arrives over the cap — the peer
+            // opening channels at a connection that is visibly going away —
+            // and must not be allowed to extend a teardown that has already
+            // spent that budget on every channel ahead of it.
+            for session in closing { session.channel.close(retrying: round == 0) }
+            sessions.removeAll { candidate in closing.contains { $0 === candidate } }
+        }
     }
 
     /// Runs one channel's read/parse/reply passes. Returns whether any work
     /// happened, and whether the channel is finished (EOF or a protocol
     /// error) and should be closed and dropped by the caller.
+    ///
+    /// Answers what has already been reassembled and reads more off the
+    /// channel only once there is nothing left to answer — not the other way
+    /// round. Reading is what makes both buffers grow, so a pass that drained
+    /// the channel dry first and parsed afterwards let the remote decide how
+    /// much of this app's memory its own traffic turned into. This way the
+    /// framer never holds more than the one partly-arrived frame it is
+    /// waiting to complete, and the two bounds below decide when the pass
+    /// stops taking on work: `maximumQueuedReplyBytes` and
+    /// `maximumSignRequestsPerPass`, each documented where it is defined.
+    ///
+    /// Nothing the bounds decline is lost — it stays framed and is answered
+    /// on the following pass, which the event loop reaches immediately, since
+    /// a pass that did work never sleeps.
     private func service(_ session: Session) -> (didWork: Bool, done: Bool) {
         let channel = session.channel
         var didWork = false
+        var signRequests = 0
 
-        while true {
-            var chunk = [UInt8](repeating: 0, count: Self.readChunkSize)
-            let n = channel.read(into: &chunk)
-            if n > 0 {
-                session.framer.append(chunk[0..<n])
-                didWork = true
-            } else if n == 0 {
-                return (didWork, true)   // EOF: nothing more will ever arrive
-            } else {
-                break   // EAGAIN or a transient error: nothing more right now
-            }
-        }
-
-        while true {
+        while session.outbound.count < Self.maximumQueuedReplyBytes,
+              signRequests < Self.maximumSignRequestsPerPass {
             let payload: [UInt8]?
             do {
                 payload = try session.framer.nextPayload()
@@ -224,7 +306,20 @@ final class ForwardedAgent {
                 // one channel among possibly several, so only this one goes.
                 return (true, true)
             }
-            guard let payload else { break }
+
+            guard let payload else {
+                // Everything reassembled has been answered: take one more
+                // chunk off the channel and come back around.
+                var chunk = [UInt8](repeating: 0, count: Self.readChunkSize)
+                let n = channel.read(into: &chunk)
+                if n > 0 {
+                    session.framer.append(chunk[0..<n])
+                    didWork = true
+                    continue
+                }
+                if n == 0 { return (didWork, true) }   // EOF: nothing more will ever arrive
+                break   // EAGAIN or a transient error: nothing more right now
+            }
 
             let request: AgentRequest
             do {
@@ -232,11 +327,17 @@ final class ForwardedAgent {
             } catch {
                 return (true, true)
             }
+            if case .sign = request { signRequests += 1 }
 
             session.outbound.append(contentsOf: respond(to: request))
             didWork = true
         }
 
+        // Written last and unconditionally: the loop above stops on a bound
+        // rather than on an empty queue, so `outbound` routinely still holds
+        // replies the channel has not taken yet. The cap is also what keeps
+        // `removeFirst` here cheap — it never shifts more than a capped
+        // queue, however much the remote asked for.
         while !session.outbound.isEmpty {
             let n = channel.write(session.outbound)
             guard n > 0 else { break }
@@ -258,6 +359,17 @@ final class ForwardedAgent {
             // never given can't be used to train the user into approving
             // prompts they have no way to evaluate.
             guard let identity = signer.identity(matching: keyBlob) else {
+                return AgentResponse.failure()
+            }
+            // The same reasoning, and the same refusal, for a request this
+            // signer would turn down anyway: a bare `ssh-rsa` (SHA-1) or a
+            // key whose algorithm it has no signer for. Which of those
+            // applies is settled by the algorithm and the flags alone — no
+            // key material, nothing that can fail halfway — so settling it
+            // here costs nothing, where doing it after the prompt spends the
+            // user's attention on a signature that was never going to be
+            // produced.
+            guard (try? AgentSigner.signingAlgorithm(for: identity.algorithm, flags: flags)) != nil else {
                 return AgentResponse.failure()
             }
             guard confirming.shouldSign(keyName: identity.keyName, endpoint: endpoint) else {

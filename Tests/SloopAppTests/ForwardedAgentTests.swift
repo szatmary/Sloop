@@ -31,11 +31,11 @@ final class ForwardedAgentTests: XCTestCase {
         libssh2_exit()
     }
 
-    /// Writes a real ed25519 key with ssh-keygen and returns its PEM — a
-    /// stand-in for the host's own key library, so `AgentSigner` derives a
-    /// real, verifiable identity rather than a fake one `ForwardedAgent`
-    /// would need to special-case.
-    private func generateKeyPEM() throws -> String {
+    /// Writes a real key with ssh-keygen and returns its PEM — a stand-in for
+    /// the host's own key library, so `AgentSigner` derives a real,
+    /// verifiable identity rather than a fake one `ForwardedAgent` would need
+    /// to special-case.
+    private func generateKeyPEM(type: String = "ed25519", bits: String? = nil) throws -> String {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -43,7 +43,8 @@ final class ForwardedAgentTests: XCTestCase {
 
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/ssh-keygen")
-        task.arguments = ["-q", "-t", "ed25519", "-N", "", "-C", "test", "-f", path.path]
+        task.arguments = ["-q", "-t", type, "-N", "", "-C", "test", "-f", path.path]
+            + (bits.map { ["-b", $0] } ?? [])
         try task.run()
         task.waitUntilExit()
         XCTAssertEqual(task.terminationStatus, 0, "ssh-keygen failed")
@@ -51,9 +52,13 @@ final class ForwardedAgentTests: XCTestCase {
         return try String(contentsOf: path, encoding: .utf8)
     }
 
-    private func makeAgent(confirming: AgentSignConfirming = StubConfirmer { true }) throws
+    private func makeAgent(confirming: AgentSignConfirming = StubConfirmer { true },
+                           keyType: String = "ed25519",
+                           bits: String? = nil) throws
         -> (agent: ForwardedAgent, identity: AgentIdentity, channel: FakeAgentChannel) {
-        let signer = AgentSigner(session: session, keys: [NamedKey(name: "k", privateKeyPEM: try generateKeyPEM())])
+        let signer = AgentSigner(session: session,
+                                 keys: [NamedKey(name: "k",
+                                                 privateKeyPEM: try generateKeyPEM(type: keyType, bits: bits))])
         let identity = try XCTUnwrap(signer.identities.first)
         let agent = ForwardedAgent(signer: signer, confirming: confirming, endpoint: "h:22")
         let channel = FakeAgentChannel()
@@ -407,6 +412,182 @@ final class ForwardedAgentTests: XCTestCase {
         XCTAssertTrue(agent.service())
         XCTAssertTrue(reentrant.closed,
                       "must still be tracked, not leaked — even though it's the one that ends up refused next")
+    }
+
+    // MARK: Teardown
+
+    /// `close()` runs the same re-entrancy hazard the over-cap path does:
+    /// closing a channel can fire the AUTHAGENT callback again mid-close and
+    /// adopt a brand-new session. The blanket `removeAll()` this used to end
+    /// with discarded that arrival without ever closing it, and an unclosed
+    /// channel is one `libssh2_channel_free` never frees — which
+    /// `libssh2_session_free` then refuses to get past, leaking the whole
+    /// LIBSSH2_SESSION (see `LibSSH2AgentChannel.close`).
+    func testChannelAdoptedDuringTeardownIsClosedNotDiscarded() throws {
+        let (agent, _, first) = try makeAgent()
+        let reentrant = FakeAgentChannel()
+        first.onClose = { [weak agent] in agent?.adopt(reentrant) }
+
+        agent.close()
+
+        XCTAssertTrue(first.closed, "sanity: the channel teardown started with is closed")
+        XCTAssertTrue(reentrant.closed,
+                      "a channel adopted mid-teardown must still be closed, not dropped unclosed")
+        XCTAssertEqual(reentrant.lastCloseWasRetrying, false,
+                       "a channel that turns up while teardown is already running must not extend it")
+    }
+
+    /// Teardown must end even when the remote answers every close with a
+    /// brand-new channel. Run off the main thread against a deadline: a
+    /// regression here is an unbounded loop, and an external timeout is the
+    /// only way to fail cleanly rather than hang the whole run — same
+    /// reasoning as the `closeAttempt` tests in
+    /// `LibSSH2TransportChannelSetupTests`.
+    func testTeardownEndsEvenWhenEveryCloseAdoptsAnotherChannel() throws {
+        let (agent, _, first) = try makeAgent()
+        var adoptions = 0
+
+        func hostileChannel() -> FakeAgentChannel {
+            let channel = FakeAgentChannel()
+            channel.onClose = { adoptions += 1; agent.adopt(hostileChannel()) }
+            return channel
+        }
+        first.onClose = { adoptions += 1; agent.adopt(hostileChannel()) }
+
+        let finished = expectation(description: "close returned")
+        DispatchQueue.global().async { agent.close(); finished.fulfill() }
+        wait(for: [finished], timeout: 5)
+
+        XCTAssertEqual(adoptions, ForwardedAgent.closeDrainRounds,
+                       "one arrival per round, and the rounds themselves are bounded")
+    }
+
+    // MARK: Reply-volume cap
+
+    /// `REQUEST_IDENTITIES` costs the remote five bytes and is answered with
+    /// every offered key, so a stream of them amplifies its input into this
+    /// app's memory by orders of magnitude. One pass must stop queueing
+    /// replies at `maximumQueuedReplyBytes` instead of answering however many
+    /// the remote chose to send.
+    func testOnePassStopsQueueingRepliesAtTheCap() throws {
+        let (agent, identity, channel) = try makeAgent()
+        let replySize = AgentResponse.identities([identity]).count
+        channel.inbound = Self.chunked(requestIdentitiesFrame(), count: Self.floodRequestCount)
+
+        XCTAssertTrue(agent.service())
+
+        XCTAssertGreaterThan(channel.outbound.count, 0, "a bounded pass still has to make progress")
+        XCTAssertLessThanOrEqual(
+            channel.outbound.count, ForwardedAgent.maximumQueuedReplyBytes + replySize,
+            "one pass answers at most the cap, plus the single reply that carried it over")
+    }
+
+    /// The cap defers work; it must never drop it. Every request the remote
+    /// sent is still answered, exactly once, across the passes that follow.
+    func testRepliesDeferredByTheCapAreAnsweredOnLaterPasses() throws {
+        let (agent, identity, channel) = try makeAgent()
+        let replySize = AgentResponse.identities([identity]).count
+        channel.inbound = Self.chunked(requestIdentitiesFrame(), count: Self.floodRequestCount)
+
+        var passes = 0
+        while passes < 500, agent.service() { passes += 1 }
+
+        XCTAssertGreaterThan(passes, 1, "sanity: this flood is big enough that one pass cannot finish it")
+        XCTAssertLessThan(passes, 500, "the flood is answered in a finite number of passes")
+        XCTAssertEqual(channel.outbound.count, Self.floodRequestCount * replySize,
+                       "every request is answered exactly once — the cap defers work, it does not drop it")
+    }
+
+    // MARK: Prompt-volume cap
+
+    /// Every sign request blocks the SSH thread on a sheet the user cannot
+    /// dismiss, and `eventLoop` polls `shouldClose` only between `service()`
+    /// passes — so a pass that answered a whole queue of them would leave the
+    /// user tapping through sheets with no way to close the tab, for as long
+    /// as the remote cared to keep sending. One pass, at most
+    /// `maximumSignRequestsPerPass` prompts.
+    func testOnePassRaisesAtMostTheBoundedNumberOfPrompts() throws {
+        var prompts = 0
+        let confirmer = StubConfirmer { prompts += 1; return false }
+        let (agent, identity, channel) = try makeAgent(confirming: confirmer)
+        channel.inbound = Self.chunked(signRequestFrame(blob: identity.blob), count: 8)
+
+        XCTAssertTrue(agent.service())
+
+        XCTAssertEqual(prompts, ForwardedAgent.maximumSignRequestsPerPass,
+                       "a queue of sign requests is not a licence to raise a queue of prompts")
+    }
+
+    /// Bounding the prompts must not lose the requests behind them: the ones
+    /// this pass declined to act on are answered on later passes.
+    func testSignRequestsDeferredByThePromptCapAreAnsweredOnLaterPasses() throws {
+        var prompts = 0
+        let confirmer = StubConfirmer { prompts += 1; return false }
+        let (agent, identity, channel) = try makeAgent(confirming: confirmer)
+        channel.inbound = Self.chunked(signRequestFrame(blob: identity.blob), count: 8)
+
+        var passes = 0
+        while passes < 50, agent.service() { passes += 1 }
+
+        XCTAssertLessThan(passes, 50, "answered in a finite number of passes")
+        XCTAssertEqual(prompts, 8, "each request still reaches the user, one pass at a time")
+        XCTAssertEqual(try readReplies(channel).count, 8, "and each one still gets its answer")
+    }
+
+    // MARK: Refusals that cost no prompt
+
+    /// A bare `ssh-rsa` request — neither SHA-2 flag — means SHA-1, which
+    /// `AgentSigner` refuses outright. Whether it will be refused is a pure
+    /// function of the identity's algorithm and the request's flags, so it
+    /// must be decided before the user is asked: a prompt for a signature
+    /// that was never going to be produced trains the user to approve
+    /// requests that mean nothing, exactly like the unknown-blob case.
+    func testBareSSHRSASignRequestIsRefusedWithoutPrompting() throws {
+        var prompted = false
+        let confirmer = StubConfirmer { prompted = true; return true }
+        let (agent, identity, channel) = try makeAgent(confirming: confirmer,
+                                                       keyType: "rsa", bits: "2048")
+        XCTAssertEqual(identity.algorithm, "ssh-rsa", "sanity: the identity really is an RSA one")
+        channel.inbound = [signRequestFrame(blob: identity.blob, flags: 0)]
+
+        XCTAssertTrue(agent.service())
+
+        XCTAssertFalse(prompted, "SHA-1 was never going to be signed — no prompt is worth spending on it")
+        XCTAssertEqual(try readReplies(channel), [AgentResponse.failure().framedPayloadOnly()])
+    }
+
+    /// The refusal must be no broader than what `sign` itself refuses: the
+    /// same key, asked for with a SHA-2 flag, still prompts and still signs.
+    func testRSASignRequestWithASHA2FlagStillPromptsAndSigns() throws {
+        var prompted = false
+        let confirmer = StubConfirmer { prompted = true; return true }
+        let (agent, identity, channel) = try makeAgent(confirming: confirmer,
+                                                       keyType: "rsa", bits: "2048")
+        channel.inbound = [signRequestFrame(blob: identity.blob,
+                                            flags: AgentSignFlags.rsaSHA2_256)]
+
+        XCTAssertTrue(agent.service())
+
+        XCTAssertTrue(prompted, "a signature this agent will actually produce is the user's call")
+        XCTAssertEqual(try readReplies(channel).map { $0.first ?? 0 }, [14], "SSH_AGENT_SIGN_RESPONSE")
+    }
+
+    // MARK: Flood fixtures
+
+    /// Enough copies of a five-byte request to be well past any per-pass
+    /// bound: ~100 KB of input, and megabytes of answers if a pass were to
+    /// run to exhaustion.
+    private static let floodRequestCount = 20_000
+
+    /// `count` copies of `request`, split into chunks a single `read` can
+    /// deliver — the fake channel hands back one chunk per call, and
+    /// `ForwardedAgent` reads into a fixed-size buffer, so a test cannot hand
+    /// it one enormous chunk any more than a real channel could.
+    private static func chunked(_ request: [UInt8], count: Int) -> [[UInt8]] {
+        let perChunk = max(1, 4000 / request.count)
+        return stride(from: 0, to: count, by: perChunk).map { start in
+            Array(repeating: request, count: Swift.min(perChunk, count - start)).flatMap { $0 }
+        }
     }
 }
 

@@ -74,6 +74,65 @@ final class AgentSigner {
 
     // MARK: Signing
 
+    /// What a request resolves to: the algorithm name that goes back on the
+    /// wire, and the digest to sign under it.
+    enum SigningAlgorithm: Equatable {
+        /// Ed25519 hashes internally; it signs the message itself.
+        case ed25519
+        case rsa(wireName: String, digest: Digest)
+        case ecdsa(wireName: String, digest: Digest)
+
+        enum Digest {
+            case sha256, sha384, sha512
+
+            func hash(_ data: [UInt8]) -> [UInt8] {
+                switch self {
+                case .sha256: return Array(SHA256.hash(data: data))
+                case .sha384: return Array(SHA384.hash(data: data))
+                case .sha512: return Array(SHA512.hash(data: data))
+                }
+            }
+        }
+    }
+
+    /// Resolves an identity's algorithm and a request's flags to the
+    /// signature they ask for, or throws if this signer will not produce one.
+    ///
+    /// Pure: no key material, no libssh2, nothing that can fail halfway. That
+    /// is the point — `ForwardedAgent` calls it to find out that a request is
+    /// going to be refused *before* it asks the user to confirm a signature
+    /// that would never have been produced. Kept as the one place that
+    /// decision is made, so the refusal a prompt is skipped for and the
+    /// refusal `sign` would have raised cannot drift apart.
+    static func signingAlgorithm(for identityAlgorithm: String,
+                                 flags: UInt32) throws -> SigningAlgorithm {
+        switch identityAlgorithm {
+        case "ssh-ed25519":
+            return .ed25519
+
+        case "ssh-rsa":
+            // The flags choose the digest; a request carrying neither is
+            // asking for SHA-1, which is refused on purpose.
+            if flags & AgentSignFlags.rsaSHA2_512 != 0 {
+                return .rsa(wireName: "rsa-sha2-512", digest: .sha512)
+            }
+            if flags & AgentSignFlags.rsaSHA2_256 != 0 {
+                return .rsa(wireName: "rsa-sha2-256", digest: .sha256)
+            }
+            throw SignError.sha1Refused
+
+        case "ecdsa-sha2-nistp256":
+            return .ecdsa(wireName: identityAlgorithm, digest: .sha256)
+        case "ecdsa-sha2-nistp384":
+            return .ecdsa(wireName: identityAlgorithm, digest: .sha384)
+        case "ecdsa-sha2-nistp521":
+            return .ecdsa(wireName: identityAlgorithm, digest: .sha512)
+
+        default:
+            throw SignError.unsupportedAlgorithm(identityAlgorithm)
+        }
+    }
+
     func sign(identity: AgentIdentity,
               data: [UInt8],
               flags: UInt32) throws -> (algorithm: String, signature: [UInt8]) {
@@ -81,34 +140,13 @@ final class AgentSigner {
             throw SignError.keyUnreadable(identity.keyName)
         }
 
-        switch identity.algorithm {
-        case "ssh-ed25519":
-            // Ed25519 hashes internally; it signs the message itself.
+        switch try Self.signingAlgorithm(for: identity.algorithm, flags: flags) {
+        case .ed25519:
             return ("ssh-ed25519", try signEd25519(key: key, message: data))
-
-        case "ssh-rsa":
-            if flags & AgentSignFlags.rsaSHA2_512 != 0 {
-                return ("rsa-sha2-512",
-                        try signRSA(key: key, hash: Array(SHA512.hash(data: data))))
-            }
-            if flags & AgentSignFlags.rsaSHA2_256 != 0 {
-                return ("rsa-sha2-256",
-                        try signRSA(key: key, hash: Array(SHA256.hash(data: data))))
-            }
-            throw SignError.sha1Refused
-
-        case "ecdsa-sha2-nistp256":
-            return (identity.algorithm,
-                    try signECDSA(key: key, hash: Array(SHA256.hash(data: data))))
-        case "ecdsa-sha2-nistp384":
-            return (identity.algorithm,
-                    try signECDSA(key: key, hash: Array(SHA384.hash(data: data))))
-        case "ecdsa-sha2-nistp521":
-            return (identity.algorithm,
-                    try signECDSA(key: key, hash: Array(SHA512.hash(data: data))))
-
-        default:
-            throw SignError.unsupportedAlgorithm(identity.algorithm)
+        case .rsa(let wireName, let digest):
+            return (wireName, try signRSA(key: key, hash: digest.hash(data)))
+        case .ecdsa(let wireName, let digest):
+            return (wireName, try signECDSA(key: key, hash: digest.hash(data)))
         }
     }
 
