@@ -150,24 +150,26 @@ final class HostStoreTests: XCTestCase {
             atPath: url.appendingPathExtension("unreadable").path))
     }
 
-    /// A directory the store cannot write into, holding a file it cannot read:
-    /// the quarantine move fails, so `save()` refuses rather than overwrite the
-    /// user's only copy.
+    /// A store whose file cannot be written: it is loaded from a directory that
+    /// is then removed, so the atomic write has nowhere to put its temporary.
+    ///
+    /// Not a read-only directory, which was the first version of this. Root
+    /// ignores the permission bits, and CI's Linux container runs as root — so
+    /// the write succeeded, nothing threw, and three tests that were the whole
+    /// point of the change passed on macOS and failed there. A missing parent
+    /// fails for every user.
     private func storeThatCannotSave() throws -> (HostStore, cleanup: () -> Void) {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("hoststore-readonly-\(UUID().uuidString)")
+            .appendingPathComponent("hoststore-vanishing-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("hosts.json")
-        try Data("{ this is not a host list".utf8).write(to: url)
 
+        // Loaded while the directory exists, so the store reads a clean fresh
+        // install and only the *write* is impossible.
         let store = HostStore(fileURL: url)
-        try FileManager.default.setAttributes([.posixPermissions: 0o500],
-                                              ofItemAtPath: directory.path)
-        return (store, {
-            try? FileManager.default.setAttributes([.posixPermissions: 0o700],
-                                                   ofItemAtPath: directory.path)
-            try? FileManager.default.removeItem(at: directory)
-        })
+        try FileManager.default.removeItem(at: directory)
+
+        return (store, { try? FileManager.default.removeItem(at: directory) })
     }
 
     /// `upsert` swallowed this with `try?`. The list then showed a host the
