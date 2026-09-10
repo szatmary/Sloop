@@ -1,0 +1,28 @@
+{
+  "identifier" : "5C9A0F00-0000-0000-0000-00000000TIP1",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "1.99",
+      "familyShareable" : false,
+      "internalID" : "5C9A0F00-0000-0000-0000-00000000TIP2",
+      "localizations" : [
+        {
+          "description" : "A one-time thank-you tip to support Sloop.",
+          "displayName" : "Leave a Tip",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "org.szatmary.sloop.tip",
+      "referenceName" : "Tip",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+  },
+  "subscriptionGroups" : [],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

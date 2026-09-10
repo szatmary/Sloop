@@ -1,0 +1,33 @@
+# Xcode / generated project (regenerate with `xcodegen generate`)
+*.xcodeproj
+*.xcworkspace
+!Package.xcworkspace
+DerivedData/
+build/
+.build/
+# Written by `xcodegen generate` from the infoPlistProperties block in
+# project.yml — edit that, not these.
+App/Info-iOS.plist
+App/Info-macOS.plist
+
+# SwiftPM
+Package.resolved
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# User-specific Xcode state
+xcuserdata/
+*.xcuserstate
+
+# Vendored native binaries (built locally, see Docs/)
+Vendor/**/*.xcframework
+Vendor/**/build/
+
+# Native dependency sources + build trees, cloned and compiled locally by the
+# scripts in Scripts/ (openssl, libssh2, ios-cmake). Hundreds of megabytes.
+.native*/
+
+# Claude Code session state + worktrees
+.claude/

@@ -1,0 +1,218 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
+import XCTest
+@testable import SloopKit
+
+final class KeyEncoderTests: XCTestCase {
+
+    func testSimpleControlBytes() {
+        XCTAssertEqual(KeyEncoder.bytes(for: .escape), [0x1b])
+        XCTAssertEqual(KeyEncoder.bytes(for: .return), [0x0d])
+        XCTAssertEqual(KeyEncoder.bytes(for: .backspace), [0x7f])
+        XCTAssertEqual(KeyEncoder.bytes(for: .tab), [0x09])
+    }
+
+    func testShiftTab() {
+        XCTAssertEqual(KeyEncoder.bytes(for: .tab, modifiers: .shift), [0x1b, 0x5b, 0x5a]) // ESC [ Z
+    }
+
+    func testArrowsNormalMode() {
+        XCTAssertEqual(KeyEncoder.bytes(for: .up), [0x1b, 0x5b, 0x41])    // ESC [ A
+        XCTAssertEqual(KeyEncoder.bytes(for: .down), [0x1b, 0x5b, 0x42])  // ESC [ B
+        XCTAssertEqual(KeyEncoder.bytes(for: .right), [0x1b, 0x5b, 0x43]) // ESC [ C
+        XCTAssertEqual(KeyEncoder.bytes(for: .left), [0x1b, 0x5b, 0x44])  // ESC [ D
+    }
+
+    func testArrowsApplicationCursorMode() {
+        XCTAssertEqual(KeyEncoder.bytes(for: .up, applicationCursor: true), [0x1b, 0x4f, 0x41])   // ESC O A
+        XCTAssertEqual(KeyEncoder.bytes(for: .left, applicationCursor: true), [0x1b, 0x4f, 0x44]) // ESC O D
+    }
+
+    func testModifiedArrowUsesCSIRegardlessOfMode() {
+        // Ctrl+Up => ESC [ 1 ; 5 A, in both normal and application-cursor mode.
+        let expected: [UInt8] = [0x1b, 0x5b, 0x31, 0x3b, 0x35, 0x41]
+        XCTAssertEqual(KeyEncoder.bytes(for: .up, modifiers: .control), expected)
+        XCTAssertEqual(KeyEncoder.bytes(for: .up, modifiers: .control, applicationCursor: true), expected)
+    }
+
+    func testHomeEnd() {
+        XCTAssertEqual(KeyEncoder.bytes(for: .home), [0x1b, 0x5b, 0x48])                       // ESC [ H
+        XCTAssertEqual(KeyEncoder.bytes(for: .end, applicationCursor: true), [0x1b, 0x4f, 0x46]) // ESC O F
+    }
+
+    func testEditKeys() {
+        XCTAssertEqual(KeyEncoder.bytes(for: .delete), [0x1b, 0x5b, 0x33, 0x7e])   // ESC [ 3 ~
+        XCTAssertEqual(KeyEncoder.bytes(for: .pageUp), [0x1b, 0x5b, 0x35, 0x7e])   // ESC [ 5 ~
+        XCTAssertEqual(KeyEncoder.bytes(for: .pageDown), [0x1b, 0x5b, 0x36, 0x7e]) // ESC [ 6 ~
+    }
+
+    func testModifiedEditKey() {
+        // Ctrl+PageUp => ESC [ 5 ; 5 ~
+        XCTAssertEqual(KeyEncoder.bytes(for: .pageUp, modifiers: .control),
+                       [0x1b, 0x5b, 0x35, 0x3b, 0x35, 0x7e])
+    }
+
+    func testFunctionKeys() {
+        XCTAssertEqual(KeyEncoder.bytes(for: .function(1)), [0x1b, 0x4f, 0x50])          // ESC O P
+        XCTAssertEqual(KeyEncoder.bytes(for: .function(4)), [0x1b, 0x4f, 0x53])          // ESC O S
+        XCTAssertEqual(KeyEncoder.bytes(for: .function(5)), [0x1b, 0x5b, 0x31, 0x35, 0x7e]) // ESC [ 15 ~
+        XCTAssertEqual(KeyEncoder.bytes(for: .function(12)), [0x1b, 0x5b, 0x32, 0x34, 0x7e]) // ESC [ 24 ~
+    }
+
+    func testControlCharacters() {
+        XCTAssertEqual(KeyEncoder.bytes(for: "c", modifiers: .control), [0x03]) // Ctrl-C
+        XCTAssertEqual(KeyEncoder.bytes(for: "C", modifiers: .control), [0x03]) // case-insensitive
+        XCTAssertEqual(KeyEncoder.bytes(for: "a", modifiers: .control), [0x01]) // Ctrl-A
+        XCTAssertEqual(KeyEncoder.bytes(for: "[", modifiers: .control), [0x1b]) // Ctrl-[ == ESC
+        XCTAssertEqual(KeyEncoder.bytes(for: " ", modifiers: .control), [0x00]) // Ctrl-Space == NUL
+    }
+
+    /// Only `@`…`_` and space have a control form. Masking is correct across
+    /// that range and nowhere else.
+    func testControlOnPunctuationWithAControlForm() {
+        XCTAssertEqual(KeyEncoder.bytes(for: "@", modifiers: .control), [0x00])
+        XCTAssertEqual(KeyEncoder.bytes(for: "[", modifiers: .control), [0x1b])
+        XCTAssertEqual(KeyEncoder.bytes(for: "\\", modifiers: .control), [0x1c])
+        XCTAssertEqual(KeyEncoder.bytes(for: "]", modifiers: .control), [0x1d])
+        XCTAssertEqual(KeyEncoder.bytes(for: "^", modifiers: .control), [0x1e])
+        XCTAssertEqual(KeyEncoder.bytes(for: "_", modifiers: .control), [0x1f])
+        XCTAssertEqual(KeyEncoder.bytes(for: " ", modifiers: .control), [0x00])
+    }
+
+    /// xterm's additions outside that range. `⌃/` and `⌃-` both reach US,
+    /// which is what readline binds undo to — the keystroke a user arming
+    /// sticky ⌃ and tapping `-` is actually reaching for.
+    func testControlOnXtermsExtraPunctuation() {
+        XCTAssertEqual(KeyEncoder.bytes(for: "?", modifiers: .control), [0x7f])
+        XCTAssertEqual(KeyEncoder.bytes(for: "/", modifiers: .control), [0x1f])
+        XCTAssertEqual(KeyEncoder.bytes(for: "-", modifiers: .control), [0x1f])
+    }
+
+    /// Everything else passes through as itself.
+    ///
+    /// `& 0x1F` used to be applied to every non-digit byte, which invented a
+    /// control character for each of these: `⌃-` sent 0x0d — Return, executing
+    /// whatever was on the line — and `⌃;` sent 0x1b, Escape. Passing the bare
+    /// character through is what xterm and Terminal.app do. SwiftTerm's own
+    /// handler drops the keystroke instead, which would make an armed ⌃
+    /// silently swallow keys.
+    func testControlOnOtherPunctuationPassesTheCharacterThrough() {
+        XCTAssertEqual(KeyEncoder.bytes(for: ";", modifiers: .control), [0x3b])
+        XCTAssertEqual(KeyEncoder.bytes(for: ",", modifiers: .control), [0x2c])
+        XCTAssertEqual(KeyEncoder.bytes(for: ".", modifiers: .control), [0x2e])
+        XCTAssertEqual(KeyEncoder.bytes(for: "'", modifiers: .control), [0x27])
+        XCTAssertEqual(KeyEncoder.bytes(for: "=", modifiers: .control), [0x3d])
+        XCTAssertEqual(KeyEncoder.bytes(for: "+", modifiers: .control), [0x2b])
+        XCTAssertEqual(KeyEncoder.bytes(for: "*", modifiers: .control), [0x2a])
+        XCTAssertEqual(KeyEncoder.bytes(for: "\"", modifiers: .control), [0x22])
+    }
+
+    func testOptionPrefixesEscape() {
+        XCTAssertEqual(KeyEncoder.bytes(for: "a", modifiers: .option), [0x1b, 0x61])          // ESC a
+        XCTAssertEqual(KeyEncoder.bytes(for: "c", modifiers: [.control, .option]), [0x1b, 0x03]) // ESC Ctrl-C
+    }
+
+    func testPlainCharacterPassesThrough() {
+        XCTAssertEqual(KeyEncoder.bytes(for: "A"), [0x41])
+        XCTAssertEqual(KeyEncoder.bytes(for: "z"), [0x7a])
+    }
+
+    /// Digits do not follow the `& 0x1F` control rule. Masking would turn
+    /// Ctrl-0 into 0x10 (DLE), breaking "tmux prefix then window number".
+    func testControlWithDigitsUsesXtermMapping() {
+        XCTAssertEqual(KeyEncoder.bytes(for: "0", modifiers: .control), [0x30])
+        XCTAssertEqual(KeyEncoder.bytes(for: "1", modifiers: .control), [0x31])
+        XCTAssertEqual(KeyEncoder.bytes(for: "9", modifiers: .control), [0x39])
+        XCTAssertEqual(KeyEncoder.bytes(for: "2", modifiers: .control), [0x00])
+        XCTAssertEqual(KeyEncoder.bytes(for: "3", modifiers: .control), [0x1b])
+        XCTAssertEqual(KeyEncoder.bytes(for: "8", modifiers: .control), [0x7f])
+    }
+
+    /// tmux's prefix: the combination that could not be typed at all before the
+    /// armed modifier reached characters typed on the software keyboard.
+    func testControlBIsTmuxPrefix() {
+        XCTAssertEqual(KeyEncoder.bytes(for: "b", modifiers: .control), [0x02])
+        XCTAssertEqual(KeyEncoder.bytes(for: "B", modifiers: .control), [0x02])
+    }
+
+    // MARK: KeyCap.Value dispatch — the pure half of
+    // CompactKeyboardView.keyCapView(_:didProduce:)
+
+    /// The reviewer's hand-traced case: iPhone's "5" key drags up to "/"; with
+    /// ⇧ armed the terminal must see "?", never shift kept alongside "/".
+    func testKeyCapValueCharacterResolvesShiftBeforeEncoding() {
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .character("/"), armedModifiers: .shift, applicationCursor: false),
+            [0x3f]) // '?'
+    }
+
+    func testKeyCapValueCharacterWithoutShiftPassesThrough() {
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .character("a"), armedModifiers: [], applicationCursor: false),
+            [0x61])
+    }
+
+    /// `.key` values pass `.shift` THROUGH to `bytes(for:modifiers:applicationCursor:)`
+    /// rather than resolving and dropping it the way `.character` does — a
+    /// terminal receiving `ESC [ Z` (rather than plain tab) is how xterm
+    /// signals shift-tab (`CBT`, "cursor backward tab"). This was the
+    /// untested half of the character/key shift asymmetry this method's own
+    /// doc comment describes.
+    func testKeyCapValueKeyPassesShiftThroughForShiftTab() {
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .key(.tab), armedModifiers: .shift, applicationCursor: false),
+            [0x1b, 0x5b, 0x5a]) // ESC [ Z
+    }
+
+    func testKeyCapValueKeyRespectsApplicationCursorMode() {
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .key(.up), armedModifiers: [], applicationCursor: true),
+            [0x1b, 0x4f, 0x41]) // ESC O A
+        XCTAssertEqual(
+            KeyEncoder.bytes(for: .key(.up), armedModifiers: [], applicationCursor: false),
+            [0x1b, 0x5b, 0x41]) // ESC [ A
+    }
+
+    /// `.modifier` and `.command` are the software keyboard's own
+    /// affordances — arm a sticky modifier, dismiss the keyboard — and never
+    /// reach the remote end.
+    func testKeyCapValueModifierAndCommandProduceNoBytes() {
+        XCTAssertNil(KeyEncoder.bytes(for: .modifier(.control), armedModifiers: [], applicationCursor: false))
+        XCTAssertNil(KeyEncoder.bytes(for: .command(.dismissKeyboard), armedModifiers: [], applicationCursor: false))
+    }
+}
+
+/// fn + the top letter row is how this keyboard reaches F1–F12: those keys sit
+/// in the same columns the F-keys occupy on a full keyboard.
+final class FunctionLayerTests: XCTestCase {
+    func testTopRowMapsToTheFunctionKeysInColumnOrder() {
+        XCTAssertEqual(functionKeyNumber(forCharacter: "q"), 1)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "p"), 10)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "["), 11)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "]"), 12)
+    }
+
+    /// Shift is armed often; fn+Q must still be F1 rather than nothing.
+    func testUpperCaseMapsToo() {
+        XCTAssertEqual(functionKeyNumber(forCharacter: "Q"), 1)
+        XCTAssertEqual(functionKeyNumber(forCharacter: "P"), 10)
+    }
+
+    func testKeysOutsideThatRowHaveNoFunctionKey() {
+        for character in "asdfghjklzxcvbnm0123456789-=;'`,./" {
+            XCTAssertNil(functionKeyNumber(forCharacter: character), "\(character)")
+        }
+    }
+
+    /// Every number the mapping can produce must actually encode — an F13 that
+    /// silently sent nothing would look like a dead key.
+    func testEveryMappedFunctionKeyEncodes() {
+        for character in "qwertyuiop[]" {
+            let number = functionKeyNumber(forCharacter: character)!
+            let bytes = KeyEncoder.bytes(for: .function(number), modifiers: [],
+                                         applicationCursor: false)
+            XCTAssertFalse(bytes.isEmpty, "F\(number) encodes to nothing")
+        }
+    }
+}

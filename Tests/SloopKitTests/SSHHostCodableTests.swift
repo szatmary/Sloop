@@ -1,0 +1,158 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
+import XCTest
+@testable import SloopKit
+
+final class SSHHostCodableTests: XCTestCase {
+
+    /// Hosts saved before connectionMethod existed must decode as .direct —
+    /// a decode failure here would wipe the user's whole host list.
+    func testLegacyJSONDecodesAsDirect() throws {
+        let legacy = """
+        {"id":"6F1E2D3C-0000-0000-0000-000000000001","alias":"box",
+         "hostname":"box.example.com","port":22,"username":"matt",
+         "auth":{"password":{}},"useMosh":false}
+        """
+        let host = try JSONDecoder().decode(SSHHost.self, from: Data(legacy.utf8))
+        XCTAssertEqual(host.connectionMethod, .direct)
+        XCTAssertEqual(host.alias, "box")
+    }
+
+    /// A host saved before Files support existed is published, like every other
+    /// host. Opt-in was the original design and lost to use: a host added in
+    /// Sloop and then looked for in Files.app was simply absent, with nothing
+    /// in the terminal to suggest why. Existing hosts are the ones most likely
+    /// to be looked for, so they must not be the ones left out.
+    func testHostsSavedBeforeFilesSupportArePublishedToo() throws {
+        let legacy = """
+        {"id":"6F1E2D3C-0000-0000-0000-000000000001","alias":"box",
+         "hostname":"box.example.com","port":22,"username":"matt",
+         "auth":{"password":{}},"useMosh":false}
+        """
+        let host = try JSONDecoder().decode(SSHHost.self, from: Data(legacy.utf8))
+        XCTAssertTrue(host.showsInFiles)
+        XCTAssertNil(host.filesRootPath)
+        XCTAssertNil(host.trimmedFilesRootPath)
+    }
+
+    /// The switch still has to survive a round trip in the *off* position —
+    /// that is the whole reason it was kept when the default flipped.
+    func testAHostExcludedFromFilesStaysExcluded() throws {
+        let host = SSHHost(alias: "box", hostname: "box.example.com", username: "matt",
+                           showsInFiles: false)
+        let decoded = try JSONDecoder().decode(
+            SSHHost.self, from: try JSONEncoder().encode(host))
+        XCTAssertFalse(decoded.showsInFiles)
+    }
+
+    func testFilesFieldsRoundTrip() throws {
+        let host = SSHHost(alias: "box", hostname: "box.example.com", username: "matt",
+                           showsInFiles: true, filesRootPath: "/srv/www")
+        let decoded = try JSONDecoder().decode(
+            SSHHost.self, from: try JSONEncoder().encode(host))
+        XCTAssertTrue(decoded.showsInFiles)
+        XCTAssertEqual(decoded.filesRootPath, "/srv/www")
+    }
+
+    /// A cleared text field must mean "use the server's default directory",
+    /// not "the path named by the empty string" — which would root the domain
+    /// at `/` and show the user a filesystem root they did not ask for.
+    func testABlankRootPathMeansTheServerDefault() {
+        XCTAssertNil(SSHHost(alias: "a", hostname: "h", username: "m",
+                             filesRootPath: "   ").trimmedFilesRootPath)
+        XCTAssertNil(SSHHost(alias: "a", hostname: "h", username: "m",
+                             filesRootPath: "").trimmedFilesRootPath)
+    }
+
+    func testARootPathIsNormalizedSoTwoSpellingsAgree() {
+        XCTAssertEqual(SSHHost(alias: "a", hostname: "h", username: "m",
+                               filesRootPath: " /srv//www/ ").trimmedFilesRootPath,
+                       "/srv/www")
+    }
+
+    /// Every field set to a non-default value on purpose: the synthesized
+    /// encoder uses `encodeIfPresent` for the optional `onConnectCommand`, so
+    /// a `nil` value emits no key at all — meaning a decode that silently
+    /// left it `nil` (e.g. because it had been dropped from `CodingKeys`,
+    /// exactly the mistake caught by hand during the recent merge) would
+    /// still pass `XCTAssertEqual` against a host built with the default
+    /// `nil`. Only a non-nil value round-tripping correctly actually proves
+    /// the key survives encode/decode; `port` and `useMosh` get the same
+    /// treatment so this doesn't merely re-confirm their own defaults either.
+    func testRoundTripsCloudflareAccess() throws {
+        let host = SSHHost(alias: "tunnel", hostname: "ssh.example.com",
+                           port: 2222, username: "matt",
+                           useMosh: true,
+                           connectionMethod: .cloudflareAccess,
+                           onConnectCommand: "tmux attach || tmux new")
+        let data = try JSONEncoder().encode(host)
+        let back = try JSONDecoder().decode(SSHHost.self, from: data)
+        XCTAssertEqual(back, host)
+        XCTAssertEqual(back.connectionMethod, .cloudflareAccess)
+        XCTAssertEqual(back.onConnectCommand, "tmux attach || tmux new")
+        XCTAssertEqual(back.port, 2222)
+        XCTAssertTrue(back.useMosh)
+    }
+
+    /// The host editor's picker iterates `allCases` and labels each with
+    /// `displayName`, so every case has to have one and no two may collide —
+    /// a picker with two identically-labelled rows is a picker the user
+    /// cannot use. This is what a hand-written list of picker rows could not
+    /// guarantee: it used to name two of the three cases, and a `.tailscale`
+    /// host opened the editor with nothing selected.
+    func testEveryConnectionMethodHasADistinctName() {
+        let names = ConnectionMethod.allCases.map(\.displayName)
+        XCTAssertEqual(names.count, ConnectionMethod.allCases.count)
+        XCTAssertEqual(Set(names).count, names.count, "names must be distinct: \(names)")
+        XCTAssertFalse(names.contains { $0.isEmpty })
+    }
+
+    /// A method this build doesn't know must FAIL to decode (Task 3 makes the
+    /// store skip such hosts instead of silently connecting them directly).
+    func testUnknownMethodThrows() {
+        let future = """
+        {"id":"6F1E2D3C-0000-0000-0000-000000000002","alias":"x",
+         "hostname":"h","port":22,"username":"u","auth":{"password":{}},
+         "useMosh":false,"connectionMethod":"wireguard"}
+        """
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(SSHHost.self, from: Data(future.utf8)))
+    }
+}
+
+extension SSHHostCodableTests {
+    /// A host saved before the switch existed carries no key for it, and must
+    /// decode as off — the same default a new host gets.
+    ///
+    /// This asserted the opposite until 2026-09-10. Recording what someone
+    /// types is not a thing to switch on for them, and a host written by an
+    /// older build never had the chance to say no.
+    func testSuggestionsDefaultToOffForHostsThatPredateTheSetting() throws {
+        let json = """
+        {"id":"\(UUID().uuidString)","alias":"web","hostname":"example.com",
+         "port":22,"username":"matt","auth":{"password":{}},"useMosh":false}
+        """
+        let host = try JSONDecoder().decode(SSHHost.self, from: Data(json.utf8))
+        XCTAssertFalse(host.suggestions)
+    }
+
+    func testANewHostDoesNotRecordUnlessAsked() {
+        XCTAssertFalse(SSHHost(alias: "web", hostname: "example.com", username: "matt").suggestions)
+    }
+
+    /// The other direction: a host that *was* asked keeps its answer.
+    func testSuggestionsSwitchedOnSurviveARoundTrip() throws {
+        var host = SSHHost(alias: "box", hostname: "example.com", username: "matt")
+        host.suggestions = true
+        let restored = try JSONDecoder().decode(SSHHost.self, from: JSONEncoder().encode(host))
+        XCTAssertTrue(restored.suggestions)
+    }
+
+    func testSuggestionsSurviveARoundTrip() throws {
+        var host = SSHHost(alias: "prod", hostname: "prod.example.com", username: "deploy")
+        host.suggestions = false
+        let restored = try JSONDecoder().decode(SSHHost.self, from: JSONEncoder().encode(host))
+        XCTAssertFalse(restored.suggestions, "a host told not to record must stay that way")
+    }
+}

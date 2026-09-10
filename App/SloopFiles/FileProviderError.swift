@@ -1,0 +1,139 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
+import Foundation
+import FileProvider
+import SloopKit
+import SloopSSH
+
+/// Turns Sloop's typed errors into ones the system acts on.
+///
+/// This is the whole reason `SFTPError` stays a type instead of a string. The
+/// system does not merely display these — it *behaves* differently:
+/// `NSFileProviderError.notAuthenticated` puts a sign-in affordance on the
+/// domain and stops retrying until the app signals the error resolved; `ENOENT`
+/// makes it drop the item from the replica; `EACCES` becomes a permissions
+/// complaint the user can act on. Collapsing them all into one opaque failure —
+/// the mistake `ConnectionState` still makes one layer up, and which
+/// `Docs/ROADMAP.md` carries as an open item — would leave the user with a
+/// spinner and no next step.
+enum FileProviderError {
+    static func from(_ error: Error) -> NSError {
+        switch error {
+        case let error as SFTPError:
+            return fileProvider(error)
+
+        // Nothing here can be fixed by retrying, and every case names the one
+        // action that fixes it: go to the app. `notAuthenticated` is what makes
+        // Files.app say so rather than silently spinning.
+        case let error as SFTPDomainService.ServiceError:
+            switch error {
+            case .noSuchHost, .notPublished, .noCredential, .domainUnavailable:
+                return notAuthenticated(error)
+            case .unknownIdentifier:
+                return NSError(domain: NSFileProviderErrorDomain,
+                               code: NSFileProviderError.noSuchItem.rawValue,
+                               userInfo: [NSLocalizedDescriptionKey: error.localizedDescription])
+            }
+        case let error as SloopStorage.StorageError:
+            return notAuthenticated(error)
+
+        // A refused host key is the case this whole design turns on. The
+        // extension cannot run trust-on-first-use, so an unknown or changed key
+        // arrives here — and must arrive as "go and look at this in Sloop",
+        // never as a transient failure the system will quietly retry forever.
+        // The protocol rather than a list of concrete types: a tailnet node
+        // waiting for device authorization is the same kind of failure and was
+        // missed by the list, so it retried in a loop while embedding a
+        // one-time authorization URL in system error text. `DialerUnavailable`
+        // and `SFTPClientFactory.Unavailable` land here for the same reason,
+        // which is why neither needs a case of its own.
+        case let error as UserActionRequiredError:
+            return notAuthenticated(error)
+
+        default:
+            // Unrecognized errors must still land in a domain the system
+            // accepts. Anything else is classified transient and retried, which
+            // for a genuine bug means a loop rather than a visible failure.
+            return NSError(domain: NSCocoaErrorDomain, code: NSXPCConnectionReplyInvalid,
+                           userInfo: [NSLocalizedDescriptionKey: error.localizedDescription,
+                                      NSUnderlyingErrorKey: error as NSError])
+        }
+    }
+
+    private static func notAuthenticated(_ error: Error) -> NSError {
+        NSError(domain: NSFileProviderErrorDomain,
+                code: NSFileProviderError.notAuthenticated.rawValue,
+                userInfo: [NSLocalizedDescriptionKey: error.localizedDescription,
+                           NSUnderlyingErrorKey: error as NSError])
+    }
+
+    /// Maps a server refusal onto the only two domains the system accepts.
+    ///
+    /// `NSFileProviderReplicatedExtension` is explicit: errors must be in
+    /// `NSFileProviderErrorDomain` or `NSCocoaErrorDomain`, and *"any other
+    /// error … will be considered to be transient and will cause the
+    /// [operation] to be retried."*
+    ///
+    /// This originally returned `NSPOSIXErrorDomain` with the errno from
+    /// `SFTPError.posixCode`, on the belief that the system read those directly.
+    /// It does not — POSIX is a third domain, so every one of these was
+    /// classified transient. A file deleted on the server was retried forever
+    /// instead of leaving the replica, and a permissions refusal never reached
+    /// the user at all. The errno mapping still exists and is still tested; it
+    /// is simply not what this boundary speaks.
+    private static func fileProvider(_ error: SFTPError) -> NSError {
+        let info: [String: Any] = [NSLocalizedDescriptionKey: error.localizedDescription,
+                                   NSUnderlyingErrorKey: error as NSError]
+        switch error {
+        case .noSuchFile:
+            // The system's cue to drop the item from the replica rather than
+            // keep asking for it.
+            return NSError(domain: NSFileProviderErrorDomain,
+                           code: NSFileProviderError.noSuchItem.rawValue, userInfo: info)
+        case .alreadyExists:
+            return NSError(domain: NSFileProviderErrorDomain,
+                           code: NSFileProviderError.filenameCollision.rawValue, userInfo: info)
+        case .contentChanged:
+            // `modifyItem` handles this itself, by reporting `.contents` as
+            // unapplied — which is how the contract expresses a conflict, and
+            // keeps the user's edit. Mapped anyway so a future caller that
+            // lets it through gets a permanent error rather than a retry loop
+            // against a file that will not stop being newer.
+            return NSError(domain: NSCocoaErrorDomain,
+                           code: NSFileWriteFileExistsError, userInfo: info)
+        case .directoryNotEmpty:
+            // Required by the deleteItem contract so the system restores the
+            // directory it had already removed from disk.
+            return NSError(domain: NSFileProviderErrorDomain,
+                           code: NSFileProviderError.directoryNotEmpty.rawValue, userInfo: info)
+        case .permissionDenied:
+            return NSError(domain: NSCocoaErrorDomain,
+                           code: NSFileReadNoPermissionError, userInfo: info)
+        case .noSpace, .quotaExceeded:
+            return NSError(domain: NSCocoaErrorDomain,
+                           code: NSFileWriteOutOfSpaceError, userInfo: info)
+        case .isADirectory, .notADirectory, .unsupported:
+            return NSError(domain: NSCocoaErrorDomain,
+                           code: NSFeatureUnsupportedError, userInfo: info)
+        case .tooLarge:
+            // Only `readData` raises this, and the File Provider always streams
+            // through `read`, which has no size it cannot handle — so this
+            // should never reach Files.app. Mapped rather than lumped in with
+            // the transient cases because retrying a file that is too big
+            // succeeds no better the second time.
+            return NSError(domain: NSCocoaErrorDomain,
+                           code: NSFileReadTooLargeError, userInfo: info)
+        case .connectionLost, .protocolFailure, .truncated:
+            // The one class that genuinely *is* transient. A dropped link or a
+            // transfer that stopped short is worth another attempt, and the
+            // attempt can now succeed: the client marks the session broken on a
+            // transport failure, so the next call redials instead of handing
+            // out the dead handle again. `.truncated` belongs here rather than
+            // among the silent successes — the retry is the entire point of
+            // noticing the short transfer.
+            return NSError(domain: NSCocoaErrorDomain,
+                           code: NSXPCConnectionReplyInvalid, userInfo: info)
+        }
+    }
+}

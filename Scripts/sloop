@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Scripts/sloop — key-library CLI for Sloop.
+#
+#   sloop import-key ~/.ssh/id_ed25519 [--name work] [--force]
+#   sloop list-keys
+#   sloop remove-key <name>
+#
+# Thin exec wrapper: the real logic is inside the app binary (KeyCLI.swift),
+# because writing the shared, iCloud-synced keychain requires the app's code
+# signature and entitlements — a bare script cannot do it.
+#
+# App discovery: the packaged release renames the bundle to Sloop.app, but a
+# local `xcodebuild`/Xcode build (and Xcode's own DerivedData output) keeps
+# the scheme name, Sloop_macOS.app — the executable inside Contents/MacOS is
+# named Sloop_macOS either way. Both bundle names are probed in /Applications
+# and ~/Applications. Set SLOOP_APP to override discovery entirely, pointing
+# it at either a .app bundle or directly at the binary inside one (handy for
+# a build sitting in DerivedData).
+set -euo pipefail
+
+# SLOOP_APP may name either a .app bundle (existing directory — descend into
+# it) or the executable itself (anything else, including a not-yet-existing
+# path, which the -x check below rejects with a clear error either way).
+if [ -n "${SLOOP_APP:-}" ]; then
+  if [ -d "$SLOOP_APP" ]; then
+    bin="$SLOOP_APP/Contents/MacOS/Sloop_macOS"
+  else
+    bin="$SLOOP_APP"
+  fi
+  if [ -x "$bin" ]; then
+    exec "$bin" "$@"
+  fi
+  echo "error: SLOOP_APP is set to '$SLOOP_APP' but '$bin' is not an executable file" >&2
+  exit 1
+fi
+
+searched=()
+for dir in "/Applications" "$HOME/Applications"; do
+  for name in "Sloop.app" "Sloop_macOS.app"; do
+    bin="$dir/$name/Contents/MacOS/Sloop_macOS"
+    searched+=("$bin")
+    if [ -x "$bin" ]; then
+      exec "$bin" "$@"
+    fi
+  done
+done
+
+echo "error: no Sloop app binary found. Searched:" >&2
+for path in "${searched[@]}"; do
+  echo "  $path" >&2
+done
+echo "Set SLOOP_APP to a .app bundle or binary path to override (e.g. a build" >&2
+echo "still sitting in DerivedData)." >&2
+exit 1

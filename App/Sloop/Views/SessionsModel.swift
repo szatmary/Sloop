@@ -1,0 +1,114 @@
+// Sloop — Copyright (C) 2026 Matthew Szatmary
+// GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
+
+import SwiftUI
+import Combine
+import SloopKit
+
+/// The app-layer wrapper around `OpenSessions` (the pure tab model in SloopKit).
+///
+/// Crucially it *owns the `TerminalController` for each open session*, not the
+/// view. That keeps every tab's connection alive while it's in the background —
+/// a controller tied to a view would be torn down the moment the tab scrolls
+/// off-screen. Controllers are created when a session opens and closed when its
+/// tab closes.
+@MainActor
+final class SessionsModel: ObservableObject {
+    /// Shared instance so app-level menu/keyboard commands (which live outside
+    /// the view tree) drive the same tabs the UI shows. Single-window today; a
+    /// future multi-window app would use one model per scene instead.
+    static let shared = SessionsModel()
+
+    @Published private(set) var open = OpenSessions()
+
+    private var controllers: [TerminalSession.ID: TerminalController] = [:]
+
+    /// Keeps every open terminal restyled as `AppearanceStore.shared.appearance`
+    /// changes, independent of any particular SwiftUI view being on screen to
+    /// observe it. `TerminalTabsView` used to do this itself via `.onChange`,
+    /// but that view only exists while `HostListView`'s
+    /// `.navigationDestination(isPresented:)` is showing it — and on iOS the
+    /// only route to Terminal Settings is from the host list, reachable
+    /// exactly when that destination is typically NOT showing (you navigate
+    /// back to the host list to reach the settings gear). So changing a
+    /// setting there could restyle nothing until the terminal happened to be
+    /// reopened and the setting changed again from inside it. Subscribing
+    /// here instead ties the restyle to the model that owns the controllers,
+    /// not to view lifecycle.
+    private var appearanceCancellable: AnyCancellable?
+
+    var sessions: [TerminalSession] { open.sessions }
+    var selectedID: TerminalSession.ID? { open.selectedID }
+    var isEmpty: Bool { open.isEmpty }
+    var count: Int { open.count }
+
+    init() {
+        appearanceCancellable = AppearanceStore.shared.$appearance.sink { [weak self] appearance in
+            self?.applyAppearance(appearance)
+        }
+    }
+
+    /// Open a session as a new tab, build its controller (which starts
+    /// connecting immediately), and make it active.
+    func openSession(_ session: TerminalSession) {
+        controllers[session.id] = TerminalController(
+            makeTransport: session.newTransport,
+            onConnectCommand: session.onConnectCommand,
+            appearance: AppearanceStore.shared.appearance,
+            suggestionsFor: session.suggestsCommands ? session.hostID : nil)
+        open.open(session)
+    }
+
+    /// Make an open tab active.
+    func select(_ id: TerminalSession.ID) {
+        open.select(id)
+    }
+
+    /// Close the active tab — the ⌘W action. No-op when nothing is open.
+    func closeSelected() {
+        if let id = open.selectedID { close(id) }
+    }
+
+    /// Cycle the active tab (⌘⇧] / ⌘⇧[). No-ops when nothing is open.
+    func selectNext() { open.selectNext() }
+    func selectPrevious() { open.selectPrevious() }
+
+    /// Position of the selected session, for linear (non-wrapping) paging.
+    /// `selectNext`/`selectPrevious` cycle, which is right for ⌘⇧[ ] but wrong
+    /// for edge swipes: there the host list sits to the left of the first tab,
+    /// so paging past either end must stop rather than wrap around.
+    var selectedIndex: Int? {
+        guard let id = selectedID else { return nil }
+        return open.sessions.firstIndex { $0.id == id }
+    }
+
+    /// Select the session `offset` places away. Returns false — selecting
+    /// nothing — when that would run off either end.
+    @discardableResult
+    func selectRelative(_ offset: Int) -> Bool {
+        guard let index = selectedIndex else { return false }
+        let target = index + offset
+        guard open.sessions.indices.contains(target) else { return false }
+        select(open.sessions[target].id)
+        return true
+    }
+
+    /// Close a tab: tear down its connection and drop its controller.
+    func close(_ id: TerminalSession.ID) {
+        controllers[id]?.close()
+        controllers[id] = nil
+        open.close(id)
+    }
+
+    /// The live controller for an open session (nil if it isn't open).
+    func controller(for session: TerminalSession) -> TerminalController? {
+        controllers[session.id]
+    }
+
+    /// Restyle every open terminal when appearance settings change.
+    func applyAppearance(_ appearance: TerminalAppearance) {
+        for controller in controllers.values {
+            controller.apply(appearance)
+        }
+    }
+}
