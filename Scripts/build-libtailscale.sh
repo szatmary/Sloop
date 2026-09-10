@@ -32,11 +32,30 @@ echo "==> $(go version)"
 mkdir -p "$WORK" "$OUT"
 cd "$WORK"
 
+# Pinned, and verified after the fact. This was a shallow clone of whatever
+# HEAD happened to be, skipped entirely if the directory already existed — so
+# the Go runtime, tailscale and every transitive module floated, a stale local
+# checkout was reused forever, and local and CI artifacts could differ with
+# nothing to show for it. The GPL corresponding-source claim cannot name a
+# revision that was never recorded.
+LIBTAILSCALE_SHA="59d4bb82744915815178e0f0776d60026a397ee7"
+
 if [ ! -d libtailscale ]; then
-  echo "==> Fetching libtailscale"
-  git clone --quiet --depth 1 https://github.com/tailscale/libtailscale
+  echo "==> Fetching libtailscale $LIBTAILSCALE_SHA"
+  git clone --quiet https://github.com/tailscale/libtailscale
+  git -C libtailscale checkout --quiet "$LIBTAILSCALE_SHA"
 fi
 cd libtailscale
+
+# An existing checkout is reused, so it has to be the right one. A mismatch is
+# a hard stop rather than a warning: building against a different revision than
+# the pin names is the exact drift the pin exists to prevent.
+actual="$(git rev-parse HEAD)"
+if [ "$actual" != "$LIBTAILSCALE_SHA" ]; then
+  echo "ERROR: libtailscale checkout is $actual, expected $LIBTAILSCALE_SHA." >&2
+  echo "       Delete $WORK/libtailscale to re-fetch, or update LIBTAILSCALE_SHA." >&2
+  exit 1
+fi
 
 # libtailscale can start a node and dial over it, but has no way to ask what the
 # node is doing — and both answers a UI needs live on the status tsnet already

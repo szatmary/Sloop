@@ -115,10 +115,15 @@ final class SloopStorageTests: XCTestCase {
         XCTAssertTrue(message.contains("entitlement"), message)
     }
 
+    /// Darwin only: there is no App Group container to be namespaced inside on
+    /// Linux, and `sharedDirectory` says so by throwing there. The naming
+    /// helpers it sits beside are path arithmetic and are checked on both.
+    #if canImport(Darwin)
     func testSharedDirectoryIsNamespacedInsideTheGroupContainer() throws {
         let directory = try SloopStorage.sharedDirectory(appGroup: "group.org.szatmary.sloop.test")
         XCTAssertEqual(directory.lastPathComponent, "Sloop")
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.path))
         try? FileManager.default.removeItem(at: directory)
     }
+    #endif
 }

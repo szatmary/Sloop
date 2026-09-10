@@ -13,7 +13,10 @@ final class DialerTests: XCTestCase {
 
     /// Bind a TCP listener on 127.0.0.1 on an OS-assigned port.
     private func makeListener() -> (fd: Int32, port: Int) {
-        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        // `sockStreamType`, not `SOCK_STREAM`: it is a plain Int32 on Darwin and
+        // `__socket_type` on Glibc, which is the whole reason that constant
+        // exists. `Dialer` and `SocketPairRelay` already use it.
+        let fd = socket(AF_INET, sockStreamType, 0)
         XCTAssertGreaterThanOrEqual(fd, 0)
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)

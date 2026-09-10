@@ -70,9 +70,20 @@ public final class HostStore {
             // Only "there is no file" means a fresh install. Every other read
             // failure — a permissions problem, an I/O error, a half-migrated
             // container — means a file exists that we must not clobber.
+            //
+            // Which error that is depends on the platform: Darwin's Foundation
+            // reports a Cocoa error, while swift-corelibs-foundation passes the
+            // raw ENOENT through as NSPOSIXErrorDomain. `KnownHostsStore` has
+            // carried both since the first Linux run found it; this store —
+            // which the class comment above says protects hosts "exactly this
+            // way, for exactly these reasons" — matched only the Cocoa codes,
+            // so every fresh install on Linux looked like a damaged file and
+            // took the quarantine path. Quarantining a file that is not there
+            // fails, so no host could ever be saved at all.
             let error = error as NSError
-            let missing = error.domain == NSCocoaErrorDomain
-                && (error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError)
+            let missing = (error.domain == NSCocoaErrorDomain
+                           && (error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError))
+                || (error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT))
             fileUnparseable = !missing
             return
         }

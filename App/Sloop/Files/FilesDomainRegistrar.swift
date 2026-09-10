@@ -62,8 +62,20 @@ enum FilesDomainRegistrar {
                 // edited offline in Files, on a host whose alias the user then
                 // corrected a typo in, was gone — the edit discarded by a
                 // rename that had nothing to do with it.
+                //
+                // macOS only, and not for want of trying: `removeDomain:mode:`
+                // exists on both platforms, but of the three modes only
+                // `.removeAll` is marked available on iOS. There is no rename
+                // API either — a domain's display name is fixed at creation —
+                // so on iOS the choice is between a Files location whose name
+                // no longer matches the host and discarding whatever had not
+                // synced. It currently discards, which is what it always did.
+                #if os(macOS)
                 try await NSFileProviderManager.remove(current,
                                                        mode: .preserveDirtyUserData)
+                #else
+                try await NSFileProviderManager.remove(current)
+                #endif
             }
             // The two-argument initializer is the replicated one. Its
             // `pathRelativeToDocumentStorage` sibling belongs to the older

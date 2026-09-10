@@ -59,8 +59,15 @@ public enum TailnetPresence {
             let family = raw.pointee.sa_family
             guard family == UInt8(AF_INET) || family == UInt8(AF_INET6) else { continue }
 
+            // Derived from the family, not read from `sa_len`: that field is a
+            // BSD extension and does not exist on Linux, where this module is
+            // compiled to hold its Foundation-only claim to account.
+            let length = family == UInt8(AF_INET)
+                ? socklen_t(MemoryLayout<sockaddr_in>.size)
+                : socklen_t(MemoryLayout<sockaddr_in6>.size)
+
             var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            let result = getnameinfo(raw, socklen_t(raw.pointee.sa_len),
+            let result = getnameinfo(raw, length,
                                      &buffer, socklen_t(buffer.count),
                                      nil, 0, NI_NUMERICHOST)
             guard result == 0 else { continue }

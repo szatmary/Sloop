@@ -1,277 +1,233 @@
 name: CI
 
-# Once a day, not once a push.
+# Runs on every push and pull request.
 #
-# GitHub bills Actions minutes for private repositories, macOS runners at ten
-# times their wall-clock — and nine jobs here run on macOS, four of them
-# building xcframeworks from source. A day of ordinary pushing exhausted the
-# allowance, after which every job failed in three seconds with no runner
-# assigned and empty logs, which looks nothing like a billing limit from the
-# outside.
+# It did not always. While the repository was private, macOS runners billed at
+# ten times wall-clock and a day of ordinary pushing exhausted the allowance —
+# after which every job failed in three seconds with no runner assigned and
+# empty logs, which looks nothing like a billing limit from the outside. The
+# workaround was a daily schedule behind a "did anything change?" gate, and the
+# cost of it was that nothing was ever checked before it landed.
 #
-# Tags still build, because that is a release. Manual runs are always
-# available, and are how to check a branch before merging it.
+# Public repositories get Actions free, so that whole apparatus is gone. What
+# replaces it is caching: the four native dependencies are pinned in their
+# build scripts, so each one is rebuilt only when its script changes. A run
+# that hits the caches skips roughly an hour of compiling OpenSSL, libssh2,
+# protobuf, mosh and libtailscale from source.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
-  schedule:
-    # 09:00 UTC. Cron has no notion of "if anything changed"; the
-    # `recent-changes` job is that notion.
-    - cron: "0 9 * * *"
 
-# Serialize runs per ref so two pushes to main can't race on the `nightly`
-# release tag (each release step deletes and recreates it). Don't cancel an
-# in-progress run — a publish mid-flight should finish, not be interrupted.
+# One run per ref. A superseded pull-request run is cancelled — the result is
+# about to be irrelevant — while a run on main is left to finish.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Nothing here publishes. See the release job.
+permissions:
+  contents: read
+
+env:
+  # Bump to invalidate every dependency cache at once. The keys hash the build
+  # scripts, which catches a change to what is built but not a change to what
+  # builds it — a new Xcode on the runner image being the case that matters.
+  CACHE_EPOCH: "1"
 
 jobs:
-  # A day with no commits needs no build. One ubuntu-minute decides whether the
-  # rest of this file — which is where the allowance actually goes — runs at
-  # all. A manual run or a tag always proceeds: someone asking for a build has a
-  # reason, and a release must build whatever its history looks like.
-  recent-changes:
-    name: Anything to build?
-    runs-on: ubuntu-latest
-    outputs:
-      build: ${{ steps.check.outputs.build }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: check
-        run: |
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          last=$(git log -1 --format=%ct)
-          if [ $(( $(date +%s) - last )) -lt 86400 ]; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "build=false" >> "$GITHUB_OUTPUT"
-            echo "No commits in the last day; skipping the build."
-          fi
+  # ---------------------------------------------------------------- SloopKit
 
-  sloopkit-tests:
-    name: SloopKit unit tests
-    runs-on: macos-14
-    needs: recent-changes
-    if: needs.recent-changes.outputs.build == 'true'
-    steps:
-      - uses: actions/checkout@v4
-      - name: swift test
-        run: swift test
-
-  # SloopKit depends on Foundation alone, and that claim shapes real design
-  # decisions (geometry types are hand-rolled to keep CoreGraphics out). Only a
-  # Linux run holds it to account: the first one found three failures caused by
-  # swift-corelibs-foundation reporting a missing file as POSIX ENOENT where
-  # Darwin reports a Cocoa error — a difference no macOS runner can see.
-  sloopkit-tests-linux:
-    name: SloopKit unit tests (Linux)
+  sloopkit-linux:
+    name: SloopKit tests (Linux)
     runs-on: ubuntu-latest
-    needs: recent-changes
-    if: needs.recent-changes.outputs.build == 'true'
     container: swift:5.9
     steps:
       - uses: actions/checkout@v4
-      - name: swift test
-        run: swift test
+      - run: swift test
 
-  app-build:
-    name: Build app (iOS) · Test app (macOS)
+  sloopkit-macos:
+    name: SloopKit tests (macOS)
     runs-on: macos-15
-    needs: recent-changes
-    if: needs.recent-changes.outputs.build == 'true'
     steps:
       - uses: actions/checkout@v4
-      - name: Install XcodeGen
-        run: brew install xcodegen
-      - name: Generate project
-        run: xcodegen generate
-      - name: Build iOS
-        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_iOS -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO -quiet
-      # `test` builds the macOS app + its test bundle (SloopAppTests) and runs
-      # the app-level tests on the runner.
-      - name: Test macOS
-        run: xcodebuild test -project Sloop.xcodeproj -scheme Sloop_macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -quiet
+      - run: swift test
 
-  # The only job needing a Go toolchain. Kept green because the Tailscale
-  # variant is the one build that can't fall back to anything: an embedded
-  # tailnet node either compiles or the feature is gone.
-  tailscale-app:
-    name: Build app with Tailscale (iOS · macOS)
+  # ------------------------------------------------- Native dependencies
+  #
+  # Each restores a cache keyed on its own build script and builds only on a
+  # miss, then hands the result to the app jobs as an artifact. Cache carries
+  # the cost across runs; the artifact carries the result across jobs within
+  # one run.
+
+  libssh2:
+    name: libssh2 xcframework
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: Vendor/libssh2.xcframework
+          key: libssh2-${{ env.CACHE_EPOCH }}-macos15-${{ hashFiles('Scripts/build-libssh2.sh', 'Scripts/lib/vendor.sh', 'Scripts/deps/libssh2/**') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: ./Scripts/build-libssh2.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libssh2-xcframework
+          path: Vendor/libssh2.xcframework
+          if-no-files-found: error
+          # Consumed by later jobs in this same run; anything past that is
+          # someone downloading a build by hand. The 90-day default is what
+          # filled the repository's storage with ninety identical copies.
+          retention-days: 7
+
+  protobuf:
+    name: protobuf xcframework
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: Vendor/protobuf.xcframework
+          key: protobuf-${{ env.CACHE_EPOCH }}-macos15-${{ hashFiles('Scripts/build-protobuf.sh', 'Scripts/lib/vendor.sh') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: ./Scripts/build-protobuf.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: protobuf-xcframework
+          path: Vendor/protobuf.xcframework
+          if-no-files-found: error
+          retention-days: 7
+
+  mosh:
+    name: mosh xcframework
+    runs-on: macos-15
+    needs: protobuf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: protobuf-xcframework
+          path: Vendor/protobuf.xcframework
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: Vendor/mosh.xcframework
+          # protobuf is merged whole into libmosh.a, so its build script is
+          # part of what decides whether this artifact is still current.
+          key: mosh-${{ env.CACHE_EPOCH }}-macos15-${{ hashFiles('Scripts/build-mosh.sh', 'Scripts/build-protobuf.sh', 'Scripts/lib/vendor.sh', 'Scripts/patches/**') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: ./Scripts/build-mosh.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mosh-xcframework
+          path: Vendor/mosh.xcframework
+          if-no-files-found: error
+          retention-days: 7
+
+  libtailscale:
+    name: libtailscale xcframework
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
-      - name: Install XcodeGen
-        run: brew install xcodegen
-      - name: Build libtailscale xcframework
-        run: Scripts/build-libtailscale.sh
-      - name: Download libssh2 xcframework
-        uses: actions/download-artifact@v4
+          # Exact, not '1.26'. A floating minor means local and CI artifacts
+          # differ silently, and the GPL corresponding-source claim cannot name
+          # what shipped.
+          go-version: '1.26.3'
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: Vendor/libtailscale.xcframework
+          key: libtailscale-${{ env.CACHE_EPOCH }}-macos15-go1.26.3-${{ hashFiles('Scripts/build-libtailscale.sh', 'Scripts/libtailscale-sloop-*.go', 'Scripts/lib/vendor.sh') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: ./Scripts/build-libtailscale.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libtailscale-xcframework
+          path: Vendor/libtailscale.xcframework
+          if-no-files-found: error
+          retention-days: 7
+
+  # ------------------------------------------------------------------- App
+
+  app:
+    name: Build and test (full variant)
+    runs-on: macos-15
+    needs: [libssh2, mosh, libtailscale]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
           name: libssh2-xcframework
           path: Vendor/libssh2.xcframework
-      - name: Download mosh xcframework
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: mosh-xcframework
           path: Vendor/mosh.xcframework
+      - uses: actions/download-artifact@v4
+        with:
+          name: libtailscale-xcframework
+          path: Vendor/libtailscale.xcframework
+      - name: Install XcodeGen
+        run: brew install xcodegen && xcodegen --version
+      # `project.tailscale.yml` includes mosh, which includes ssh, which
+      # includes the base — so this is the only spec that has SSH, Mosh,
+      # Tailscale and the File Provider extension at once. Tests used to run
+      # against the base project instead, where seven of the fifteen app test
+      # files are `#if canImport(CSSH)` and compiled out: CI proved the code
+      # compiled and nothing more.
       - name: Generate project
         run: xcodegen generate --spec project.tailscale.yml
       - name: Build iOS
         run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_iOS -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO -quiet
-      - name: Build macOS
-        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -quiet
-    needs: [recent-changes, libssh2-xcframework, mosh-xcframework]
-    if: needs.recent-changes.outputs.build == 'true'
+      - name: Test macOS
+        run: xcodebuild test -project Sloop.xcodeproj -scheme Sloop_macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -quiet
 
-  libssh2-xcframework:
-    name: Build libssh2 xcframework
-    runs-on: macos-14
-    needs: recent-changes
-    if: needs.recent-changes.outputs.build == 'true'
+  # --------------------------------------------------------------- Release
+  #
+  # Builds what a release actually is and publishes nothing.
+  #
+  # There used to be two publish steps here. One refreshed a `nightly` release
+  # on every push to main, except that push only fired on tags, so it could
+  # never run. The other attached an ad-hoc-signed, SSH-only build to any `v*`
+  # tag — the wrong artifact, unsigned, and on a collision course with
+  # Scripts/sign-release.sh, which does the real thing locally.
+  #
+  # Nothing is published until notarization exists (Docs/SIGNING.md) and the
+  # portal prerequisites are registered (Docs/LAUNCH.md §1). The build runs
+  # anyway, so the day those land the pipeline is already correct.
+
+  release-build:
+    name: Release build (unsigned)
+    runs-on: macos-15
+    needs: [libssh2, mosh, libtailscale]
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
-      - name: Build xcframework
-        run: ./Scripts/build-libssh2.sh
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: libssh2-xcframework
           path: Vendor/libssh2.xcframework
-          if-no-files-found: error
-          # These are consumed by later jobs in this same run; anything past
-          # that is someone downloading a build by hand. The default is 90
-          # days, and at a build a day that is what filled the repo's storage
-          # with ninety identical copies.
-          retention-days: 7
-
-  protobuf-xcframework:
-    name: Build protobuf xcframework (mosh)
-    runs-on: macos-14
-    needs: recent-changes
-    if: needs.recent-changes.outputs.build == 'true'
-    # Brick 2a of Mosh: cross-compile protobuf 3.21 (runtime) for the Apple
-    # slices; feeds the mosh xcframework. Green and reliable, so it gates.
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build protobuf xcframework
-        run: ./Scripts/build-protobuf.sh
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: protobuf-xcframework
-          path: Vendor/protobuf.xcframework
-          if-no-files-found: error
-          retention-days: 7
-
-  mosh-xcframework:
-    name: Build mosh xcframework
-    runs-on: macos-14
-    needs: [recent-changes, protobuf-xcframework]
-    if: needs.recent-changes.outputs.build == 'true'
-    # Brick 2b: cross-compile mosh's full client library set (+ merged protobuf)
-    # for the Apple slices. Green and reliable, so it gates.
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download protobuf xcframework
-        uses: actions/download-artifact@v4
-        with:
-          name: protobuf-xcframework
-          path: Vendor/protobuf.xcframework
-      - name: Build mosh xcframework
-        run: ./Scripts/build-mosh.sh
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: mosh-xcframework
           path: Vendor/mosh.xcframework
-          if-no-files-found: error
-          retention-days: 7
-
-  app-build-ssh:
-    name: Build app with SSH (iOS · macOS)
-    runs-on: macos-15
-    needs: [recent-changes, libssh2-xcframework]
-    if: needs.recent-changes.outputs.build == 'true'
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download libssh2 xcframework
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: libssh2-xcframework
-          path: Vendor/libssh2.xcframework
+          name: libtailscale-xcframework
+          path: Vendor/libtailscale.xcframework
       - name: Install XcodeGen
         run: brew install xcodegen
-      - name: Generate project (SSH)
-        run: xcodegen generate --spec project.ssh.yml
-      - name: Build iOS
-        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_iOS -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO -quiet
-      - name: Build macOS
-        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -sdk macosx CODE_SIGNING_ALLOWED=NO -quiet
-
-  app-build-mosh:
-    name: Build app with Mosh (iOS · macOS)
-    runs-on: macos-15
-    needs: [recent-changes, libssh2-xcframework, mosh-xcframework]
-    if: needs.recent-changes.outputs.build == 'true'
-    # Builds the app with the real Mosh UDP/SSP transport (project.mosh.yml:
-    # mosh.xcframework + the MoshBridge bridging header + SLOOP_MOSH). Green on
-    # both platforms, so it gates like the other app builds.
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download libssh2 xcframework
-        uses: actions/download-artifact@v4
-        with:
-          name: libssh2-xcframework
-          path: Vendor/libssh2.xcframework
-      # protobuf is baked into mosh.xcframework (build-mosh.sh merges it), so it
-      # is not downloaded or linked separately here.
-      - name: Download mosh xcframework
-        uses: actions/download-artifact@v4
-        with:
-          name: mosh-xcframework
-          path: Vendor/mosh.xcframework
-      - name: Install XcodeGen
-        run: brew install xcodegen
-      - name: Generate project (Mosh)
-        run: xcodegen generate --spec project.mosh.yml
-      - name: Build iOS
-        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_iOS -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO -quiet
-      - name: Build macOS
-        run: xcodebuild build -project Sloop.xcodeproj -scheme Sloop_macOS -sdk macosx CODE_SIGNING_ALLOWED=NO -quiet
-
-  mac-release:
-    name: Release build (macOS app + GitHub Release)
-    runs-on: macos-15
-    needs: [recent-changes, libssh2-xcframework]
-    if: needs.recent-changes.outputs.build == 'true'
-    # Needed so the nightly/tagged release steps can create releases and tags.
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download libssh2 xcframework
-        uses: actions/download-artifact@v4
-        with:
-          name: libssh2-xcframework
-          path: Vendor/libssh2.xcframework
-      - name: Install XcodeGen
-        run: brew install xcodegen
-      - name: Generate project (SSH)
-        run: xcodegen generate --spec project.ssh.yml
-      # Release, arm64, SSH-enabled. Built without a Developer ID (no signing
-      # keys yet); we ad-hoc sign in Package so the arm64 binary is valid to
-      # execute and Gatekeeper shows the normal "unidentified developer" prompt
-      # (right-click → Open) instead of "damaged". Real signing + notarization
-      # come with an Apple Developer account.
-      - name: Build Release (no Developer ID)
+      - name: Generate project
+        run: xcodegen generate --spec project.tailscale.yml
+      - name: Build Release
         run: >
           xcodebuild build
           -project Sloop.xcodeproj
@@ -281,53 +237,17 @@ jobs:
           -derivedDataPath build/dd
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
           -quiet
-      - name: Package .app (ad-hoc signed)
+      - name: Package
         run: |
           set -euo pipefail
           APP="$(find build/dd/Build/Products/Release -maxdepth 1 -name '*.app' | head -1)"
-          test -n "$APP" || { echo "No .app found"; ls -R build/dd/Build/Products || true; exit 1; }
-          echo "Packaging $APP"
+          test -n "$APP" || { echo "no .app produced"; ls -R build/dd/Build/Products || true; exit 1; }
           rm -rf build/pkg && mkdir -p build/pkg
           cp -R "$APP" build/pkg/Sloop.app
-          # Ad-hoc signature ("-"): no account/cert needed, makes the arm64 app
-          # runnable after the user clears quarantine / right-clicks Open.
-          codesign --force --deep --sign - --timestamp=none build/pkg/Sloop.app
-          codesign --verify --deep --strict --verbose=2 build/pkg/Sloop.app
-          ditto -c -k --keepParent build/pkg/Sloop.app Sloop-macOS.zip
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+          ditto -c -k --keepParent build/pkg/Sloop.app Sloop-macOS-unsigned.zip
+      - uses: actions/upload-artifact@v4
         with:
-          name: Sloop-macOS-app
-          path: Sloop-macOS.zip
-          retention-days: 14
+          name: Sloop-macOS-unsigned
+          path: Sloop-macOS-unsigned.zip
           if-no-files-found: error
-
-      # Rolling pre-release: every push to main refreshes the `nightly` release
-      # so the Releases page always has the newest macOS build at a stable
-      # download URL. Recreated each time (delete + create) so the tag moves to
-      # the current commit.
-      - name: Publish nightly release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh release delete nightly --yes --cleanup-tag 2>/dev/null || true
-          gh release create nightly Sloop-macOS.zip \
-            --prerelease \
-            --target "$GITHUB_SHA" \
-            --title "Nightly (latest main)" \
-            --notes $'Automated **ad-hoc-signed** (not notarized) arm64 macOS build from the latest `main` (`'"${GITHUB_SHA:0:7}"$'`), SSH-enabled.\n\nGatekeeper blocks unnotarized downloads. To run it:\n1. Right-click the app → **Open** → **Open**. If macOS still says it is *damaged*, run this in Terminal first:\n2. `xattr -cr /path/to/Sloop.app` then open it.\n\nProper Developer ID signing + notarization come with an Apple Developer account.'
-
-      # Versioned release: pushing a tag like `v0.1.0` publishes a stable
-      # release with the same macOS build attached.
-      - name: Publish tagged release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh release create "$GITHUB_REF_NAME" Sloop-macOS.zip \
-            --verify-tag \
-            --title "$GITHUB_REF_NAME" \
-            --notes $'**Ad-hoc-signed** (not notarized) arm64 macOS build for `'"$GITHUB_REF_NAME"$'`, SSH-enabled.\n\nGatekeeper blocks unnotarized downloads: right-click the app → **Open**, or if it says *damaged*, run `xattr -cr /path/to/Sloop.app` first. Developer ID signing + notarization come with an Apple Developer account.'
+          retention-days: 14

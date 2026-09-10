@@ -51,6 +51,7 @@ public enum SloopStorage {
     /// deleted in the other, and the user would be told nothing.
     public static func sharedDirectory(appGroup: String = appGroupIdentifier,
                                        fileManager: FileManager = .default) throws -> URL {
+        #if canImport(Darwin)
         guard let container = fileManager.containerURL(
             forSecurityApplicationGroupIdentifier: appGroup) else {
             throw StorageError.appGroupUnavailable(appGroup)
@@ -58,6 +59,19 @@ public enum SloopStorage {
         let directory = container.appendingPathComponent("Sloop", isDirectory: true)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
+        #else
+        // App Groups are an Apple platform concept; corelibs-foundation has no
+        // `containerURL(forSecurityApplicationGroupIdentifier:)` because there
+        // is nothing for it to return. Only this function is Darwin-bound — the
+        // file-naming helpers below are path arithmetic, and they are what the
+        // Linux build is here to check.
+        //
+        // It fails the same way an Apple build without the entitlement does,
+        // rather than handing back a private directory: a fallback here is the
+        // one thing this function's doc comment rules out, because the app and
+        // the extension would then read different host lists and say nothing.
+        throw StorageError.appGroupUnavailable(appGroup)
+        #endif
     }
 
     public static func hostsFile(in directory: URL) -> URL {

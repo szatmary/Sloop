@@ -23,7 +23,13 @@ options:
 packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
-    from: "1.2.0"
+    # Exact, not `from:`. The generated .xcodeproj is gitignored and so is the
+    # Package.resolved beside it, so `from: "1.2.0"` meant nothing recorded
+    # which revision a build used — it resolved to 1.18.0 in practice, sixteen
+    # minor versions along, and would have moved again without notice. A
+    # release has to be rebuildable, and the GPL corresponding-source claim has
+    # to be able to name the SwiftTerm it shipped.
+    exactVersion: "1.18.0"
   SloopKit:
     path: .
 
