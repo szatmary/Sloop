@@ -2,6 +2,12 @@
 // GPL-3.0 with additional terms under §7 — see LICENSE and THIRD-PARTY-NOTICES.md
 
 // Sources/SloopKit/Cloudflare/CloudflareAccessDialer.swift
+// Darwin only. The carrier is a `URLSessionWebSocketTask`, which
+// swift-corelibs-foundation does not implement — the `FoundationNetworking`
+// import below is enough to find the symbols and not enough to link them. The
+// Linux job exists to hold SloopKit's Foundation-only claim to account, and
+// this file is the honest exception to it rather than a reason to drop the job.
+#if canImport(Darwin)
 import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
@@ -374,3 +380,5 @@ extension CloudflareAccessDialer: URLSessionWebSocketDelegate, URLSessionTaskDel
         completionHandler(nil)
     }
 }
+
+#endif
